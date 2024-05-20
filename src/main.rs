@@ -1,4 +1,6 @@
-use crate::cluster_state::{ClusterState, Label, Node, NodeType, SharedClusterState};
+use crate::cluster_state::{
+    ClusterState, ClusterStateResolver, Label, Node, NodeType, SharedClusterState,
+};
 use axum::http::header;
 use axum::middleware::map_response;
 use axum::response::Response;
@@ -11,13 +13,17 @@ use kube::{Api, Client, ResourceExt};
 use shadow_rs::shadow;
 use std::net::SocketAddr;
 use std::sync::Mutex;
+use std::time::Duration;
 use tokio::signal;
+use tokio::sync::mpsc;
+use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace;
-use tracing::info;
+use tracing::{error, info};
 
 mod cluster_state;
 mod errors;
@@ -43,37 +49,40 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
     res
 }
 
-#[tokio::main]
+async fn fetch_state(
+    cluster_state: SharedClusterState,
+    token: CancellationToken,
+) -> errors::Result<()> {
+    info!("Starting fetch_state");
+    let mut id: usize = 0;
+    let resolver = ClusterStateResolver::new().await?;
+    loop {
+        if token.is_cancelled() {
+            break;
+        }
+        resolver.resolve(cluster_state.clone()).await?;
+        sleep(Duration::from_millis(300)).await;
+        id += 1;
+    }
+    info!("Stopped fetch_state, number of loops {id}");
+    Ok(())
+}
+
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> errors::Result<()> {
     logger::setup("INFO");
 
-    let mut cluster_state: SharedClusterState = SharedClusterState::new(Mutex::new(ClusterState::new()));
+    let token = CancellationToken::new();
 
-    let pods: Api<Pod> = Api::default_namespaced(Client::try_default().await?);
-    let lp = ListParams::default();
-    let pods = pods.list(&lp).await?;
+    let cluster_state: SharedClusterState =
+        SharedClusterState::new(Mutex::new(ClusterState::new()));
 
-    {
-        // FIXME
-        let mut locked_cluster_state = cluster_state.lock().unwrap();
-        for p in pods {
-            println!("Found Pod: {}", p.name_any());
-            let labels: Vec<Label> = p
-                .labels()
-                .iter()
-                .map(|(k, v)| Label::new(k.clone(), v.clone()))
-                .collect();
-            let node = Node {
-                uid: p.uid().unwrap(),
-                name: p.name_any(),
-                namespace: p.namespace().unwrap(),
-                version: p.resource_version().unwrap(),
-                node_type: NodeType::Pod,
-                labels,
-            };
-            locked_cluster_state.add_node(node);
-        }
-    }
+    let c0 = cluster_state.clone();
+    let t0 = token.clone();
+    let fetch_state_handle = tokio::spawn(async move { fetch_state(c0, t0) })
+        .await
+        .unwrap();
+    info!("Created fetch_state_handle");
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
     let route = Router::new()
@@ -110,17 +119,18 @@ async fn main() -> errors::Result<()> {
     let http_listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
     let f = tokio::spawn(async move {
         axum::serve(http_listener, svc.clone())
-            .with_graceful_shutdown(shutdown_signal())
+            .with_graceful_shutdown(shutdown_signal(token.clone()))
             .await
             .expect("Failed to start server")
     });
-    f.await.expect("Failed to get the server running");
     info!("Server shutdown");
+
+    let (f0, f1) = tokio::join!(f, fetch_state_handle);
 
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(token: CancellationToken) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -139,8 +149,12 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        _ = ctrl_c => {
+            token.cancel()
+        },
+        _ = terminate => {
+            token.cancel()
+        },
     }
 
     println!("signal received, starting graceful shutdown");

@@ -10,7 +10,8 @@ struct AppState {
 
 pub async fn create_route(cluster_state: SharedClusterState) -> Router {
     let state = AppState { cluster_state };
-    let get_layer_route = Router::new().route("/v1/graph", get(get_graph))
+    let get_layer_route = Router::new()
+        .route("/v1/graph", get(get_graph))
         .with_state(state);
     Router::new().merge(get_layer_route)
 }
