@@ -1,4 +1,3 @@
-use crate::cluster_state::ClusterState;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;

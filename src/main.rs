@@ -1,5 +1,5 @@
 use crate::cluster_state::{
-    ClusterState, ClusterStateResolver, Label, Node, NodeType, SharedClusterState,
+    ClusterState, ClusterStateResolver, SharedClusterState,
 };
 use axum::http::header;
 use axum::middleware::map_response;
@@ -7,15 +7,11 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
-use k8s_openapi::api::core::v1::Pod;
-use kube::api::ListParams;
-use kube::{Api, Client, ResourceExt};
 use shadow_rs::shadow;
 use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::signal;
-use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tower_http::compression::CompressionLayer;
@@ -23,7 +19,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace;
-use tracing::{error, info};
+use tracing::{info};
 
 mod cluster_state;
 mod errors;

@@ -1,22 +1,19 @@
 use serde::{Deserialize, Serialize};
-use serde_json;
-use std::any::Any;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap};
 use std::fmt::Debug;
-use std::ops::{Deref, DerefMut};
+use std::ops::{DerefMut};
 
 use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Pod, Service};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use k8s_openapi::{kind, Metadata, Resource};
 use kube::api::ListParams;
 use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
-use std::sync::{Arc, Mutex, MutexGuard};
-use tracing::{info, warn};
+use std::sync::{Arc, Mutex};
+use tracing::{warn};
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub enum NodeType {
@@ -200,7 +197,7 @@ impl ClusterStateResolver {
 
         {
             let mut locked_cluster_state = cluster_state.lock().unwrap();
-            let mut state = locked_cluster_state.deref_mut();
+            let state = locked_cluster_state.deref_mut();
             for item in &pods {
                 let node = Self::create_node(item);
                 state.add_node(node);
