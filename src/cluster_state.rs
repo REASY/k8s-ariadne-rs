@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
-use std::ops::{DerefMut};
+use std::ops::DerefMut;
 
 use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
@@ -13,7 +13,7 @@ use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
-use tracing::{warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub enum NodeType {
@@ -46,13 +46,14 @@ pub struct Node {
     pub version: String,
     pub node_type: NodeType,
     pub labels: Vec<Label>,
+    pub status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Edge {
     #[default]
     None,
-    Use,
+    Connect,
     Own,
 }
 
@@ -66,6 +67,7 @@ pub struct GraphVertex {
     version: String,
     node_type: NodeType,
     labels: Vec<Label>,
+    status: String,
 }
 
 impl GraphVertex {
@@ -77,6 +79,7 @@ impl GraphVertex {
             version: node.version.clone(),
             node_type: node.node_type.clone(),
             labels: node.labels.to_vec(),
+            status: node.status.clone(),
         }
     }
 }
@@ -142,6 +145,7 @@ impl ClusterState {
             let node = self.id_to_node.get(&vertex_id).unwrap();
             vertices.push(GraphVertex::new(node));
         });
+        vertices.sort_by_key(|v| v.id.clone());
 
         let mut edges: Vec<GraphEdge> = Vec::with_capacity(self.graph.edge_count());
         self.graph.all_edges().for_each(|(from, to, t)| {
@@ -153,6 +157,12 @@ impl ClusterState {
                 edge_type: t.clone(),
             });
         });
+        edges.sort_by(|a, b| {
+            let key_a = (a.source.as_str(), a.target.as_str(), a.edge_type.clone());
+            let key_b = (b.source.as_str(), b.target.as_str(), b.edge_type.clone());
+            key_a.cmp(&key_b)
+        });
+
         DirectedGraph { vertices, edges }
     }
 
@@ -188,49 +198,108 @@ impl ClusterStateResolver {
         })
     }
 
-    pub async fn resolve(&self, cluster_state: SharedClusterState) -> errors::Result<()> {
+    pub async fn resolve(&self) -> errors::Result<ClusterState> {
         let pods: Vec<Pod> = Self::get_object(&self.pods).await?;
         let services = Self::get_object(&self.services).await?;
         let replica_sets = Self::get_object(&self.replica_sets).await?;
         let stateful_sets = Self::get_object(&self.stateful_set).await?;
         let deployments = Self::get_object(&self.deployments).await?;
+        let mut state = ClusterState::new();
 
         {
-            let mut locked_cluster_state = cluster_state.lock().unwrap();
-            let state = locked_cluster_state.deref_mut();
             for item in &pods {
-                let node = Self::create_node(item);
+                let status = item
+                    .status
+                    .as_ref()
+                    .map(|x| x.phase.clone())
+                    .flatten()
+                    .unwrap_or_default()
+                    .clone();
+                let node = Self::create_node(item, status.clone());
                 state.add_node(node);
             }
 
             for item in &services {
-                let node = Self::create_node(item);
+                let status = item
+                    .spec
+                    .as_ref()
+                    .map(|s| {
+                        format!(
+                            "{} {}",
+                            s.type_.clone().unwrap_or_default(),
+                            s.cluster_ip.clone().unwrap_or_default()
+                        )
+                    })
+                    .unwrap_or_default();
+                let node = Self::create_node(item, status);
                 state.add_node(node);
             }
 
             for item in &replica_sets {
-                let node = Self::create_node(item);
+                let status = item
+                    .status
+                    .as_ref()
+                    .map(|x| format!("{}/{}", x.ready_replicas.unwrap_or_default(), x.replicas))
+                    .unwrap_or_default();
+                let node = Self::create_node(item, status);
                 state.add_node(node);
             }
 
             for item in &stateful_sets {
-                let node = Self::create_node(item);
+                let status = item
+                    .status
+                    .as_ref()
+                    .map(|x| format!("{}/{}", x.current_replicas.unwrap_or_default(), x.replicas))
+                    .unwrap_or_default();
+                let node = Self::create_node(item, status);
                 state.add_node(node);
             }
 
             for item in &deployments {
-                let node = Self::create_node(item);
+                let status = item
+                    .status
+                    .as_ref()
+                    .map(|x| x.conditions.as_ref().map(|t| t.last()))
+                    .flatten()
+                    .flatten()
+                    .map(|c| c.type_.clone())
+                    .unwrap_or_default();
+                let node = Self::create_node(item, status);
                 state.add_node(node);
             }
 
-            Self::add_owner_edges(&pods, state);
-            Self::add_owner_edges(&replica_sets, state);
-            Self::add_owner_edges(&stateful_sets, state);
-            Self::add_owner_edges(&deployments, state);
-            Self::add_owner_edges(&services, state);
+            Self::add_owner_edges(&pods, &mut state);
+            Self::add_owner_edges(&replica_sets, &mut state);
+            Self::add_owner_edges(&stateful_sets, &mut state);
+            Self::add_owner_edges(&deployments, &mut state);
+            Self::add_owner_edges(&services, &mut state);
+
+            for item in &services {
+                let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
+                match maybe_selector {
+                    None => {}
+                    Some(selector) => {
+                        for pod in &pods {
+                            match pod.metadata.labels.as_ref() {
+                                None => {}
+                                Some(pod_selector) => {
+                                    let is_connected = selector.iter().all(|(name, value)| {
+                                        pod_selector.get(name).map(|v| v == value).unwrap_or(false)
+                                    });
+                                    if is_connected {
+                                        let svc_uid = item.metadata.uid.clone().unwrap_or_default();
+                                        let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
+                                        state.add_edge(svc_uid, pod_uid, Edge::Connect);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        Ok(())
+        Ok(state)
     }
 
     fn add_owner_edges<T: Resource + k8s_openapi::Resource + ResourceExt>(
@@ -267,7 +336,10 @@ impl ClusterStateResolver {
         Ok(r)
     }
 
-    fn create_node<T: Resource + k8s_openapi::Resource + ResourceExt>(p: &T) -> Node {
+    fn create_node<T: Resource + k8s_openapi::Resource + ResourceExt>(
+        p: &T,
+        status: String,
+    ) -> Node {
         let node_type = match kind(p) {
             Pod::KIND => NodeType::Pod,
             Service::KIND => NodeType::Service,
@@ -291,6 +363,7 @@ impl ClusterStateResolver {
             version: p.resource_version().unwrap(),
             node_type: node_type,
             labels,
+            status,
         }
     }
 }

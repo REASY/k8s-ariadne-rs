@@ -1,6 +1,4 @@
-use crate::cluster_state::{
-    ClusterState, ClusterStateResolver, SharedClusterState,
-};
+use crate::cluster_state::{ClusterState, ClusterStateResolver, SharedClusterState};
 use axum::http::header;
 use axum::middleware::map_response;
 use axum::response::Response;
@@ -9,7 +7,8 @@ use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::ops::DerefMut;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::sleep;
@@ -19,7 +18,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace;
-use tracing::{info};
+use tracing::info;
 
 mod cluster_state;
 mod errors;
@@ -56,7 +55,13 @@ async fn fetch_state(
         if token.is_cancelled() {
             break;
         }
-        resolver.resolve(cluster_state.clone()).await?;
+        let new_state = resolver.resolve().await?;
+
+        {
+            let mut old_locked_state = cluster_state.lock().unwrap();
+            *old_locked_state = new_state;
+        }
+
         sleep(Duration::from_millis(300)).await;
         id += 1;
     }
