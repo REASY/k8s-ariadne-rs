@@ -7,7 +7,7 @@ use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
-use std::sync::{Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::sleep;
@@ -61,7 +61,7 @@ async fn fetch_state(
             *old_locked_state = new_state;
         }
 
-        sleep(Duration::from_millis(300)).await;
+        sleep(Duration::from_millis(200)).await;
         id += 1;
     }
     info!("Stopped fetch_state, number of loops {id}");
@@ -126,6 +126,8 @@ async fn main() -> errors::Result<()> {
     info!("Server shutdown");
 
     let (f0, f1) = tokio::join!(f, fetch_state_handle);
+    f0.unwrap();
+    f1.unwrap();
 
     Ok(())
 }

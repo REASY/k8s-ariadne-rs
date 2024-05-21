@@ -9,20 +9,11 @@
             stroke-width: 1.5px;
         }
 
-        .legend {
-            font-size: 16px;
-        }
-
-        .legend rect {
-            stroke: #fff;
-            stroke-width: 2px;
-        }
-
         table {
-            width: 50%;
+            width: 30%;
             border-collapse: collapse;
             margin: 25px 0;
-            font-size: 18px;
+            font-size: 16px;
             text-align: left;
         }
 
@@ -38,14 +29,26 @@
     </style>
 </head>
 <body>
-<table id="colorTable">
+<table id="node-legend">
     <thead>
-    <tr id="descriptionRow">
-        <th>Legend</th>
+    <tr id="node-legend-row">
+        <th>Node Legend</th>
     </tr>
     </thead>
     <tbody>
-    <tr id="colorRow">
+    <tr id="node-legend-color-row">
+        <td>Color</td>
+    </tr>
+    </tbody>
+</table>
+<table id="edge-legend">
+    <thead>
+    <tr id="edge-legend-row">
+        <th>Edge Legend</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr id="edge-legend-color-row">
         <td>Color</td>
     </tr>
     </tbody>
@@ -73,36 +76,36 @@
         return Object.keys(obj).length === 0;
     }
 
-    function object_equals( x, y ) {
-        if ( x === y ) return true;
+    function object_equals(x, y) {
+        if (x === y) return true;
         // if both x and y are null or undefined and exactly the same
 
-        if ( ! ( x instanceof Object ) || ! ( y instanceof Object ) ) return false;
+        if (!(x instanceof Object) || !(y instanceof Object)) return false;
         // if they are not strictly equal, they both need to be Objects
 
-        if ( x.constructor !== y.constructor ) return false;
+        if (x.constructor !== y.constructor) return false;
         // they must have the exact same prototype chain, the closest we can do is
         // test there constructor.
 
-        for ( var p in x ) {
-            if ( ! x.hasOwnProperty( p ) ) continue;
+        for (var p in x) {
+            if (!x.hasOwnProperty(p)) continue;
             // other properties were tested using x.constructor === y.constructor
 
-            if ( ! y.hasOwnProperty( p ) ) return false;
+            if (!y.hasOwnProperty(p)) return false;
             // allows to compare x[ p ] and y[ p ] when set to undefined
 
-            if ( x[ p ] === y[ p ] ) continue;
+            if (x[p] === y[p]) continue;
             // if they have the same strict value or identity then they are equal
 
-            if ( typeof( x[ p ] ) !== "object" ) return false;
+            if (typeof (x[p]) !== "object") return false;
             // Numbers, Strings, Functions, Booleans must be strictly equal
 
-            if ( ! object_equals( x[ p ],  y[ p ] ) ) return false;
+            if (!object_equals(x[p], y[p])) return false;
             // Objects and Arrays must be tested recursively
         }
 
-        for ( p in y )
-            if ( y.hasOwnProperty( p ) && ! x.hasOwnProperty( p ) )
+        for (p in y)
+            if (y.hasOwnProperty(p) && !x.hasOwnProperty(p))
                 return false;
         // allows x[ p ] to be set to undefined
 
@@ -170,15 +173,13 @@
     }
 
 
-    function generate_legend() {
-        const descriptionRow = document.getElementById("descriptionRow");
-        const colorRow = document.getElementById("colorRow");
-
+    function generate_legend(domain, color_range, descriptionRow, colorRow) {
         domain.forEach((description, index) => {
             const color = color_range[index];
 
             const descCell = document.createElement("th");
             descCell.textContent = description;
+            descCell.style = "width: 90px;";
 
             const colorCell = document.createElement("td");
             colorCell.style.backgroundColor = color;
@@ -188,7 +189,8 @@
         });
     }
 
-    generate_legend();
+    generate_legend(node_domain, node_color_range, document.getElementById("node-legend-row"), document.getElementById("node-legend-color-row"));
+    generate_legend(edge_domain, edge_color_range, document.getElementById("edge-legend-row"), document.getElementById("edge-legend-color-row"));
 
     async function fetch_graph(url) {
         const r = await fetch(url);

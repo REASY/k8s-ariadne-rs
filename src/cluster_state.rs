@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::errors;
@@ -12,7 +12,7 @@ use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
-use tracing::{warn};
+use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub enum NodeType {
