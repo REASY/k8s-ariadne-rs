@@ -1,9 +1,10 @@
 [package]
 name = "k8s-graph-rs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
+async-openai = "0.21.0"
 axum = "0.7.5"
 axum-prometheus = "0.6"
 const_format = "0.2"

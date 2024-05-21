@@ -12,6 +12,7 @@ use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
+use async_openai::config::OpenAIConfig;
 use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
@@ -178,6 +179,7 @@ pub struct ClusterStateResolver {
     replica_sets: Api<ReplicaSet>,
     stateful_set: Api<StatefulSet>,
     deployments: Api<Deployment>,
+    openai_client: async_openai::Client<OpenAIConfig>
 }
 
 impl ClusterStateResolver {
@@ -188,12 +190,14 @@ impl ClusterStateResolver {
         let replica_sets: Api<ReplicaSet> = Api::default_namespaced(client.clone());
         let stateful_set: Api<StatefulSet> = Api::default_namespaced(client.clone());
         let deployments: Api<Deployment> = Api::default_namespaced(client.clone());
+        let openai_client = async_openai::Client::new();
         Ok(ClusterStateResolver {
             pods,
             services,
             replica_sets,
             stateful_set,
             deployments,
+            openai_client
         })
     }
 
