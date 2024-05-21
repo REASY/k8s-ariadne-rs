@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap};
 use std::fmt::Debug;
-use std::ops::DerefMut;
 
 use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
@@ -13,7 +12,7 @@ use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::{warn};
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub enum NodeType {
