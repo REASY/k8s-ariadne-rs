@@ -2,6 +2,7 @@ use crate::cluster_state::{DirectedGraph, SharedClusterState};
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
+use axum::response::Html;
 
 #[derive(Debug, Clone)]
 struct AppState {
@@ -11,6 +12,7 @@ struct AppState {
 pub async fn create_route(cluster_state: SharedClusterState) -> Router {
     let state = AppState { cluster_state };
     let get_layer_route = Router::new()
+        .route("/index", get(html))
         .route("/v1/graph", get(get_graph))
         .with_state(state);
     Router::new().merge(get_layer_route)
@@ -20,4 +22,9 @@ pub async fn create_route(cluster_state: SharedClusterState) -> Router {
 async fn get_graph(State(state): State<AppState>) -> Json<DirectedGraph> {
     let lock = state.cluster_state.lock().unwrap();
     Json(lock.to_directed_graph())
+}
+
+
+async fn html() -> Html<&'static str> {
+    Html("<p>Hello, World!</p>")
 }

@@ -7,7 +7,7 @@ use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Pod, Service};
-use k8s_openapi::{kind, Metadata, Resource};
+use k8s_openapi::{kind, Resource};
 use kube::api::ListParams;
 use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
@@ -60,7 +60,7 @@ pub type NodeId = u32;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GraphVertex {
-    uid: String,
+    id: String,
     name: String,
     namespace: String,
     version: String,
@@ -71,7 +71,7 @@ pub struct GraphVertex {
 impl GraphVertex {
     pub fn new(node: &Node) -> Self {
         GraphVertex {
-            uid: node.uid.clone(),
+            id: node.uid.clone(),
             name: node.name.clone(),
             namespace: node.namespace.clone(),
             version: node.version.clone(),
