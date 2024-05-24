@@ -4,6 +4,7 @@ use std::fmt::Debug;
 
 use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
+use async_openai::config::OpenAIConfig;
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Pod, Service};
 use k8s_openapi::{kind, Resource};
@@ -12,7 +13,6 @@ use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
-use async_openai::config::OpenAIConfig;
 use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
@@ -179,7 +179,7 @@ pub struct ClusterStateResolver {
     replica_sets: Api<ReplicaSet>,
     stateful_set: Api<StatefulSet>,
     deployments: Api<Deployment>,
-    openai_client: async_openai::Client<OpenAIConfig>
+    openai_client: async_openai::Client<OpenAIConfig>,
 }
 
 impl ClusterStateResolver {
@@ -197,7 +197,7 @@ impl ClusterStateResolver {
             replica_sets,
             stateful_set,
             deployments,
-            openai_client
+            openai_client,
         })
     }
 

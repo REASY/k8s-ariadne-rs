@@ -79,9 +79,7 @@ async fn main() -> errors::Result<()> {
 
     let c0 = cluster_state.clone();
     let t0 = token.clone();
-    let fetch_state_handle = tokio::spawn(async move { fetch_state(c0, t0) })
-        .await
-        .unwrap();
+    let fetch_state_handle = tokio::spawn(async move { fetch_state(c0, t0).await.unwrap() });
     info!("Created fetch_state_handle");
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
