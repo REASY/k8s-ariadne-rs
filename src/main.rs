@@ -123,11 +123,10 @@ async fn main() -> errors::Result<()> {
             .await
             .expect("Failed to start server")
     });
-    info!("Server shutdown");
-
     let (f0, f1) = tokio::join!(f, fetch_state_handle);
     f0.unwrap();
     f1.unwrap();
+    info!("Server shutdown");
 
     Ok(())
 }
