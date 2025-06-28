@@ -1,4 +1,5 @@
-use crate::cluster_state::{ClusterState, ClusterStateResolver, SharedClusterState};
+use ariadne_core::cluster_state::ClusterState;
+use ariadne_core::cluster_state::{ClusterStateResolver, SharedClusterState};
 use axum::http::header;
 use axum::middleware::map_response;
 use axum::response::Response;
@@ -19,10 +20,8 @@ use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace;
 use tracing::info;
 
-mod cluster_state;
-mod errors;
-mod id_gen;
-mod logger;
+pub mod errors;
+pub mod logger;
 mod routes;
 
 shadow!(build);

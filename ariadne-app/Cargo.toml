@@ -1,0 +1,21 @@
+[package]
+name = "ariadne-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ariadne-core = { workspace = true }
+axum = { workspace = true }
+axum-prometheus = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+shadow-rs = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["codec"] }
+tower-http = { workspace = true, features = ["trace", "compression-br", "propagate-header", "sensitive-headers", "cors", "fs"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[build-dependencies]
+shadow-rs = { workspace = true }

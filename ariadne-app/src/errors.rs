@@ -1,3 +1,5 @@
+use crate::errors;
+use ariadne_core::prelude::AriadneError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -11,12 +13,8 @@ pub struct AppError(Box<ErrorKind>);
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub enum ErrorKind {
-    #[error("SerdeJsonError: {0}")]
-    SerdeJsonError(#[from] serde_json::Error),
-    #[error("IoError: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("KubeClientError: {0}")]
-    KubeClientError(#[from] kube::Error),
+    #[error("AriadneError: {0}")]
+    Ariadne(#[from] AriadneError),
 }
 
 impl<E> From<E> for AppError
@@ -31,9 +29,7 @@ where
 impl AppError {
     fn get_codes(&self) -> (StatusCode, u16) {
         match *self.0 {
-            ErrorKind::SerdeJsonError(_) => (StatusCode::BAD_REQUEST, 40001),
-            ErrorKind::IoError(_) => (StatusCode::BAD_REQUEST, 40002),
-            ErrorKind::KubeClientError(_) => (StatusCode::BAD_REQUEST, 40003),
+            ErrorKind::Ariadne(_) => (StatusCode::BAD_REQUEST, 40001),
         }
     }
 }
@@ -52,4 +48,5 @@ impl IntoResponse for AppError {
         (status_code, body).into_response()
     }
 }
+
 pub type Result<T> = std::result::Result<T, AppError>;

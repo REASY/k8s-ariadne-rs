@@ -1,53 +1,23 @@
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::errors;
 use crate::id_gen::{GetNextIdResult, IdGen};
-use async_openai::config::OpenAIConfig;
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
-use k8s_openapi::api::core::v1::{Pod, Service};
-use k8s_openapi::{kind, Resource};
+use crate::types::*;
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::core::v1::{
+    Endpoints, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+};
+use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::Resource;
 use kube::api::ListParams;
 use kube::{Api, Client, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
-
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
-pub enum NodeType {
-    #[default]
-    None,
-    Service,
-    Pod,
-    Deployment,
-    ReplicaSet,
-    StatefulSet,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
-pub struct Label {
-    pub name: String,
-    pub value: String,
-}
-
-impl Label {
-    pub fn new(name: String, value: String) -> Self {
-        Label { name, value }
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-pub struct Node {
-    pub uid: String,
-    pub name: String,
-    pub namespace: String,
-    pub version: String,
-    pub node_type: NodeType,
-    pub labels: Vec<Label>,
-    pub status: String,
-}
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Edge {
@@ -63,23 +33,19 @@ pub type NodeId = u32;
 pub struct GraphVertex {
     id: String,
     name: String,
-    namespace: String,
-    version: String,
-    node_type: NodeType,
-    labels: Vec<Label>,
-    status: String,
+    namespace: Option<String>,
+    version: Option<String>,
+    node_type: ResourceType,
 }
 
 impl GraphVertex {
-    pub fn new(node: &Node) -> Self {
+    pub fn new(node: &GenericObject) -> Self {
         GraphVertex {
-            id: node.uid.clone(),
-            name: node.name.clone(),
-            namespace: node.namespace.clone(),
-            version: node.version.clone(),
-            node_type: node.node_type.clone(),
-            labels: node.labels.to_vec(),
-            status: node.status.clone(),
+            id: node.id.uid.clone(),
+            name: node.id.name.clone(),
+            namespace: node.id.namespace.clone(),
+            version: node.id.resource_version.clone(),
+            node_type: node.resource_type.clone(),
         }
     }
 }
@@ -97,11 +63,28 @@ pub struct DirectedGraph {
     edges: Vec<GraphEdge>,
 }
 
+macro_rules! create_generic_object {
+    ($item:expr, $resource_type:ident, $variant:ident, $field:ident) => {
+        GenericObject {
+            id: ObjectIdentifier {
+                uid: $item.uid().unwrap().to_string(),
+                name: $item.name_any(),
+                namespace: $item.namespace(),
+                resource_version: $item.resource_version(),
+            },
+            resource_type: ResourceType::$resource_type,
+            attributes: Box::new(ResourceAttributes::$variant {
+                $field: $item.clone(),
+            }),
+        }
+    };
+}
+
 #[derive(Debug, Default)]
 pub struct ClusterState {
     graph: DiGraphMap<NodeId, Edge>,
     id_gen: IdGen,
-    id_to_node: HashMap<NodeId, Node>,
+    id_to_node: HashMap<NodeId, GenericObject>,
 }
 
 impl ClusterState {
@@ -113,8 +96,8 @@ impl ClusterState {
         }
     }
 
-    pub fn add_node(&mut self, node: Node) {
-        match self.id_gen.get_next_id(&node.uid) {
+    pub fn add_node(&mut self, node: GenericObject) {
+        match self.id_gen.get_next_id(&node.id.uid) {
             GetNextIdResult::Existing(id) => {
                 self.id_to_node.insert(id, node);
             }
@@ -174,100 +157,116 @@ impl ClusterState {
 pub type SharedClusterState = Arc<Mutex<ClusterState>>;
 
 pub struct ClusterStateResolver {
-    pods: Api<Pod>,
-    services: Api<Service>,
-    replica_sets: Api<ReplicaSet>,
-    stateful_set: Api<StatefulSet>,
-    deployments: Api<Deployment>,
-    openai_client: async_openai::Client<OpenAIConfig>,
+    node_api: Api<Node>,
+    pod_api: Api<Pod>,
+    deployment_api: Api<Deployment>,
+    stateful_set_api: Api<StatefulSet>,
+    replica_set_api: Api<ReplicaSet>,
+    daemon_set_api: Api<DaemonSet>,
+    persistent_volume_api: Api<PersistentVolume>,
+    persistent_volume_claim_api: Api<PersistentVolumeClaim>,
+    ingress_api: Api<Ingress>,
+    service_api: Api<Service>,
+    endpoints_api: Api<Endpoints>,
 }
 
 impl ClusterStateResolver {
-    pub async fn new() -> errors::Result<Self> {
+    pub async fn new() -> Result<Self> {
         let client = Client::try_default().await?;
-        let pods: Api<Pod> = Api::default_namespaced(client.clone());
-        let services: Api<Service> = Api::default_namespaced(client.clone());
-        let replica_sets: Api<ReplicaSet> = Api::default_namespaced(client.clone());
-        let stateful_set: Api<StatefulSet> = Api::default_namespaced(client.clone());
-        let deployments: Api<Deployment> = Api::default_namespaced(client.clone());
-        let openai_client = async_openai::Client::new();
         Ok(ClusterStateResolver {
-            pods,
-            services,
-            replica_sets,
-            stateful_set,
-            deployments,
-            openai_client,
+            node_api: Api::all(client.clone()),
+            pod_api: Api::default_namespaced(client.clone()),
+            deployment_api: Api::default_namespaced(client.clone()),
+            stateful_set_api: Api::default_namespaced(client.clone()),
+            replica_set_api: Api::default_namespaced(client.clone()),
+            daemon_set_api: Api::all(client.clone()),
+            persistent_volume_api: Api::all(client.clone()),
+            persistent_volume_claim_api: Api::all(client.clone()),
+            ingress_api: Api::default_namespaced(client.clone()),
+            service_api: Api::default_namespaced(client.clone()),
+            endpoints_api: Api::default_namespaced(client.clone()),
         })
     }
 
-    pub async fn resolve(&self) -> errors::Result<ClusterState> {
-        let pods: Vec<Pod> = Self::get_object(&self.pods).await?;
-        let services = Self::get_object(&self.services).await?;
-        let replica_sets = Self::get_object(&self.replica_sets).await?;
-        let stateful_sets = Self::get_object(&self.stateful_set).await?;
-        let deployments = Self::get_object(&self.deployments).await?;
+    pub async fn resolve(&self) -> Result<ClusterState> {
+        let nodes: Vec<Node> = Self::get_object(&self.node_api).await?;
+        let pods: Vec<Pod> = Self::get_object(&self.pod_api).await?;
+        let deployments: Vec<Deployment> = Self::get_object(&self.deployment_api).await?;
+        let stateful_sets: Vec<StatefulSet> = Self::get_object(&self.stateful_set_api).await?;
+        let replica_sets: Vec<ReplicaSet> = Self::get_object(&self.replica_set_api).await?;
+        let daemon_sets: Vec<DaemonSet> = Self::get_object(&self.daemon_set_api).await?;
+
+        let persistent_volumes: Vec<PersistentVolume> =
+            Self::get_object(&self.persistent_volume_api).await?;
+        let persistent_volume_claims: Vec<PersistentVolumeClaim> =
+            Self::get_object(&self.persistent_volume_claim_api).await?;
+
+        let services: Vec<Service> = Self::get_object(&self.service_api).await?;
+        let ingresses: Vec<Ingress> = Self::get_object(&self.ingress_api).await?;
+        let endpoints: Vec<Endpoints> = Self::get_object(&self.endpoints_api).await?;
+
         let mut state = ClusterState::new();
-
         {
+            for item in &nodes {
+                let node = create_generic_object!(item.clone(), Node, Node, node);
+                state.add_node(node);
+            }
+
             for item in &pods {
-                let status = item
-                    .status
-                    .as_ref()
-                    .map(|x| x.phase.clone())
-                    .flatten()
-                    .unwrap_or_default()
-                    .clone();
-                let node = Self::create_node(item, status.clone());
-                state.add_node(node);
-            }
-
-            for item in &services {
-                let status = item
-                    .spec
-                    .as_ref()
-                    .map(|s| {
-                        format!(
-                            "{} {}",
-                            s.type_.clone().unwrap_or_default(),
-                            s.cluster_ip.clone().unwrap_or_default()
-                        )
-                    })
-                    .unwrap_or_default();
-                let node = Self::create_node(item, status);
-                state.add_node(node);
-            }
-
-            for item in &replica_sets {
-                let status = item
-                    .status
-                    .as_ref()
-                    .map(|x| format!("{}/{}", x.ready_replicas.unwrap_or_default(), x.replicas))
-                    .unwrap_or_default();
-                let node = Self::create_node(item, status);
-                state.add_node(node);
-            }
-
-            for item in &stateful_sets {
-                let status = item
-                    .status
-                    .as_ref()
-                    .map(|x| format!("{}/{}", x.current_replicas.unwrap_or_default(), x.replicas))
-                    .unwrap_or_default();
-                let node = Self::create_node(item, status);
+                let node = create_generic_object!(item.clone(), Pod, Pod, pod);
                 state.add_node(node);
             }
 
             for item in &deployments {
-                let status = item
-                    .status
-                    .as_ref()
-                    .map(|x| x.conditions.as_ref().map(|t| t.last()))
-                    .flatten()
-                    .flatten()
-                    .map(|c| c.type_.clone())
-                    .unwrap_or_default();
-                let node = Self::create_node(item, status);
+                let node = create_generic_object!(item.clone(), Deployment, Deployment, deployment);
+                state.add_node(node);
+            }
+
+            for item in &stateful_sets {
+                let node =
+                    create_generic_object!(item.clone(), StatefulSet, StatefulSet, stateful_set);
+                state.add_node(node);
+            }
+
+            for item in &replica_sets {
+                let node =
+                    create_generic_object!(item.clone(), ReplicaSet, ReplicaSet, replica_set);
+                state.add_node(node);
+            }
+
+            for item in &daemon_sets {
+                let node = create_generic_object!(item.clone(), DaemonSet, DaemonSet, daemon_set);
+                state.add_node(node);
+            }
+
+            for item in &persistent_volumes {
+                let node =
+                    create_generic_object!(item.clone(), PersistentVolume, PersistentVolume, pv);
+                state.add_node(node);
+            }
+
+            for item in &persistent_volume_claims {
+                let node = create_generic_object!(
+                    item.clone(),
+                    PersistentVolumeClaim,
+                    PersistentVolumeClaim,
+                    pvc
+                );
+                state.add_node(node);
+            }
+
+            for item in &ingresses {
+                let node = create_generic_object!(item.clone(), Ingress, Ingress, ingress);
+                state.add_node(node);
+            }
+
+            for item in &services {
+                let node = create_generic_object!(item.clone(), Service, Service, service);
+                state.add_node(node);
+            }
+
+            for item in &endpoints {
+                let node = create_generic_object!(item.clone(), Endpoints, Endpoints, endpoints);
                 state.add_node(node);
             }
 
@@ -316,9 +315,7 @@ impl ClusterStateResolver {
         }
     }
 
-    async fn get_object<T: Clone + DeserializeOwned + Debug>(
-        api: &Api<T>,
-    ) -> errors::Result<Vec<T>> {
+    async fn get_object<T: Clone + DeserializeOwned + Debug>(api: &Api<T>) -> Result<Vec<T>> {
         let mut r: Vec<T> = Vec::new();
         let mut continue_token: Option<String> = None;
         loop {
@@ -337,36 +334,5 @@ impl ClusterStateResolver {
             }
         }
         Ok(r)
-    }
-
-    fn create_node<T: Resource + k8s_openapi::Resource + ResourceExt>(
-        p: &T,
-        status: String,
-    ) -> Node {
-        let node_type = match kind(p) {
-            Pod::KIND => NodeType::Pod,
-            Service::KIND => NodeType::Service,
-            Deployment::KIND => NodeType::Deployment,
-            ReplicaSet::KIND => NodeType::ReplicaSet,
-            StatefulSet::KIND => NodeType::StatefulSet,
-            x => {
-                warn!("Do not know how to map {x} to NodeType");
-                NodeType::None
-            }
-        };
-        let labels: Vec<Label> = p
-            .labels()
-            .iter()
-            .map(|(k, v)| Label::new(k.clone(), v.clone()))
-            .collect();
-        Node {
-            uid: p.uid().unwrap(),
-            name: p.name_any(),
-            namespace: p.namespace().unwrap(),
-            version: p.resource_version().unwrap(),
-            node_type: node_type,
-            labels,
-            status,
-        }
     }
 }
