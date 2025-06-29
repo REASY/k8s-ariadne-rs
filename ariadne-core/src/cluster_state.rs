@@ -21,12 +21,12 @@ use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Edge {
-    Owns,        // e.g., Deployment → Pod
-    Selects,     // e.g., Service → Pod via labels
-    Hosts,       // e.g., Node → Pod
-    Claims,      // e.g., Pod → PersistentVolumeClaim
-    Binds,       // e.g., PersistentVolumeClaim → PersistentVolume
-    References,  // e.g., Pod → ConfigMap/Secret
+    Owns,       // e.g., Deployment → Pod
+    Selects,    // e.g., Service → Pod via labels
+    Hosts,      // e.g., Node → Pod
+    Claims,     // e.g., Pod → PersistentVolumeClaim
+    Binds,      // e.g., PersistentVolumeClaim → PersistentVolume
+    References, // e.g., Pod → ConfigMap/Secret
 }
 
 pub type NodeId = u32;
@@ -110,9 +110,9 @@ impl ClusterState {
         }
     }
 
-    pub fn add_edge(&mut self, source: String, target: String, edge: Edge) {
-        let maybe_source = self.get_node(&source);
-        let maybe_target = self.get_node(&target);
+    pub fn add_edge(&mut self, source: &str, target: &str, edge: Edge) {
+        let maybe_source = self.get_node(source);
+        let maybe_target = self.get_node(target);
 
         match (maybe_source, maybe_target) {
             (Some(from), Some(to)) => {
@@ -296,11 +296,46 @@ impl ClusterStateResolver {
                                     if is_connected {
                                         let svc_uid = item.metadata.uid.clone().unwrap_or_default();
                                         let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
-                                        state.add_edge(svc_uid, pod_uid, Edge::Selects);
+                                        state.add_edge(
+                                            svc_uid.as_str(),
+                                            pod_uid.as_str(),
+                                            Edge::Selects,
+                                        );
                                     }
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            let node_name_to_node = nodes
+                .iter()
+                .map(|n| {
+                    (
+                        n.metadata.name.as_ref().unwrap().as_str(),
+                        n.metadata.uid.as_ref().unwrap().as_str(),
+                    )
+                })
+                .collect::<HashMap<&str, &str>>();
+            for pod in &pods {
+                let node_uid = pod
+                    .spec
+                    .as_ref()
+                    .map(|s| s.node_name.as_ref().map(|x| x.as_str()))
+                    .flatten();
+                match node_uid {
+                    None => {}
+                    Some(node_name) => {
+                        let node_uid = node_name_to_node.get(node_name).unwrap();
+                        pod.metadata
+                            .uid
+                            .as_ref()
+                            .map(|x| x.as_str())
+                            .iter()
+                            .for_each(|pod_uid| {
+                                state.add_edge(node_uid, pod_uid, Edge::Hosts);
+                            });
                     }
                 }
             }
@@ -309,13 +344,12 @@ impl ClusterStateResolver {
         Ok(state)
     }
 
-    fn add_owner_edges<T: Resource + ResourceExt>(
-        objs: &Vec<T>,
-        cluster_state: &mut ClusterState,
-    ) {
+    fn add_owner_edges<T: Resource + ResourceExt>(objs: &Vec<T>, cluster_state: &mut ClusterState) {
         for item in objs {
             for owner in item.owner_references() {
-                cluster_state.add_edge(owner.uid.clone(), item.uid().unwrap(), Edge::Owns);
+                item.uid().iter().for_each(|uid| {
+                    cluster_state.add_edge(owner.uid.as_ref(), uid, Edge::Owns);
+                });
             }
         }
     }
