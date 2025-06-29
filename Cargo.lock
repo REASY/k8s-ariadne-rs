@@ -81,6 +81,7 @@ dependencies = [
  "ariadne-core",
  "axum",
  "axum-prometheus",
+ "kube",
  "serde",
  "serde_json",
  "shadow-rs",

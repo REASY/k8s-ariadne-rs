@@ -13,7 +13,8 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::Resource;
 use kube::api::ListParams;
-use kube::{Api, Client, ResourceExt};
+use kube::config::KubeConfigOptions;
+use kube::{Api, Client, Config, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
@@ -173,20 +174,21 @@ pub struct ClusterStateResolver {
 }
 
 impl ClusterStateResolver {
-    pub async fn new() -> Result<Self> {
-        let client = Client::try_default().await?;
+    pub async fn new(options: &KubeConfigOptions, namespace: &str) -> Result<Self> {
+        let cfg = Config::from_kubeconfig(options).await?;
+        let client = Client::try_from(cfg)?;
         Ok(ClusterStateResolver {
             node_api: Api::all(client.clone()),
-            pod_api: Api::default_namespaced(client.clone()),
-            deployment_api: Api::default_namespaced(client.clone()),
-            stateful_set_api: Api::default_namespaced(client.clone()),
-            replica_set_api: Api::default_namespaced(client.clone()),
+            pod_api: Api::namespaced(client.clone(), namespace),
+            deployment_api: Api::namespaced(client.clone(), namespace),
+            stateful_set_api: Api::namespaced(client.clone(), namespace),
+            replica_set_api: Api::namespaced(client.clone(), namespace),
             daemon_set_api: Api::all(client.clone()),
             persistent_volume_api: Api::all(client.clone()),
             persistent_volume_claim_api: Api::all(client.clone()),
-            ingress_api: Api::default_namespaced(client.clone()),
-            service_api: Api::default_namespaced(client.clone()),
-            endpoints_api: Api::default_namespaced(client.clone()),
+            ingress_api: Api::namespaced(client.clone(), namespace),
+            service_api: Api::namespaced(client.clone(), namespace),
+            endpoints_api: Api::namespaced(client.clone(), namespace),
         })
     }
 
@@ -281,67 +283,70 @@ impl ClusterStateResolver {
             Self::add_owner_edges(&persistent_volume_claims, &mut state);
             Self::add_owner_edges(&ingresses, &mut state);
 
+            let mut with_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
+                Vec::new();
             for item in &services {
-                let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
-                match maybe_selector {
+                item.metadata.uid.as_ref().iter().for_each(|uid| {
+                    let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
+                    maybe_selector.iter().for_each(|tree| {
+                        with_selectors.push((uid.as_str(), tree));
+                    });
+                });
+            }
+
+            for pod in &pods {
+                match pod.metadata.labels.as_ref() {
                     None => {}
-                    Some(selector) => {
-                        for pod in &pods {
-                            match pod.metadata.labels.as_ref() {
-                                None => {}
-                                Some(pod_selector) => {
-                                    let is_connected = selector.iter().all(|(name, value)| {
-                                        pod_selector.get(name).map(|v| v == value).unwrap_or(false)
-                                    });
-                                    if is_connected {
-                                        let svc_uid = item.metadata.uid.clone().unwrap_or_default();
-                                        let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
-                                        state.add_edge(
-                                            svc_uid.as_str(),
-                                            pod_uid.as_str(),
-                                            Edge::Selects,
-                                        );
-                                    }
-                                }
+                    Some(pod_selector) => {
+                        for (uid, selector) in &with_selectors {
+                            let is_connected = (*selector).iter().all(|(name, value)| {
+                                pod_selector.get(name).map(|v| v == value).unwrap_or(false)
+                            });
+                            if is_connected {
+                                let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
+                                state.add_edge(*uid, pod_uid.as_str(), Edge::Selects);
                             }
                         }
                     }
                 }
             }
-
-            let node_name_to_node = nodes
-                .iter()
-                .map(|n| {
-                    (
-                        n.metadata.name.as_ref().unwrap().as_str(),
-                        n.metadata.uid.as_ref().unwrap().as_str(),
-                    )
-                })
-                .collect::<HashMap<&str, &str>>();
-            for pod in &pods {
-                let node_uid = pod
-                    .spec
-                    .as_ref()
-                    .map(|s| s.node_name.as_ref().map(|x| x.as_str()))
-                    .flatten();
-                match node_uid {
-                    None => {}
-                    Some(node_name) => {
-                        let node_uid = node_name_to_node.get(node_name).unwrap();
-                        pod.metadata
-                            .uid
-                            .as_ref()
-                            .map(|x| x.as_str())
-                            .iter()
-                            .for_each(|pod_uid| {
-                                state.add_edge(node_uid, pod_uid, Edge::Hosts);
-                            });
-                    }
-                }
-            }
+            Self::nodes_host_pods(&nodes, &pods, &mut state);
         }
 
         Ok(state)
+    }
+
+    fn nodes_host_pods(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
+        let node_name_to_node = nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.metadata.name.as_ref().unwrap().as_str(),
+                    n.metadata.uid.as_ref().unwrap().as_str(),
+                )
+            })
+            .collect::<HashMap<&str, &str>>();
+        for pod in pods {
+            let node_uid = pod
+                .spec
+                .as_ref()
+                .map(|s| s.node_name.as_ref().map(|x| x.as_str()))
+                .flatten();
+            match node_uid {
+                None => {}
+                Some(node_name) => {
+                    let node_uid = node_name_to_node.get(node_name).unwrap();
+                    pod.metadata
+                        .uid
+                        .as_ref()
+                        .map(|x| x.as_str())
+                        .iter()
+                        .for_each(|pod_uid| {
+                            state.add_edge(node_uid, pod_uid, Edge::Hosts);
+                        });
+                }
+            }
+        }
     }
 
     fn add_owner_edges<T: Resource + ResourceExt>(objs: &Vec<T>, cluster_state: &mut ClusterState) {

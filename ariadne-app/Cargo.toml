@@ -7,6 +7,7 @@ edition = "2021"
 ariadne-core = { workspace = true }
 axum = { workspace = true }
 axum-prometheus = { workspace = true }
+kube = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 shadow-rs = { workspace = true }

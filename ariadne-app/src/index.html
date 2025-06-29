@@ -62,12 +62,14 @@
 
     const graph_url = "http://127.0.0.1:18080/v1/graph";
 
-    const node_domain = ['Pod', 'Service', 'ReplicaSet', 'StatefulSet', 'Deployment'];
-    const node_color_range = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'];
+
+    const node_domain = ['Node', 'Pod', 'Deployment', 'StatefulSet', 'ReplicaSet', 'DaemonSet', 'PersistentVolume', 'PersistentVolumeClaim', 'Ingress', 'Service', 'Endpoints'];
+    const edge_domain = ["Owns", "Selects", "Hosts", "Claims", "Binds", "References"]
+
+    const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7'];
     const node_color = d3.scaleOrdinal(node_domain, node_color_range);
 
-    const edge_domain = ["Owns", "Selects", "Hosts", "Claims", "Binds", "References"]
-    const edge_color_range = ['#a463f2', '#9498a0', '#e377c2', '#7f2c2c', '#bcbd22', '#17becf'];
+    const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7'];
     const edge_color = d3.scaleOrdinal(edge_domain, edge_color_range);
     let domain = [].concat.apply([], [node_domain, edge_domain]);
     let color_range = [].concat.apply([], [node_color_range, edge_color_range]);

@@ -13,6 +13,8 @@ pub enum ErrorKind {
     IoError(#[from] std::io::Error),
     #[error("KubeClientError: {0}")]
     KubeClientError(#[from] kube::Error),
+    #[error("KubeconfigError: {0}")]
+    KubeconfigError(#[from] kube::config::KubeconfigError),
 }
 
 impl<E> From<E> for AriadneError

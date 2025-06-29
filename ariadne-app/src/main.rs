@@ -6,6 +6,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
+use kube::config::KubeConfigOptions;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
 use std::sync::Mutex;
@@ -48,7 +49,14 @@ async fn fetch_state(
 ) -> errors::Result<()> {
     info!("Starting fetch_state");
     let mut id: usize = 0;
-    let resolver = ClusterStateResolver::new().await?;
+    let cluster = std::env::var("KUBE_CONTEXT").ok();
+    let namespace = std::env::var("KUBE_NAMESPACE").unwrap();
+    let kube_opts = KubeConfigOptions {
+        context: cluster,
+        cluster: None,
+        user: None,
+    };
+    let resolver = ClusterStateResolver::new(&kube_opts, namespace.as_str()).await?;
     loop {
         if token.is_cancelled() {
             break;
@@ -60,7 +68,7 @@ async fn fetch_state(
             *old_locked_state = new_state;
         }
 
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(1000)).await;
         id += 1;
     }
     info!("Stopped fetch_state, number of loops {id}");
