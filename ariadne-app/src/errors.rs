@@ -1,4 +1,3 @@
-use crate::errors;
 use ariadne_core::prelude::AriadneError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

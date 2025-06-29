@@ -19,12 +19,14 @@ use serde::de::DeserializeOwned;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Edge {
-    #[default]
-    None,
-    Connect,
-    Own,
+    Owns,        // e.g., Deployment → Pod
+    Selects,     // e.g., Service → Pod via labels
+    Hosts,       // e.g., Node → Pod
+    Claims,      // e.g., Pod → PersistentVolumeClaim
+    Binds,       // e.g., PersistentVolumeClaim → PersistentVolume
+    References,  // e.g., Pod → ConfigMap/Secret
 }
 
 pub type NodeId = u32;
@@ -273,8 +275,11 @@ impl ClusterStateResolver {
             Self::add_owner_edges(&pods, &mut state);
             Self::add_owner_edges(&replica_sets, &mut state);
             Self::add_owner_edges(&stateful_sets, &mut state);
+            Self::add_owner_edges(&daemon_sets, &mut state);
             Self::add_owner_edges(&deployments, &mut state);
-            Self::add_owner_edges(&services, &mut state);
+            Self::add_owner_edges(&endpoints, &mut state);
+            Self::add_owner_edges(&persistent_volume_claims, &mut state);
+            Self::add_owner_edges(&ingresses, &mut state);
 
             for item in &services {
                 let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
@@ -291,7 +296,7 @@ impl ClusterStateResolver {
                                     if is_connected {
                                         let svc_uid = item.metadata.uid.clone().unwrap_or_default();
                                         let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
-                                        state.add_edge(svc_uid, pod_uid, Edge::Connect);
+                                        state.add_edge(svc_uid, pod_uid, Edge::Selects);
                                     }
                                 }
                             }
@@ -304,13 +309,13 @@ impl ClusterStateResolver {
         Ok(state)
     }
 
-    fn add_owner_edges<T: Resource + k8s_openapi::Resource + ResourceExt>(
+    fn add_owner_edges<T: Resource + ResourceExt>(
         objs: &Vec<T>,
         cluster_state: &mut ClusterState,
     ) {
         for item in objs {
             for owner in item.owner_references() {
-                cluster_state.add_edge(owner.uid.clone(), item.uid().unwrap(), Edge::Own);
+                cluster_state.add_edge(owner.uid.clone(), item.uid().unwrap(), Edge::Owns);
             }
         }
     }
