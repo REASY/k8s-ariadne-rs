@@ -1,9 +1,5 @@
 use crate::prelude::*;
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::Debug;
-
 use crate::id_gen::{GetNextIdResult, IdGen};
 use crate::types::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -17,7 +13,12 @@ use kube::config::KubeConfigOptions;
 use kube::{Api, Client, Config, ResourceExt};
 use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fs;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -171,6 +172,22 @@ pub struct ClusterStateResolver {
     ingress_api: Api<Ingress>,
     service_api: Api<Service>,
     endpoints_api: Api<Endpoints>,
+    should_export_snapshot: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ClusterSnapshot {
+    nodes: Vec<Node>,
+    pods: Vec<Pod>,
+    deployments: Vec<Deployment>,
+    stateful_sets: Vec<StatefulSet>,
+    replica_sets: Vec<ReplicaSet>,
+    daemon_sets: Vec<DaemonSet>,
+    persistent_volumes: Vec<PersistentVolume>,
+    persistent_volume_claims: Vec<PersistentVolumeClaim>,
+    services: Vec<Service>,
+    ingresses: Vec<Ingress>,
+    endpoints: Vec<Endpoints>,
 }
 
 impl ClusterStateResolver {
@@ -189,6 +206,7 @@ impl ClusterStateResolver {
             ingress_api: Api::namespaced(client.clone(), namespace),
             service_api: Api::namespaced(client.clone(), namespace),
             endpoints_api: Api::namespaced(client.clone(), namespace),
+            should_export_snapshot: false,
         })
     }
 
@@ -208,6 +226,28 @@ impl ClusterStateResolver {
         let services: Vec<Service> = Self::get_object(&self.service_api).await?;
         let ingresses: Vec<Ingress> = Self::get_object(&self.ingress_api).await?;
         let endpoints: Vec<Endpoints> = Self::get_object(&self.endpoints_api).await?;
+
+        if self.should_export_snapshot {
+            let snapshot = ClusterSnapshot {
+                nodes: nodes.clone(),
+                pods: pods.clone(),
+                deployments: deployments.clone(),
+                stateful_sets: stateful_sets.clone(),
+                replica_sets: replica_sets.clone(),
+                daemon_sets: daemon_sets.clone(),
+                persistent_volumes: persistent_volumes.clone(),
+                persistent_volume_claims: persistent_volume_claims.clone(),
+                services: services.clone(),
+                ingresses: ingresses.clone(),
+                endpoints: endpoints.clone(),
+            };
+            let slice_string_in_json_format = serde_json::to_string(&snapshot).unwrap();
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            fs::write(format!("snapshot_{ts}.json",), slice_string_in_json_format).unwrap();
+        }
 
         let mut state = ClusterState::new();
         {
