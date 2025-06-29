@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
@@ -190,6 +190,11 @@ struct ClusterSnapshot {
     endpoints: Vec<Endpoints>,
 }
 
+static CLUSTER_STATE: LazyLock<ClusterSnapshot> = LazyLock::new(|| {
+    let bytes = fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
+    serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
+});
+
 impl ClusterStateResolver {
     pub async fn new(options: &KubeConfigOptions, namespace: &str) -> Result<Self> {
         let cfg = Config::from_kubeconfig(options).await?;
@@ -210,7 +215,7 @@ impl ClusterStateResolver {
         })
     }
 
-    pub async fn resolve(&self) -> Result<ClusterState> {
+    pub async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
         let nodes: Vec<Node> = Self::get_object(&self.node_api).await?;
         let pods: Vec<Pod> = Self::get_object(&self.pod_api).await?;
         let deployments: Vec<Deployment> = Self::get_object(&self.deployment_api).await?;
@@ -226,70 +231,66 @@ impl ClusterStateResolver {
         let services: Vec<Service> = Self::get_object(&self.service_api).await?;
         let ingresses: Vec<Ingress> = Self::get_object(&self.ingress_api).await?;
         let endpoints: Vec<Endpoints> = Self::get_object(&self.endpoints_api).await?;
+        let snapshot = ClusterSnapshot {
+            nodes: nodes,
+            pods: pods,
+            deployments: deployments,
+            stateful_sets: stateful_sets,
+            replica_sets: replica_sets,
+            daemon_sets: daemon_sets,
+            persistent_volumes: persistent_volumes,
+            persistent_volume_claims: persistent_volume_claims,
+            services: services,
+            ingresses: ingresses,
+            endpoints: endpoints,
+        };
+        Ok(snapshot)
+    }
 
-        if self.should_export_snapshot {
-            let snapshot = ClusterSnapshot {
-                nodes: nodes.clone(),
-                pods: pods.clone(),
-                deployments: deployments.clone(),
-                stateful_sets: stateful_sets.clone(),
-                replica_sets: replica_sets.clone(),
-                daemon_sets: daemon_sets.clone(),
-                persistent_volumes: persistent_volumes.clone(),
-                persistent_volume_claims: persistent_volume_claims.clone(),
-                services: services.clone(),
-                ingresses: ingresses.clone(),
-                endpoints: endpoints.clone(),
-            };
-            let slice_string_in_json_format = serde_json::to_string(&snapshot).unwrap();
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-            fs::write(format!("snapshot_{ts}.json",), slice_string_in_json_format).unwrap();
-        }
+    pub async fn resolve(&self) -> Result<ClusterState> {
+        let snapshot = &CLUSTER_STATE; // self.get_snapshot().await?;
 
         let mut state = ClusterState::new();
         {
-            for item in &nodes {
+            for item in &snapshot.nodes {
                 let node = create_generic_object!(item.clone(), Node, Node, node);
                 state.add_node(node);
             }
 
-            for item in &pods {
+            for item in &snapshot.pods {
                 let node = create_generic_object!(item.clone(), Pod, Pod, pod);
                 state.add_node(node);
             }
 
-            for item in &deployments {
+            for item in &snapshot.deployments {
                 let node = create_generic_object!(item.clone(), Deployment, Deployment, deployment);
                 state.add_node(node);
             }
 
-            for item in &stateful_sets {
+            for item in &snapshot.stateful_sets {
                 let node =
                     create_generic_object!(item.clone(), StatefulSet, StatefulSet, stateful_set);
                 state.add_node(node);
             }
 
-            for item in &replica_sets {
+            for item in &snapshot.replica_sets {
                 let node =
                     create_generic_object!(item.clone(), ReplicaSet, ReplicaSet, replica_set);
                 state.add_node(node);
             }
 
-            for item in &daemon_sets {
+            for item in &snapshot.daemon_sets {
                 let node = create_generic_object!(item.clone(), DaemonSet, DaemonSet, daemon_set);
                 state.add_node(node);
             }
 
-            for item in &persistent_volumes {
+            for item in &snapshot.persistent_volumes {
                 let node =
                     create_generic_object!(item.clone(), PersistentVolume, PersistentVolume, pv);
                 state.add_node(node);
             }
 
-            for item in &persistent_volume_claims {
+            for item in &snapshot.persistent_volume_claims {
                 let node = create_generic_object!(
                     item.clone(),
                     PersistentVolumeClaim,
@@ -299,33 +300,33 @@ impl ClusterStateResolver {
                 state.add_node(node);
             }
 
-            for item in &ingresses {
+            for item in &snapshot.ingresses {
                 let node = create_generic_object!(item.clone(), Ingress, Ingress, ingress);
                 state.add_node(node);
             }
 
-            for item in &services {
+            for item in &snapshot.services {
                 let node = create_generic_object!(item.clone(), Service, Service, service);
                 state.add_node(node);
             }
 
-            for item in &endpoints {
+            for item in &snapshot.endpoints {
                 let node = create_generic_object!(item.clone(), Endpoints, Endpoints, endpoints);
                 state.add_node(node);
             }
 
-            Self::add_owner_edges(&pods, &mut state);
-            Self::add_owner_edges(&replica_sets, &mut state);
-            Self::add_owner_edges(&stateful_sets, &mut state);
-            Self::add_owner_edges(&daemon_sets, &mut state);
-            Self::add_owner_edges(&deployments, &mut state);
-            Self::add_owner_edges(&endpoints, &mut state);
-            Self::add_owner_edges(&persistent_volume_claims, &mut state);
-            Self::add_owner_edges(&ingresses, &mut state);
+            Self::add_owner_edges(&snapshot.pods, &mut state);
+            Self::add_owner_edges(&snapshot.replica_sets, &mut state);
+            Self::add_owner_edges(&snapshot.stateful_sets, &mut state);
+            Self::add_owner_edges(&snapshot.daemon_sets, &mut state);
+            Self::add_owner_edges(&snapshot.deployments, &mut state);
+            Self::add_owner_edges(&snapshot.endpoints, &mut state);
+            Self::add_owner_edges(&snapshot.persistent_volume_claims, &mut state);
+            Self::add_owner_edges(&snapshot.ingresses, &mut state);
 
             let mut with_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
                 Vec::new();
-            for item in &services {
+            for item in &snapshot.services {
                 item.metadata.uid.as_ref().iter().for_each(|uid| {
                     let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
                     maybe_selector.iter().for_each(|tree| {
@@ -334,23 +335,56 @@ impl ClusterStateResolver {
                 });
             }
 
-            for pod in &pods {
-                match pod.metadata.labels.as_ref() {
-                    None => {}
-                    Some(pod_selector) => {
-                        for (uid, selector) in &with_selectors {
-                            let is_connected = (*selector).iter().all(|(name, value)| {
-                                pod_selector.get(name).map(|v| v == value).unwrap_or(false)
+            let pvc_name_to_uid: HashMap<&str, &str> = snapshot
+                .persistent_volume_claims
+                .iter()
+                .filter(|pvc| pvc.metadata.name.is_some() && pvc.metadata.uid.is_some())
+                .map(|pvc| {
+                    (
+                        pvc.metadata.name.as_ref().unwrap().as_str(),
+                        pvc.metadata.uid.as_ref().unwrap().as_str(),
+                    )
+                })
+                .collect();
+
+            for pod in &snapshot.pods {
+                pod.metadata
+                    .uid
+                    .clone()
+                    .as_ref()
+                    .iter()
+                    .for_each(|pod_uid| {
+                        pod.spec
+                            .as_ref()
+                            .map(|s| s.volumes.as_ref())
+                            .iter()
+                            .flatten()
+                            .for_each(|volumes| {
+                                volumes.iter().for_each(|v| {
+                                    v.persistent_volume_claim.as_ref().iter().for_each(|pvc| {
+                                        let pvc_uid =
+                                            pvc_name_to_uid.get(pvc.claim_name.as_str()).unwrap();
+                                        state.add_edge(*pod_uid, pvc_uid, Edge::Claims);
+                                    });
+                                });
                             });
-                            if is_connected {
-                                let pod_uid = pod.metadata.uid.clone().unwrap_or_default();
-                                state.add_edge(*uid, pod_uid.as_str(), Edge::Selects);
+
+                        match pod.metadata.labels.as_ref() {
+                            None => {}
+                            Some(pod_selector) => {
+                                for (uid, selector) in &with_selectors {
+                                    let is_connected = (*selector).iter().all(|(name, value)| {
+                                        pod_selector.get(name).map(|v| v == value).unwrap_or(false)
+                                    });
+                                    if is_connected {
+                                        state.add_edge(*uid, pod_uid.as_str(), Edge::Selects);
+                                    }
+                                }
                             }
                         }
-                    }
-                }
+                    });
             }
-            Self::nodes_host_pods(&nodes, &pods, &mut state);
+            Self::nodes_host_pods(&snapshot.nodes, &snapshot.pods, &mut state);
         }
 
         Ok(state)
