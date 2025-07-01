@@ -2,8 +2,9 @@ pub mod errors;
 
 pub type Result<T> = std::result::Result<T, errors::AriadneError>;
 
-pub mod cluster_state;
 pub mod id_gen;
+pub mod state;
+pub mod state_resolver;
 pub mod types;
 
 pub mod prelude {

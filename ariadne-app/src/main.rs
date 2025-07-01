@@ -1,5 +1,5 @@
-use ariadne_core::cluster_state::ClusterState;
-use ariadne_core::cluster_state::{ClusterStateResolver, SharedClusterState};
+use ariadne_core::state::{ClusterState, SharedClusterState};
+use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
 use axum::middleware::map_response;
 use axum::response::Response;

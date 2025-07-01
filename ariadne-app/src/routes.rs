@@ -1,4 +1,4 @@
-use ariadne_core::cluster_state::{DirectedGraph, SharedClusterState};
+use ariadne_core::state::{DirectedGraph, SharedClusterState};
 use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;

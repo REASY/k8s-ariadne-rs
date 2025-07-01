@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
-use crate::id_gen::{GetNextIdResult, IdGen};
+use crate::create_generic_object;
+use crate::state::{ClusterState, Edge};
 use crate::types::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{
@@ -11,154 +12,12 @@ use k8s_openapi::Resource;
 use kube::api::ListParams;
 use kube::config::KubeConfigOptions;
 use kube::{Api, Client, Config, ResourceExt};
-use petgraph::graphmap::DiGraphMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub enum Edge {
-    Owns,       // e.g., Deployment → Pod
-    Selects,    // e.g., Service → Pod via labels
-    Hosts,      // e.g., Node → Pod
-    Claims,     // e.g., Pod → PersistentVolumeClaim
-    Binds,      // e.g., PersistentVolumeClaim → PersistentVolume
-    References, // e.g., Pod → ConfigMap/Secret
-}
-
-pub type NodeId = u32;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GraphVertex {
-    id: String,
-    name: String,
-    namespace: Option<String>,
-    version: Option<String>,
-    node_type: ResourceType,
-}
-
-impl GraphVertex {
-    pub fn new(node: &GenericObject) -> Self {
-        GraphVertex {
-            id: node.id.uid.clone(),
-            name: node.id.name.clone(),
-            namespace: node.id.namespace.clone(),
-            version: node.id.resource_version.clone(),
-            node_type: node.resource_type.clone(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GraphEdge {
-    source: String,
-    target: String,
-    edge_type: Edge,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DirectedGraph {
-    vertices: Vec<GraphVertex>,
-    edges: Vec<GraphEdge>,
-}
-
-macro_rules! create_generic_object {
-    ($item:expr, $resource_type:ident, $variant:ident, $field:ident) => {
-        GenericObject {
-            id: ObjectIdentifier {
-                uid: $item.uid().unwrap().to_string(),
-                name: $item.name_any(),
-                namespace: $item.namespace(),
-                resource_version: $item.resource_version(),
-            },
-            resource_type: ResourceType::$resource_type,
-            attributes: Box::new(ResourceAttributes::$variant {
-                $field: $item.clone(),
-            }),
-        }
-    };
-}
-
-#[derive(Debug, Default)]
-pub struct ClusterState {
-    graph: DiGraphMap<NodeId, Edge>,
-    id_gen: IdGen,
-    id_to_node: HashMap<NodeId, GenericObject>,
-}
-
-impl ClusterState {
-    pub fn new() -> Self {
-        ClusterState {
-            graph: DiGraphMap::new(),
-            id_gen: IdGen::new(),
-            id_to_node: HashMap::new(),
-        }
-    }
-
-    pub fn add_node(&mut self, node: GenericObject) {
-        match self.id_gen.get_next_id(&node.id.uid) {
-            GetNextIdResult::Existing(id) => {
-                self.id_to_node.insert(id, node);
-            }
-            GetNextIdResult::New(new_id) => {
-                self.id_to_node.insert(new_id, node);
-                self.graph.add_node(new_id);
-            }
-        }
-    }
-
-    pub fn add_edge(&mut self, source: &str, target: &str, edge: Edge) {
-        let maybe_source = self.get_node(source);
-        let maybe_target = self.get_node(target);
-
-        match (maybe_source, maybe_target) {
-            (Some(from), Some(to)) => {
-                self.graph.add_edge(from, to, edge);
-            }
-            (from_id, to_id) => {
-                warn!("Node(s) do not exist, source: {source}, from_id: {from_id:?}, target: {target}, to_id: {to_id:?}, edge: {edge:?}")
-            }
-        }
-    }
-
-    pub fn to_directed_graph(&self) -> DirectedGraph {
-        let mut vertices: Vec<GraphVertex> = Vec::with_capacity(self.graph.node_count());
-        self.graph.nodes().for_each(|vertex_id| {
-            let node = self.id_to_node.get(&vertex_id).unwrap();
-            vertices.push(GraphVertex::new(node));
-        });
-        vertices.sort_by_key(|v| v.id.clone());
-
-        let mut edges: Vec<GraphEdge> = Vec::with_capacity(self.graph.edge_count());
-        self.graph.all_edges().for_each(|(from, to, t)| {
-            let from = String::from(self.id_gen.get_by_id(from).unwrap());
-            let to = String::from(self.id_gen.get_by_id(to).unwrap());
-            edges.push(GraphEdge {
-                source: from,
-                target: to,
-                edge_type: t.clone(),
-            });
-        });
-        edges.sort_by(|a, b| {
-            let key_a = (a.source.as_str(), a.target.as_str(), a.edge_type.clone());
-            let key_b = (b.source.as_str(), b.target.as_str(), b.edge_type.clone());
-            key_a.cmp(&key_b)
-        });
-
-        DirectedGraph { vertices, edges }
-    }
-
-    fn get_node(&mut self, uid: &str) -> Option<u32> {
-        self.id_gen.get_id(uid)
-    }
-}
-
-pub type SharedClusterState = Arc<Mutex<ClusterState>>;
+use std::sync::LazyLock;
 
 pub struct ClusterStateResolver {
     node_api: Api<Node>,
@@ -191,8 +50,24 @@ struct ClusterSnapshot {
 }
 
 static CLUSTER_STATE: LazyLock<ClusterSnapshot> = LazyLock::new(|| {
-    let bytes = fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
-    serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
+    if false {
+        let bytes = fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
+        serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
+    } else {
+        ClusterSnapshot {
+            nodes: vec![],
+            pods: vec![],
+            deployments: vec![],
+            stateful_sets: vec![],
+            replica_sets: vec![],
+            daemon_sets: vec![],
+            persistent_volumes: vec![],
+            persistent_volume_claims: vec![],
+            services: vec![],
+            ingresses: vec![],
+            endpoints: vec![],
+        }
+    }
 });
 
 impl ClusterStateResolver {
@@ -215,7 +90,7 @@ impl ClusterStateResolver {
         })
     }
 
-    pub async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
+    async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
         let nodes: Vec<Node> = Self::get_object(&self.node_api).await?;
         let pods: Vec<Pod> = Self::get_object(&self.pod_api).await?;
         let deployments: Vec<Deployment> = Self::get_object(&self.deployment_api).await?;
@@ -248,8 +123,12 @@ impl ClusterStateResolver {
     }
 
     pub async fn resolve(&self) -> Result<ClusterState> {
-        let snapshot = &CLUSTER_STATE; // self.get_snapshot().await?;
+        let snapshot = self.get_snapshot().await?;
+        let state = Self::create_state(&snapshot);
+        Ok(state)
+    }
 
+    fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {
         let mut state = ClusterState::new();
         {
             for item in &snapshot.nodes {
@@ -315,14 +194,7 @@ impl ClusterStateResolver {
                 state.add_node(node);
             }
 
-            Self::add_owner_edges(&snapshot.pods, &mut state);
-            Self::add_owner_edges(&snapshot.replica_sets, &mut state);
-            Self::add_owner_edges(&snapshot.stateful_sets, &mut state);
-            Self::add_owner_edges(&snapshot.daemon_sets, &mut state);
-            Self::add_owner_edges(&snapshot.deployments, &mut state);
-            Self::add_owner_edges(&snapshot.endpoints, &mut state);
-            Self::add_owner_edges(&snapshot.persistent_volume_claims, &mut state);
-            Self::add_owner_edges(&snapshot.ingresses, &mut state);
+            Self::owner_edges(&snapshot, &mut state);
 
             let mut with_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
                 Vec::new();
@@ -386,8 +258,18 @@ impl ClusterStateResolver {
             }
             Self::nodes_host_pods(&snapshot.nodes, &snapshot.pods, &mut state);
         }
+        state
+    }
 
-        Ok(state)
+    fn owner_edges(snapshot: &ClusterSnapshot, mut state: &mut ClusterState) {
+        Self::add_owner_edges(&snapshot.pods, &mut state);
+        Self::add_owner_edges(&snapshot.replica_sets, &mut state);
+        Self::add_owner_edges(&snapshot.stateful_sets, &mut state);
+        Self::add_owner_edges(&snapshot.daemon_sets, &mut state);
+        Self::add_owner_edges(&snapshot.deployments, &mut state);
+        Self::add_owner_edges(&snapshot.endpoints, &mut state);
+        Self::add_owner_edges(&snapshot.persistent_volume_claims, &mut state);
+        Self::add_owner_edges(&snapshot.ingresses, &mut state);
     }
 
     fn nodes_host_pods(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
