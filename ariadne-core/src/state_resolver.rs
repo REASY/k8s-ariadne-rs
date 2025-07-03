@@ -257,6 +257,8 @@ impl ClusterStateResolver {
                     });
             }
             Self::nodes_host_pods(&snapshot.nodes, &snapshot.pods, &mut state);
+
+            Self::pvc_to_pv(&snapshot.persistent_volumes, &mut state);
         }
         state
     }
@@ -334,5 +336,17 @@ impl ClusterStateResolver {
             }
         }
         Ok(r)
+    }
+
+    fn pvc_to_pv(pvs: &[PersistentVolume], state: &mut ClusterState) {
+        for pv in pvs {
+            pv.spec.iter().for_each(|spec| {
+                spec.claim_ref.iter().for_each(|claim_ref| {
+                    claim_ref.uid.iter().for_each(|pvc_id| {
+                        state.add_edge(pvc_id, pv.metadata.uid.as_ref().unwrap(), Edge::Binds);
+                    });
+                });
+            });
+        }
     }
 }
