@@ -14,6 +14,7 @@ pub enum Edge {
     Claims,     // e.g., Pod → PersistentVolumeClaim
     Binds,      // e.g., PersistentVolumeClaim → PersistentVolume
     References, // e.g., Pod → ConfigMap/Secret
+    Routes,     // e.g., Ingress → Service
 }
 
 pub type NodeId = u32;
@@ -63,9 +64,9 @@ macro_rules! create_generic_object {
                 resource_version: $item.resource_version(),
             },
             resource_type: ResourceType::$resource_type,
-            attributes: Box::new(ResourceAttributes::$variant {
+            attributes: Some(Box::new(ResourceAttributes::$variant {
                 $field: $item.clone(),
-            }),
+            })),
         }
     };
 }

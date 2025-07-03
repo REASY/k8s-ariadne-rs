@@ -7,7 +7,7 @@ use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet}
 use k8s_openapi::api::core::v1::{
     Endpoints, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
 };
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::networking::v1::{Ingress, IngressRule};
 use k8s_openapi::Resource;
 use kube::api::ListParams;
 use kube::config::KubeConfigOptions;
@@ -199,9 +199,9 @@ impl ClusterStateResolver {
             let mut with_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
                 Vec::new();
             for item in &snapshot.services {
-                item.metadata.uid.as_ref().iter().for_each(|uid| {
+                item.metadata.uid.as_ref().inspect(|uid| {
                     let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
-                    maybe_selector.iter().for_each(|tree| {
+                    maybe_selector.inspect(|tree| {
                         with_selectors.push((uid.as_str(), tree));
                     });
                 });
@@ -233,7 +233,7 @@ impl ClusterStateResolver {
                             .flatten()
                             .for_each(|volumes| {
                                 volumes.iter().for_each(|v| {
-                                    v.persistent_volume_claim.as_ref().iter().for_each(|pvc| {
+                                    v.persistent_volume_claim.as_ref().inspect(|pvc| {
                                         let pvc_uid =
                                             pvc_name_to_uid.get(pvc.claim_name.as_str()).unwrap();
                                         state.add_edge(*pod_uid, pvc_uid, Edge::Claims);
@@ -259,6 +259,8 @@ impl ClusterStateResolver {
             Self::nodes_host_pods(&snapshot.nodes, &snapshot.pods, &mut state);
 
             Self::pvc_to_pv(&snapshot.persistent_volumes, &mut state);
+
+            Self::ingress_to_service(&snapshot.ingresses, &snapshot.services, &mut state);
         }
         state
     }
@@ -298,8 +300,7 @@ impl ClusterStateResolver {
                         .uid
                         .as_ref()
                         .map(|x| x.as_str())
-                        .iter()
-                        .for_each(|pod_uid| {
+                        .inspect(|pod_uid| {
                             state.add_edge(node_uid, pod_uid, Edge::Hosts);
                         });
                 }
@@ -310,7 +311,7 @@ impl ClusterStateResolver {
     fn add_owner_edges<T: Resource + ResourceExt>(objs: &Vec<T>, cluster_state: &mut ClusterState) {
         for item in objs {
             for owner in item.owner_references() {
-                item.uid().iter().for_each(|uid| {
+                item.uid().inspect(|uid| {
                     cluster_state.add_edge(owner.uid.as_ref(), uid, Edge::Owns);
                 });
             }
@@ -340,13 +341,59 @@ impl ClusterStateResolver {
 
     fn pvc_to_pv(pvs: &[PersistentVolume], state: &mut ClusterState) {
         for pv in pvs {
-            pv.spec.iter().for_each(|spec| {
-                spec.claim_ref.iter().for_each(|claim_ref| {
-                    claim_ref.uid.iter().for_each(|pvc_id| {
+            pv.spec.as_ref().inspect(|spec| {
+                spec.claim_ref.as_ref().inspect(|claim_ref| {
+                    claim_ref.uid.as_ref().inspect(|pvc_id| {
                         state.add_edge(pvc_id, pv.metadata.uid.as_ref().unwrap(), Edge::Binds);
                     });
                 });
             });
         }
+    }
+
+    fn ingress_to_service(ingresses: &[Ingress], services: &[Service], state: &mut ClusterState) {
+        // FIXME: Safer
+        let service_name_to_id = services
+            .iter()
+            .map(|n| {
+                (
+                    n.metadata.name.as_ref().unwrap().as_str(),
+                    n.metadata.uid.as_ref().unwrap().as_str(),
+                )
+            })
+            .collect::<HashMap<&str, &str>>();
+        ingresses.iter().for_each(|ingress| {
+            ingress.metadata.uid.as_ref().inspect(|ingress_id| {
+                ingress.spec.as_ref().inspect(|spec| {
+                    spec.rules.as_ref().inspect(|rules| {
+                        rules.iter().for_each(|rule| {
+                            rule.host.as_ref().inspect(|host| {
+                                state.add_node(GenericObject {
+                                    id: ObjectIdentifier {
+                                        uid: (*host).clone(),
+                                        name: (*host).clone(),
+                                        namespace: ingress.metadata.namespace.clone(),
+                                        resource_version: None,
+                                    },
+                                    resource_type: ResourceType::Host,
+                                    attributes: None,
+                                });
+                                state.add_edge(host, ingress_id, Edge::Routes);
+                            });
+
+                            rule.http.as_ref().inspect(|http| {
+                                http.paths.iter().for_each(|p| {
+                                    p.backend.service.as_ref().inspect(|s| {
+                                        service_name_to_id.get(s.name.as_str()).inspect(|svc_id| {
+                                            state.add_edge(ingress_id, svc_id, Edge::Routes);
+                                        });
+                                    });
+                                });
+                            });
+                        })
+                    });
+                });
+            });
+        });
     }
 }

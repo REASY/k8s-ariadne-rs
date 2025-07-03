@@ -18,6 +18,7 @@ pub enum ResourceType {
     Ingress,
     Service,
     Endpoints,
+    Host,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -47,5 +48,5 @@ pub struct ObjectIdentifier {
 pub struct GenericObject {
     pub id: ObjectIdentifier,
     pub resource_type: ResourceType,
-    pub attributes: Box<ResourceAttributes>,
+    pub attributes: Option<Box<ResourceAttributes>>,
 }

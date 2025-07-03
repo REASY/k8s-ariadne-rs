@@ -110,13 +110,13 @@
 
 <script>
     // --- 1. Data and Color Scales ---
-    const node_domain = ['Node', 'Pod', 'Deployment', 'StatefulSet', 'ReplicaSet', 'DaemonSet', 'PersistentVolume', 'PersistentVolumeClaim', 'Ingress', 'Service', 'Endpoints'];
-    const edge_domain = ["Owns", "Selects", "Hosts", "Claims", "Binds", "References"];
+    const node_domain = ['Node', 'Pod', 'Deployment', 'StatefulSet', 'ReplicaSet', 'DaemonSet', 'PersistentVolume', 'PersistentVolumeClaim', 'Ingress', 'Service', 'Endpoints', "Host"];
+    const edge_domain = ["Owns", "Selects", "Hosts", "Claims", "Binds", "References", "Routes"];
 
-    const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7'];
+    const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#6EA7B7'];
     const node_color = d3.scaleOrdinal(node_domain, node_color_range);
 
-    const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7'];
+    const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7', '#A155F7'];
     const edge_color = d3.scaleOrdinal(edge_domain, edge_color_range);
 
     const graph_url = "http://127.0.0.1:18080/v1/graph";
