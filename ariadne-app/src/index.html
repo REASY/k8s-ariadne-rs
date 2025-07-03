@@ -219,7 +219,14 @@
         node.append("text")
             .attr("class", "label")
             .attr("y", 20)
-            .text(d => d.name.length > 15 ? d.name.substring(0, 12) + '...' : d.name);
+            .text(d => {
+                if (d.node_type === "Host") {
+                    return d.name;
+                }
+                else {
+                    return d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name
+                }
+            });
 
         // Add tooltips
         node.on("mouseover", (event, d) => {
