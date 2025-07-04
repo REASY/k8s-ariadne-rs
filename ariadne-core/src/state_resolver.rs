@@ -261,6 +261,8 @@ impl ClusterStateResolver {
             Self::pvc_to_pv(&snapshot.persistent_volumes, &mut state);
 
             Self::ingress_to_service(&snapshot.ingresses, &snapshot.services, &mut state);
+
+            Self::endpoint_to_pod(&snapshot.endpoints, &mut state);
         }
         state
     }
@@ -391,6 +393,38 @@ impl ClusterStateResolver {
                                 });
                             });
                         })
+                    });
+                });
+            });
+        });
+    }
+
+    fn endpoint_to_pod(endpoints: &[Endpoints], state: &mut ClusterState) {
+        endpoints.iter().for_each(|endpoint| {
+            endpoint.metadata.uid.as_ref().inspect(|endpoint_id| {
+                endpoint.subsets.as_ref().inspect(|subsets| {
+                    subsets.iter().for_each(|subset| {
+                        subset.addresses.iter().for_each(|addresses| {
+                            addresses.iter().for_each(|address| {
+                                address.target_ref.as_ref().inspect(|target_ref| {
+                                    target_ref.uid.as_ref().inspect(|target_id| {
+                                        state.add_edge(endpoint_id, target_id, Edge::References);
+                                    });
+                                });
+                                let host = address.ip.as_str();
+                                state.add_node(GenericObject {
+                                    id: ObjectIdentifier {
+                                        uid: address.ip.clone(),
+                                        name: address.ip.clone(),
+                                        namespace: endpoint.metadata.namespace.clone(),
+                                        resource_version: None,
+                                    },
+                                    resource_type: ResourceType::Host,
+                                    attributes: None,
+                                });
+                                state.add_edge(host, endpoint_id, Edge::Routes);
+                            });
+                        });
                     });
                 });
             });
