@@ -44,13 +44,13 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
 }
 
 async fn fetch_state(
+    namespace: String,
+    cluster: Option<String>,
     cluster_state: SharedClusterState,
     token: CancellationToken,
 ) -> errors::Result<()> {
     info!("Starting fetch_state");
     let mut id: usize = 0;
-    let cluster = std::env::var("KUBE_CONTEXT").ok();
-    let namespace = std::env::var("KUBE_NAMESPACE").unwrap();
     let kube_opts = KubeConfigOptions {
         context: cluster,
         cluster: None,
@@ -79,6 +79,10 @@ async fn fetch_state(
 async fn main() -> errors::Result<()> {
     logger::setup("INFO");
 
+    let cluster: Option<String> = std::env::var("KUBE_CONTEXT").ok();
+    let namespace: String = std::env::var("KUBE_NAMESPACE").expect("KUBE_NAMESPACE not set");
+    info!("Cluster: {:?}, namespace: {namespace}", cluster);
+
     let token = CancellationToken::new();
 
     let cluster_state: SharedClusterState =
@@ -86,7 +90,8 @@ async fn main() -> errors::Result<()> {
 
     let c0 = cluster_state.clone();
     let t0 = token.clone();
-    let fetch_state_handle = tokio::spawn(async move { fetch_state(c0, t0).await.unwrap() });
+    let fetch_state_handle =
+        tokio::spawn(async move { fetch_state(namespace, cluster, c0, t0).await.unwrap() });
     info!("Created fetch_state_handle");
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();

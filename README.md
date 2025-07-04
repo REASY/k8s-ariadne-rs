@@ -28,14 +28,16 @@ cargo build
 ## Run web app
 
 ```bash
-cargo run --release
-warning: `k8s-graph-rs` (bin "k8s-graph-rs") generated 1 warning
-    Finished `release` profile [optimized] target(s) in 0.31s
-     Running `target\release\k8s-graph-rs.exe`
-2024-05-21T13:39:38.683877Z  INFO main ThreadId(01) k8s_graph_rs: src\main.rs:85: Created fetch_state_handle
-2024-05-21T13:39:38.884332Z  INFO main ThreadId(01) k8s_graph_rs: src\main.rs:117: Server listening for HTTP on 127.0.0.1:18080
-2024-05-21T13:39:38.886641Z  INFO main ThreadId(01) k8s_graph_rs: src\main.rs:126: Server shutdown
-2024-05-21T13:39:38.886807Z  INFO main ThreadId(01) k8s_graph_rs: src\main.rs:50: Starting fetch_state
+KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
+
+   Compiling ariadne-app v0.1.0 (/Users/abalaian/github/REASY/k8s-graph-rs/ariadne-app)
+   Compiling ariadne-core v0.1.0 (/Users/abalaian/github/REASY/k8s-graph-rs/ariadne-core)
+    Finished `release` profile [optimized] target(s) in 9.22s
+     Running `target/release/ariadne-app`
+2025-07-04T07:00:09.904994Z  INFO main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:84: Cluster: Some("tools.hk-tools-2t"), namespace: pyroscope
+2025-07-04T07:00:09.905196Z  INFO main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:95: Created fetch_state_handle
+2025-07-04T07:00:09.905307Z  INFO tokio-runtime-worker ThreadId(15) ariadne_app: ariadne-app/src/main.rs:52: Starting fetch_state
+2025-07-04T07:00:10.105757Z  INFO                 main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:127: Server listening for HTTP on http://127.0.0.1:18080
 ```
 
 ## Open browser at http://127.0.0.1:18080/index.html

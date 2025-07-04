@@ -7,7 +7,7 @@ use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet}
 use k8s_openapi::api::core::v1::{
     Endpoints, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
 };
-use k8s_openapi::api::networking::v1::{Ingress, IngressRule};
+use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::Resource;
 use kube::api::ListParams;
 use kube::config::KubeConfigOptions;
@@ -16,8 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::fs;
-use std::sync::LazyLock;
+use tracing::log;
 
 pub struct ClusterStateResolver {
     node_api: Api<Node>,
@@ -31,6 +30,7 @@ pub struct ClusterStateResolver {
     ingress_api: Api<Ingress>,
     service_api: Api<Service>,
     endpoints_api: Api<Endpoints>,
+    #[allow(unused)]
     should_export_snapshot: bool,
 }
 
@@ -49,9 +49,10 @@ struct ClusterSnapshot {
     endpoints: Vec<Endpoints>,
 }
 
-static CLUSTER_STATE: LazyLock<ClusterSnapshot> = LazyLock::new(|| {
+#[allow(unused)]
+static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
     if false {
-        let bytes = fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
+        let bytes = std::fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
         ClusterSnapshot {
@@ -91,7 +92,10 @@ impl ClusterStateResolver {
     }
 
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
-        let nodes: Vec<Node> = Self::get_object(&self.node_api).await?;
+        let nodes: Vec<Node> = Self::get_object(&self.node_api).await.or_else(|err| {
+            log::error!("Failed to get nodes: {}", err);
+            Result::Ok(vec![])
+        })?;
         let pods: Vec<Pod> = Self::get_object(&self.pod_api).await?;
         let deployments: Vec<Deployment> = Self::get_object(&self.deployment_api).await?;
         let stateful_sets: Vec<StatefulSet> = Self::get_object(&self.stateful_set_api).await?;
@@ -99,7 +103,12 @@ impl ClusterStateResolver {
         let daemon_sets: Vec<DaemonSet> = Self::get_object(&self.daemon_set_api).await?;
 
         let persistent_volumes: Vec<PersistentVolume> =
-            Self::get_object(&self.persistent_volume_api).await?;
+            Self::get_object(&self.persistent_volume_api)
+                .await
+                .or_else(|err| {
+                    log::error!("Failed to get PVs: {}", err);
+                    Result::Ok(vec![])
+                })?;
         let persistent_volume_claims: Vec<PersistentVolumeClaim> =
             Self::get_object(&self.persistent_volume_claim_api).await?;
 
@@ -297,13 +306,17 @@ impl ClusterStateResolver {
             match node_uid {
                 None => {}
                 Some(node_name) => {
-                    let node_uid = node_name_to_node.get(node_name).unwrap();
-                    pod.metadata
-                        .uid
+                    node_name_to_node
+                        .get(node_name)
                         .as_ref()
-                        .map(|x| x.as_str())
-                        .inspect(|pod_uid| {
-                            state.add_edge(node_uid, pod_uid, Edge::Hosts);
+                        .inspect(|node_uid| {
+                            pod.metadata
+                                .uid
+                                .as_ref()
+                                .map(|x| x.as_str())
+                                .inspect(|pod_uid| {
+                                    state.add_edge(node_uid, pod_uid, Edge::Hosts);
+                                });
                         });
                 }
             }
