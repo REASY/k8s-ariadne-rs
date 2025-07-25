@@ -125,6 +125,7 @@ async fn main() -> errors::Result<()> {
     let http_addr: SocketAddr = format!("{}:{}", "127.0.0.1", "18080").parse().unwrap();
 
     info!("Server listening for HTTP on http://{}", &http_addr);
+    info!("Index page is on http://{}/index.html", &http_addr);
     let svc = route.into_make_service_with_connect_info::<SocketAddr>();
     let http_listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
     let f = tokio::spawn(async move {

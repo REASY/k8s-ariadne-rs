@@ -1,4 +1,4 @@
-use ariadne_core::prelude::AriadneError;
+use ariadne_core::errors::AriadneError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;

@@ -1,21 +1,10 @@
 use crate::id_gen::{GetNextIdResult, IdGen};
-use crate::types::{GenericObject, ResourceType};
+use crate::types::{Edge, GenericObject, ResourceType};
 use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub enum Edge {
-    Owns,       // e.g., Deployment → Pod
-    Selects,    // e.g., Service → Pod via labels
-    Hosts,      // e.g., Node → Pod
-    Claims,     // e.g., Pod → PersistentVolumeClaim
-    Binds,      // e.g., PersistentVolumeClaim → PersistentVolume
-    References, // e.g., Pod → ConfigMap/Secret
-    Routes,     // e.g., Ingress → Service
-}
 
 pub type NodeId = u32;
 
