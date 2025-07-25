@@ -461,9 +461,9 @@ impl ClusterStateResolver {
                                     )),
                                 });
                                 state.add_edge(
-                                    endpoints_id,
                                     &endpoint_address_uid,
-                                    Edge::HasEndpoint,
+                                    endpoints_id,
+                                    Edge::ListedIn,
                                 );
 
                                 address.target_ref.as_ref().inspect(|target_ref| {

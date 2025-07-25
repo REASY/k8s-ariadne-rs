@@ -135,10 +135,10 @@
                 const node_domain = graphMetadata.resource_types;
                 const edge_domain = graphMetadata.edge_types;
 
-                const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#6EA7B7'];
+                const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#6EA7B7', '#84CC16', '#D946EF', '#14B8A6', '#8B5CF6', '#F59E0B', '#DC2626', '#64748B'];
                 const node_color = d3.scaleOrdinal(node_domain, node_color_range);
 
-                const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7', '#A155F7'];
+                const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7', '#A155F7', '#EC4899', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#84CC16', '#D946EF'];
                 const edge_color = d3.scaleOrdinal(edge_domain, edge_color_range);
 
                 // To use the fetch function, uncomment the line below and comment out the `sampleData` line.
@@ -209,6 +209,16 @@
             .style("stroke", d => edge_color(d.edge_type))
             .attr("marker-end", d => `url(#arrow-${d.edge_type.replace(/\s+/g, '-')})`);
 
+        link.on("mouseover", (event, d) => {
+            tooltip.transition().duration(200).style("opacity", .9);
+            tooltip.html(`<strong>${d.edge_type}</strong>`)
+                .style("left", (event.pageX + 15) + "px")
+                .style("top", (event.pageY - 28) + "px");
+        })
+            .on("mouseout", () => {
+                tooltip.transition().duration(500).style("opacity", 0);
+            });
+
         // Create nodes
         const node = g.append("g")
             .attr("class", "nodes")
@@ -225,7 +235,7 @@
             .attr("class", "label")
             .attr("y", 20)
             .text(d => {
-                if (d.node_type === "Host") {
+                if (d.node_type === "Host" || d.node_type === "EndpointAddress") {
                     return d.name;
                 } else {
                     return d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name
