@@ -63,7 +63,7 @@ impl KubeClientImpl {
             deployment_api: Api::namespaced(client.clone(), namespace),
             stateful_set_api: Api::namespaced(client.clone(), namespace),
             replica_set_api: Api::namespaced(client.clone(), namespace),
-            daemon_set_api: Api::all(client.clone()),
+            daemon_set_api: Api::namespaced(client.clone(), namespace),
             job_api: Api::namespaced(client.clone(), namespace),
             ingress_api: Api::namespaced(client.clone(), namespace),
             service_api: Api::namespaced(client.clone(), namespace),
