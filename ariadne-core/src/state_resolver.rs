@@ -49,8 +49,8 @@ struct ClusterSnapshot {
 
 #[allow(unused)]
 static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
-    if false {
-        let bytes = std::fs::read("/home/user/Downloads/snapshot_1751206570696.json").unwrap();
+    if true {
+        let bytes = std::fs::read("/home/user/Downloads/snapshot.json").unwrap();
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
         ClusterSnapshot {
@@ -380,7 +380,7 @@ impl ClusterStateResolver {
                                 let host_uid = format!("{}_{}", ingress_id, host);
                                 state.add_node(GenericObject {
                                     id: ObjectIdentifier {
-                                        uid: host_uid,
+                                        uid: host_uid.clone(),
                                         name: (*host).clone(),
                                         namespace: ingress.metadata.namespace.clone(),
                                         resource_version: None,
@@ -388,7 +388,7 @@ impl ClusterStateResolver {
                                     resource_type: ResourceType::Host,
                                     attributes: None,
                                 });
-                                state.add_edge(ingress_id, host, Edge::ClaimsHost);
+                                state.add_edge(&host_uid, ingress_id, Edge::IsClaimedBy);
                             });
 
                             rule.http.as_ref().inspect(|http| {

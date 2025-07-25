@@ -57,7 +57,7 @@ pub enum Edge {
     Selects,        // e.g., Service -> Pod
     DefinesBackend, // e.g., Ingress -> IngressBackend
     TargetsService, // e.g., IngressBackend -> Service
-    ClaimsHost,     // e.g., Ingress -> Host
+    IsClaimedBy,    // e.g., Host -> Ingress
     HasEndpoint,    // e.g., Endpoints -> EndpointAddress
     IsAddressOf,    // e.g., EndpointAddress -> Pod
 
