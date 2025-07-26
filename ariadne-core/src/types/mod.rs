@@ -29,6 +29,7 @@ pub enum ResourceType {
     ConfigMap,
 
     // Storage
+    Provisioner,
     StorageClass,
     PersistentVolumeClaim,
     PersistentVolume,
@@ -69,8 +70,10 @@ pub enum Edge {
     UsesIdentity, // e.g., Pod -> ServiceAccount
 
     // Storage
-    ClaimsVolume, // e.g., Pod → PersistentVolumeClaim
-    BoundTo,      // e.g., PersistentVolumeClaim → PersistentVolume
+    ClaimsVolume,     // e.g., Pod → PersistentVolumeClaim
+    BoundTo,          // e.g., PersistentVolumeClaim → PersistentVolume
+    UsesProvisioner,  // e.g., StorageClass -> Provisioner
+    UsesStorageClass, // e.g., PersistentVolume -> StorageClass
 
     // Policy
     AppliesTo, // e.g., NetworkPolicy -> Pod
@@ -113,6 +116,9 @@ pub enum ResourceAttributes {
     },
     ConfigMap {
         config_map: ConfigMap,
+    },
+    Provisioner {
+        provisioner: String,
     },
     StorageClass {
         storage_class: StorageClass,
