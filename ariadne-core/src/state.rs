@@ -31,9 +31,11 @@ impl GraphVertex {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GraphEdge {
-    source: String,
-    target: String,
-    edge_type: Edge,
+    pub source: String,
+    pub source_type: ResourceType,
+    pub target: String,
+    pub target_type: ResourceType,
+    pub edge_type: Edge,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,23 +105,13 @@ impl ClusterState {
     }
 
     pub fn to_directed_graph(&self) -> DirectedGraph {
-        let mut vertices: Vec<GraphVertex> = Vec::with_capacity(self.graph.node_count());
-        self.graph.nodes().for_each(|vertex_id| {
-            let node = self.id_to_node.get(&vertex_id).unwrap();
-            vertices.push(GraphVertex::new(node));
-        });
+        let mut vertices: Vec<GraphVertex> = self
+            .get_nodes()
+            .map(|node| GraphVertex::new(node))
+            .collect();
         vertices.sort_by_key(|v| v.id.clone());
 
-        let mut edges: Vec<GraphEdge> = Vec::with_capacity(self.graph.edge_count());
-        self.graph.all_edges().for_each(|(from, to, t)| {
-            let from = String::from(self.id_gen.get_by_id(from).unwrap());
-            let to = String::from(self.id_gen.get_by_id(to).unwrap());
-            edges.push(GraphEdge {
-                source: from,
-                target: to,
-                edge_type: t.clone(),
-            });
-        });
+        let mut edges: Vec<GraphEdge> = self.get_edges().collect();
         edges.sort_by(|a, b| {
             let key_a = (a.source.as_str(), a.target.as_str(), a.edge_type.clone());
             let key_b = (b.source.as_str(), b.target.as_str(), b.edge_type.clone());
@@ -131,6 +123,28 @@ impl ClusterState {
 
     fn get_node(&mut self, uid: &str) -> Option<u32> {
         self.id_gen.get_id(uid)
+    }
+
+    pub fn get_nodes(&self) -> impl Iterator<Item = &GenericObject> {
+        self.graph
+            .nodes()
+            .map(|id| self.id_to_node.get(&id).unwrap())
+    }
+
+    pub fn get_edges(&self) -> impl Iterator<Item = GraphEdge> + use<'_> {
+        self.graph.all_edges().map(|(from, to, t)| {
+            let source = String::from(self.id_gen.get_by_id(from).unwrap());
+            let source_resource_type = self.id_to_node.get(&from).unwrap().resource_type.clone();
+            let target = String::from(self.id_gen.get_by_id(to).unwrap());
+            let target_resource_type = self.id_to_node.get(&to).unwrap().resource_type.clone();
+            GraphEdge {
+                source,
+                source_type: source_resource_type,
+                target,
+                target_type: target_resource_type,
+                edge_type: t.clone(),
+            }
+        })
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::memgraph;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -15,6 +16,8 @@ pub enum ErrorKind {
     KubeClientError(#[from] kube::Error),
     #[error("KubeconfigError: {0}")]
     KubeconfigError(#[from] kube::config::KubeconfigError),
+    #[error("MemgraphError: {0}")]
+    MemgraphError(#[from] memgraph::MemgraphError),
 }
 
 impl<E> From<E> for AriadneError

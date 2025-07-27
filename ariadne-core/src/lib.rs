@@ -7,6 +7,8 @@ pub mod prelude {
 
 pub mod id_gen;
 pub mod kube_client;
+pub mod memgraph;
+pub mod model;
 pub mod state;
 pub mod state_resolver;
 pub mod types;

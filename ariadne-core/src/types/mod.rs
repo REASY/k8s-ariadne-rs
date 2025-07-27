@@ -9,7 +9,7 @@ use k8s_openapi::api::storage::v1::StorageClass;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, EnumIter)]
+#[derive(Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Clone, EnumIter)]
 pub enum ResourceType {
     // Core Workloads
     Pod,

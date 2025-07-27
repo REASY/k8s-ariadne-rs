@@ -1,3 +1,4 @@
+use ariadne_core::memgraph;
 use ariadne_core::state::{ClusterState, SharedClusterState};
 use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
@@ -7,6 +8,7 @@ use axum::routing::get;
 use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
 use kube::config::KubeConfigOptions;
+use rsmgclient::ConnectParams;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
 use std::sync::Mutex;
@@ -64,11 +66,20 @@ async fn fetch_state(
         let new_state = resolver.resolve().await?;
 
         {
+            let mut mem_graph = memgraph::Memgraph::try_new(ConnectParams {
+                host: Some(String::from("localhost")),
+                ..Default::default()
+            })?;
+
+            mem_graph.create(&new_state)?;
+        }
+
+        {
             let mut old_locked_state = cluster_state.lock().unwrap();
             *old_locked_state = new_state;
         }
 
-        sleep(Duration::from_millis(1000)).await;
+        sleep(Duration::from_millis(400000)).await;
         id += 1;
     }
     info!("Stopped fetch_state, number of loops {id}");
