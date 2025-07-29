@@ -146,6 +146,14 @@ impl ClusterState {
             }
         })
     }
+
+    pub fn get_node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn get_edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
 }
 
 pub type SharedClusterState = Arc<Mutex<ClusterState>>;

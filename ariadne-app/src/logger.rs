@@ -5,7 +5,8 @@ use tracing_subscriber::EnvFilter;
 
 pub fn setup(log_level: &str) {
     if env::var_os("RUST_LOG").is_none() {
-        let env = format!("ariadne_app={log_level},tower_http=WARN,hyper=WARN");
+        let env =
+            format!("ariadne_app={log_level},ariadne_core={log_level},tower_http=WARN,hyper=WARN");
         env::set_var("RUST_LOG", env);
     }
     let subscriber = get_subscriber();

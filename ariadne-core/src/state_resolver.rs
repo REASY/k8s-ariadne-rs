@@ -138,7 +138,7 @@ impl ClusterStateResolver {
     }
 
     pub async fn resolve(&self) -> Result<ClusterState> {
-        let snapshot = &CLUSTER_STATE; // self.get_snapshot().await?;
+        let snapshot = self.get_snapshot().await?;
         let state = Self::create_state(&snapshot);
         Ok(state)
     }
