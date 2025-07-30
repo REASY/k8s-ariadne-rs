@@ -201,16 +201,17 @@ impl ClusterStateResolver {
         for item in &snapshot.storage_classes {
             let provisoner = &item.provisioner;
             if unique_provisoners.insert(&item.provisioner) {
+                let obj_id = ObjectIdentifier {
+                    uid: provisoner.clone(),
+                    name: provisoner.clone(),
+                    namespace: item.metadata.namespace.clone(),
+                    resource_version: None,
+                };
                 state.add_node(GenericObject {
-                    id: ObjectIdentifier {
-                        uid: provisoner.clone(),
-                        name: provisoner.clone(),
-                        namespace: item.metadata.namespace.clone(),
-                        resource_version: None,
-                    },
+                    id: obj_id.clone(),
                     resource_type: ResourceType::Provisioner,
                     attributes: Some(Box::new(ResourceAttributes::Provisioner {
-                        provisioner: provisoner.clone(),
+                        provisioner: Provisioner::new(&obj_id, provisoner.as_str()),
                     })),
                 });
             }
@@ -412,15 +413,18 @@ impl ClusterStateResolver {
                         rules.iter().for_each(|rule| {
                             rule.host.as_ref().inspect(|host| {
                                 let host_uid = format!("{}_{}", ingress_id, host);
+                                let obj_id = ObjectIdentifier {
+                                    uid: host_uid.clone(),
+                                    name: (*host).clone(),
+                                    namespace: ingress.metadata.namespace.clone(),
+                                    resource_version: None,
+                                };
                                 state.add_node(GenericObject {
-                                    id: ObjectIdentifier {
-                                        uid: host_uid.clone(),
-                                        name: (*host).clone(),
-                                        namespace: ingress.metadata.namespace.clone(),
-                                        resource_version: None,
-                                    },
+                                    id: obj_id.clone(),
                                     resource_type: ResourceType::Host,
-                                    attributes: None,
+                                    attributes: Some(Box::new(ResourceAttributes::Host {
+                                        host: Host::new(&obj_id, host),
+                                    })),
                                 });
                                 state.add_edge(&host_uid, ingress_id, Edge::IsClaimedBy);
                             });
@@ -434,17 +438,20 @@ impl ClusterStateResolver {
                                         // Prepare for the edges:
                                         // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
                                         // 2. (IngressBackend) [:TargetsService]-> Service
+                                        let obj_id = ObjectIdentifier {
+                                            uid: ingress_svc_backend_uid.clone(),
+                                            name: service_name.to_string(),
+                                            namespace: ingress.metadata.namespace.clone(),
+                                            resource_version: None,
+                                        };
+
                                         state.add_node(GenericObject {
-                                            id: ObjectIdentifier {
-                                                uid: ingress_svc_backend_uid.clone(),
-                                                name: service_name.to_string(),
-                                                namespace: ingress.metadata.namespace.clone(),
-                                                resource_version: None,
-                                            },
+                                            id: obj_id.clone(),
                                             resource_type: ResourceType::IngressServiceBackend,
                                             attributes: Some(Box::new(
                                                 ResourceAttributes::IngressServiceBackend {
-                                                    ingress_service_backend: (*s).clone(),
+                                                    ingress_service_backend:
+                                                        IngressServiceBackend::new(&obj_id, &s),
                                                 },
                                             )),
                                         });
@@ -480,17 +487,20 @@ impl ClusterStateResolver {
                             addresses.iter().for_each(|address| {
                                 let endpoint_address_uid =
                                     format!("{}_{}", endpoints_id, address.ip.as_str());
+                                let obj_id = ObjectIdentifier {
+                                    uid: endpoint_address_uid.clone(),
+                                    name: address.ip.clone(),
+                                    namespace: endpoints.metadata.namespace.clone(),
+                                    resource_version: None,
+                                };
                                 state.add_node(GenericObject {
-                                    id: ObjectIdentifier {
-                                        uid: endpoint_address_uid.clone(),
-                                        name: address.ip.clone(),
-                                        namespace: endpoints.metadata.namespace.clone(),
-                                        resource_version: None,
-                                    },
+                                    id: obj_id.clone(),
                                     resource_type: ResourceType::EndpointAddress,
                                     attributes: Some(Box::new(
                                         ResourceAttributes::EndpointAddress {
-                                            endpoint_address: address.clone(),
+                                            endpoint_address: EndpointAddress::new(
+                                                &obj_id, &address,
+                                            ),
                                         },
                                     )),
                                 });
