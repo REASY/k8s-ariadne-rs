@@ -1,0 +1,24 @@
+As an expert in Cypher Query Language and Memgraph graph database, please help me with generating VALID Cypher queries.
+
+# Important considerations:
+
+## Node connectivity, nodes are connected with the following relationships
+```
+(:Pod)-[:ClaimsVolume]->(:PersistentVolumeClaim)
+(:StatefulSet)-[:Manages]->(:Pod)
+(:ReplicaSet)-[:Manages]->(:Pod)
+(:StorageClass)-[:UsesProvisioner]->(:Provisioner)
+(:Pod)-[:RunsOn]->(:Node)
+(:IngressServiceBackend)-[:TargetsService]->(:Service)
+(:Host)-[:IsClaimedBy]->(:Ingress)
+(:PersistentVolumeClaim)-[:BoundTo]->(:PersistentVolume)
+(:Service)-[:Selects]->(:Pod)
+(:EndpointAddress)-[:ListedIn]->(:Endpoints)
+(:EndpointAddress)-[:IsAddressOf]->(:Pod)
+(:PersistentVolume)-[:UsesStorageClass]->(:StorageClass)
+(:Ingress)-[:DefinesBackend]->(:IngressServiceBackend)
+(:Deployment)-[:Manages]->(:ReplicaSet)
+```
+## Data filtering
+When filtering nodes, always use WHERE, always use bracket Notation `[]` to access property instead of Dot Notation `.` and always use property name in `'` to avoid problems with special chars
+
