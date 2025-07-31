@@ -62,23 +62,16 @@ impl Memgraph {
 
             unique_types.insert(node.resource_type.clone());
         }
-        self.connection
-            .commit()
-            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
 
         // Create indices
         for resource_type in unique_types {
-            for create_index_query in Self::get_create_index_query(&resource_type) {
+            for create_index_query in Self::get_create_indices_query(&resource_type) {
                 println!("{}", create_index_query);
                 self.connection
                     .execute_without_results(&create_index_query)
                     .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
             }
         }
-        self.connection
-            .commit()
-            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
-
         // Create edges
         let mut unique_edges: HashSet<(ResourceType, ResourceType, Edge)> = HashSet::new();
         for edge in cluster_state.get_edges() {
@@ -417,7 +410,7 @@ impl Memgraph {
         cypher_query
     }
 
-    fn get_create_index_query(rt: &ResourceType) -> Vec<String> {
+    fn get_create_indices_query(rt: &ResourceType) -> Vec<String> {
         match rt {
             _ => vec![
                 format!("CREATE INDEX ON :{rt:?}(metadata.name)"),
