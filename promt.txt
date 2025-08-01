@@ -19,6 +19,15 @@ As an expert in Cypher Query Language and Memgraph graph database, please help m
 (:Ingress)-[:DefinesBackend]->(:IngressServiceBackend)
 (:Deployment)-[:Manages]->(:ReplicaSet)
 ```
-## Data filtering
-When filtering nodes, always use WHERE, always use bracket Notation `[]` to access property instead of Dot Notation `.` and always use property name in `'` to avoid problems with special chars
-
+## Rules for Cypher query generation
+When generating Cypher queries, follow these rules:
+1. Variable Usage:
+Always reference variables directly, without square brackets.
+- Correct: p['status']['phase']
+- Incorrect: [p]['status']['phase']
+2. Filtering:
+Use only the WHERE clause for filtering nodes or relationships. Do not use WITH ... WHERE or other filtering mechanisms.
+3. Property Names:
+Always use single quotes (') around property names when accessing properties, especially if they may contain special characters.
+- Correct: p['status']['phase']
+- Incorrect: p[status][phase] or p["status"]["phase"]
