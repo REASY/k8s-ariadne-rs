@@ -273,3 +273,29 @@ Always reference variables directly, without square brackets.
 Always use single quotes (') around property names when accessing properties, especially if they may contain special characters.
 - Correct: p['status']['phase']
 - Incorrect: p[status][phase] or p["status"]["phase"]
+
+## Hints
+When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Below is an example of query that properly derived the total CPU and RAM request/limits
+```cypher
+MATCH (p:Pod)
+UNWIND p['spec']['containers'] AS container
+WITH p, container['resources']['requests'] AS reqs, container['resources']['limits'] AS lims
+WITH p, reqs, lims,
+  CASE
+    WHEN lims['memory'] ENDS WITH 'Gi' THEN toFloat(replace(lims['memory'], 'Gi', '')) * 1024
+    WHEN lims['memory'] ENDS WITH 'Mi' THEN toFloat(replace(lims['memory'], 'Mi', ''))
+    WHEN lims['memory'] ENDS WITH 'Ki' THEN toFloat(replace(lims['memory'], 'Ki', '')) / 1024
+    ELSE toFloat(lims['memory'])
+  END AS lim_memory_mib,
+  CASE
+    WHEN reqs['memory'] ENDS WITH 'Gi' THEN toFloat(replace(reqs['memory'], 'Gi', '')) * 1024
+    WHEN reqs['memory'] ENDS WITH 'Mi' THEN toFloat(replace(reqs['memory'], 'Mi', ''))
+    WHEN reqs['memory'] ENDS WITH 'Ki' THEN toFloat(replace(reqs['memory'], 'Ki', '')) / 1024
+    ELSE toFloat(reqs['memory'])
+  END AS req_memory_mib
+RETURN p.metadata.name,
+  SUM(req_memory_mib),
+  SUM(lim_memory_mib),
+  SUM(toFloat(reqs['cpu'])),
+  SUM(toFloat(lims['cpu']))
+```
