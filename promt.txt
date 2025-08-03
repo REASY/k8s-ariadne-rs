@@ -4,25 +4,27 @@ As an expert in Cypher Query Language and Memgraph graph database, please help m
 
 ## Detailed graph schema
 Node properties:
-  Provisioner: 2 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
-  IngressServiceBackend: 3 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, port: #/definitions/io.k8s.api.networking.v1.ServiceBackendPort)
-  EndpointAddress: 5 properties (hostname: STRING, ip: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, nodeName: STRING, targetRef: #/definitions/io.k8s.api.core.v1.ObjectReference)
-  Host: 2 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
-  Pod: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.PodSpec, status: #/definitions/io.k8s.api.core.v1.PodStatus)
-  Deployment: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DeploymentSpec, status: #/definitions/io.k8s.api.apps.v1.DeploymentStatus)
-  StatefulSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.StatefulSetSpec, status: #/definitions/io.k8s.api.apps.v1.StatefulSetStatus)
-  ReplicaSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.ReplicaSetSpec, status: #/definitions/io.k8s.api.apps.v1.ReplicaSetStatus)
-  DaemonSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DaemonSetSpec, status: #/definitions/io.k8s.api.apps.v1.DaemonSetStatus)
-  Job: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.batch.v1.JobSpec, status: #/definitions/io.k8s.api.batch.v1.JobStatus)
-  Ingress: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.IngressSpec, status: #/definitions/io.k8s.api.networking.v1.IngressStatus)
-  Service: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.ServiceSpec, status: #/definitions/io.k8s.api.core.v1.ServiceStatus)
-  Endpoints: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, subsets: [#/definitions/io.k8s.api.core.v1.EndpointSubset])
-  NetworkPolicy: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.NetworkPolicySpec)
+  Cluster: 4 properties (cluster_url: STRING, info: #/definitions/io.k8s.apimachinery.pkg.version.Info, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
   ConfigMap: 6 properties (apiVersion: STRING, binaryData: MAP, data: MAP, immutable: BOOLEAN, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
-  StorageClass: 10 properties (allowVolumeExpansion: BOOLEAN, allowedTopologies: [#/definitions/io.k8s.api.core.v1.TopologySelectorTerm], apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, mountOptions: [STRING], parameters: MAP, provisioner: STRING, reclaimPolicy: STRING, volumeBindingMode: STRING)
-  PersistentVolume: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.PersistentVolumeSpec, status: #/definitions/io.k8s.api.core.v1.PersistentVolumeStatus)
+  DaemonSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DaemonSetSpec, status: #/definitions/io.k8s.api.apps.v1.DaemonSetStatus)
+  Deployment: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DeploymentSpec, status: #/definitions/io.k8s.api.apps.v1.DeploymentStatus)
+  EndpointAddress: 5 properties (hostname: STRING, ip: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, nodeName: STRING, targetRef: #/definitions/io.k8s.api.core.v1.ObjectReference)
+  Endpoints: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, subsets: [#/definitions/io.k8s.api.core.v1.EndpointSubset])
+  Host: 2 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
+  Ingress: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.IngressSpec, status: #/definitions/io.k8s.api.networking.v1.IngressStatus)
+  IngressServiceBackend: 3 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, port: #/definitions/io.k8s.api.networking.v1.ServiceBackendPort)
+  Job: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.batch.v1.JobSpec, status: #/definitions/io.k8s.api.batch.v1.JobStatus)
+  Namespace: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.NamespaceSpec, status: #/definitions/io.k8s.api.core.v1.NamespaceStatus)
+  NetworkPolicy: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.NetworkPolicySpec)
   Node: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.NodeSpec, status: #/definitions/io.k8s.api.core.v1.NodeStatus)
+  PersistentVolume: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.PersistentVolumeSpec, status: #/definitions/io.k8s.api.core.v1.PersistentVolumeStatus)
+  Pod: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.PodSpec, status: #/definitions/io.k8s.api.core.v1.PodStatus)
+  Provisioner: 2 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
+  ReplicaSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.ReplicaSetSpec, status: #/definitions/io.k8s.api.apps.v1.ReplicaSetStatus)
+  Service: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.ServiceSpec, status: #/definitions/io.k8s.api.core.v1.ServiceStatus)
   ServiceAccount: 6 properties (apiVersion: STRING, automountServiceAccountToken: BOOLEAN, imagePullSecrets: [#/definitions/io.k8s.api.core.v1.LocalObjectReference], kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, secrets: [#/definitions/io.k8s.api.core.v1.ObjectReference])
+  StatefulSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.StatefulSetSpec, status: #/definitions/io.k8s.api.apps.v1.StatefulSetStatus)
+  StorageClass: 10 properties (allowVolumeExpansion: BOOLEAN, allowedTopologies: [#/definitions/io.k8s.api.core.v1.TopologySelectorTerm], apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, mountOptions: [STRING], parameters: MAP, provisioner: STRING, reclaimPolicy: STRING, volumeBindingMode: STRING)
 Referenced types (used via `#/definitions/`):
   io.k8s.api.apps.v1.DaemonSetCondition: 5 properties (lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
   io.k8s.api.apps.v1.DaemonSetSpec: 5 properties (minReadySeconds: INTEGER, revisionHistoryLimit: INTEGER, selector: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, template: #/definitions/io.k8s.api.core.v1.PodTemplateSpec, updateStrategy: #/definitions/io.k8s.api.apps.v1.DaemonSetUpdateStrategy)
@@ -126,6 +128,9 @@ Referenced types (used via `#/definitions/`):
   io.k8s.api.core.v1.LocalVolumeSource: 2 properties (fsType: STRING, path: STRING)
   io.k8s.api.core.v1.ModifyVolumeStatus: 2 properties (status: STRING, targetVolumeAttributesClassName: STRING)
   io.k8s.api.core.v1.NFSVolumeSource: 3 properties (path: STRING, readOnly: BOOLEAN, server: STRING)
+  io.k8s.api.core.v1.NamespaceCondition: 5 properties (lastTransitionTime: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.core.v1.NamespaceSpec: 1 property (finalizers: [STRING])
+  io.k8s.api.core.v1.NamespaceStatus: 2 properties (conditions: [#/definitions/io.k8s.api.core.v1.NamespaceCondition], phase: STRING)
   io.k8s.api.core.v1.NodeAddress: 2 properties (address: STRING, type: STRING)
   io.k8s.api.core.v1.NodeAffinity: 2 properties (preferredDuringSchedulingIgnoredDuringExecution: [#/definitions/io.k8s.api.core.v1.PreferredSchedulingTerm], requiredDuringSchedulingIgnoredDuringExecution: #/definitions/io.k8s.api.core.v1.NodeSelector)
   io.k8s.api.core.v1.NodeCondition: 6 properties (lastHeartbeatTime: DATETIME_UTC, lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
@@ -242,23 +247,56 @@ Referenced types (used via `#/definitions/`):
   io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry: 7 properties (apiVersion: STRING, fieldsType: STRING, fieldsV1: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1, manager: STRING, operation: STRING, subresource: STRING, time: DATETIME_UTC)
   io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta: 15 properties (annotations: MAP, creationTimestamp: DATETIME_UTC, deletionGracePeriodSeconds: INTEGER, deletionTimestamp: DATETIME_UTC, finalizers: [STRING], generateName: STRING, generation: INTEGER, labels: MAP, managedFields: [#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry], name: STRING, namespace: STRING, ownerReferences: [#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference], resourceVersion: STRING, selfLink: STRING, uid: STRING)
   io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference: 6 properties (apiVersion: STRING, blockOwnerDeletion: BOOLEAN, controller: BOOLEAN, kind: STRING, name: STRING, uid: STRING)
+  io.k8s.apimachinery.pkg.version.Info: 9 properties (buildDate: STRING, compiler: STRING, gitCommit: STRING, gitTreeState: STRING, gitVersion: STRING, goVersion: STRING, major: STRING, minor: STRING, platform: STRING)
 
 ## Node connectivity, nodes are connected with the following relationships
 ```
-(:Pod)-[:ClaimsVolume]->(:PersistentVolumeClaim)
-(:StatefulSet)-[:Manages]->(:Pod)
-(:ReplicaSet)-[:Manages]->(:Pod)
-(:StorageClass)-[:UsesProvisioner]->(:Provisioner)
+(:ReplicaSet)-[:BelongsTo]->(:Namespace)
+(:Job)-[:BelongsTo]->(:Namespace)
+(:DaemonSet)-[:Manages]->(:Pod)
+(:Node)-[:Manages]->(:Pod)
+(:Job)-[:PartOf]->(:Cluster)
+(:Ingress)-[:PartOf]->(:Cluster)
+(:StatefulSet)-[:PartOf]->(:Cluster)
 (:Pod)-[:RunsOn]->(:Node)
+(:PersistentVolumeClaim)-[:PartOf]->(:Cluster)
+(:ServiceAccount)-[:BelongsTo]->(:Namespace)
+(:Node)-[:PartOf]->(:Cluster)
 (:IngressServiceBackend)-[:TargetsService]->(:Service)
-(:Host)-[:IsClaimedBy]->(:Ingress)
-(:PersistentVolumeClaim)-[:BoundTo]->(:PersistentVolume)
-(:Service)-[:Selects]->(:Pod)
-(:EndpointAddress)-[:ListedIn]->(:Endpoints)
-(:EndpointAddress)-[:IsAddressOf]->(:Pod)
 (:PersistentVolume)-[:UsesStorageClass]->(:StorageClass)
-(:Ingress)-[:DefinesBackend]->(:IngressServiceBackend)
+(:Pod)-[:PartOf]->(:Cluster)
+(:ServiceAccount)-[:PartOf]->(:Cluster)
+(:Service)-[:BelongsTo]->(:Namespace)
+(:PersistentVolumeClaim)-[:BoundTo]->(:PersistentVolume)
 (:Deployment)-[:Manages]->(:ReplicaSet)
+(:PersistentVolume)-[:PartOf]->(:Cluster)
+(:Namespace)-[:PartOf]->(:Cluster)
+(:EndpointAddress)-[:IsAddressOf]->(:Pod)
+(:StorageClass)-[:UsesProvisioner]->(:Provisioner)
+(:Host)-[:IsClaimedBy]->(:Ingress)
+(:Deployment)-[:BelongsTo]->(:Namespace)
+(:DaemonSet)-[:BelongsTo]->(:Namespace)
+(:StatefulSet)-[:BelongsTo]->(:Namespace)
+(:ConfigMap)-[:BelongsTo]->(:Namespace)
+(:Deployment)-[:PartOf]->(:Cluster)
+(:Ingress)-[:BelongsTo]->(:Namespace)
+(:Endpoints)-[:PartOf]->(:Cluster)
+(:StatefulSet)-[:Manages]->(:Pod)
+(:Service)-[:Selects]->(:Pod)
+(:ReplicaSet)-[:PartOf]->(:Cluster)
+(:Endpoints)-[:BelongsTo]->(:Namespace)
+(:StorageClass)-[:PartOf]->(:Cluster)
+(:Provisioner)-[:PartOf]->(:Cluster)
+(:Job)-[:Manages]->(:Pod)
+(:EndpointAddress)-[:ListedIn]->(:Endpoints)
+(:Pod)-[:ClaimsVolume]->(:PersistentVolumeClaim)
+(:Pod)-[:BelongsTo]->(:Namespace)
+(:ConfigMap)-[:PartOf]->(:Cluster)
+(:ReplicaSet)-[:Manages]->(:Pod)
+(:Ingress)-[:DefinesBackend]->(:IngressServiceBackend)
+(:PersistentVolumeClaim)-[:BelongsTo]->(:Namespace)
+(:Service)-[:PartOf]->(:Cluster)
+(:DaemonSet)-[:PartOf]->(:Cluster)
 ```
 ## Rules for Cypher query generation
 When generating Cypher queries, follow these rules:
@@ -275,19 +313,24 @@ Always use single quotes (') around property names when accessing properties, es
 - Incorrect: p[status][phase] or p["status"]["phase"]
 
 ## Hints
-When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Below is an example of query that properly derived the total CPU and RAM request/limits
+When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Limits and requests for memory are measured in bytes.
+It can be expresses memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. Or the power-of-two equivalents can be used: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: 128974848, 129e6, 129M,  128974848000m, 123Mi. Pay attention to the case of the suffixes.
+
+Below is an example of query that correctly derives the total CPU and RAM request/limits
 ```cypher
 MATCH (p:Pod)
 UNWIND p['spec']['containers'] AS container
 WITH p, container['resources']['requests'] AS reqs, container['resources']['limits'] AS lims
 WITH p, reqs, lims,
   CASE
+    WHEN lims['memory'] ENDS WITH 'Ti' THEN toFloat(replace(lims['memory'], 'Ti', '')) * 1024 * 1024
     WHEN lims['memory'] ENDS WITH 'Gi' THEN toFloat(replace(lims['memory'], 'Gi', '')) * 1024
     WHEN lims['memory'] ENDS WITH 'Mi' THEN toFloat(replace(lims['memory'], 'Mi', ''))
     WHEN lims['memory'] ENDS WITH 'Ki' THEN toFloat(replace(lims['memory'], 'Ki', '')) / 1024
     ELSE toFloat(lims['memory'])
   END AS lim_memory_mib,
   CASE
+    WHEN reqs['memory'] ENDS WITH 'Ti' THEN toFloat(replace(reqs['memory'], 'Ti', '')) * 1024 * 1024
     WHEN reqs['memory'] ENDS WITH 'Gi' THEN toFloat(replace(reqs['memory'], 'Gi', '')) * 1024
     WHEN reqs['memory'] ENDS WITH 'Mi' THEN toFloat(replace(reqs['memory'], 'Mi', ''))
     WHEN reqs['memory'] ENDS WITH 'Ki' THEN toFloat(replace(reqs['memory'], 'Ki', '')) / 1024

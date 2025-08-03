@@ -3,7 +3,7 @@ use clap::Parser;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Node, PersistentVolume, Pod, Service, ServiceAccount,
+    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -14,7 +14,7 @@ pub mod logger;
 mod schema;
 
 use crate::schema::{get_schema, write_schema_prompt, SchemaInfo};
-use ariadne_core::types::{EndpointAddress, Host, IngressServiceBackend, Provisioner};
+use ariadne_core::types::{Cluster, EndpointAddress, Host, IngressServiceBackend, Provisioner};
 use k8s_openapi::schemars::schema_for;
 
 shadow!(build);
@@ -47,6 +47,7 @@ fn main() {
         schema_for!(IngressServiceBackend),
         schema_for!(EndpointAddress),
         schema_for!(Host),
+        schema_for!(Cluster),
     ];
     let k8s_types: Vec<RootSchema> = vec![
         schema_for!(Pod),
@@ -63,6 +64,7 @@ fn main() {
         schema_for!(StorageClass),
         schema_for!(PersistentVolume),
         schema_for!(Node),
+        schema_for!(Namespace),
         schema_for!(ServiceAccount),
     ];
     let mut all_types = logical_types;
@@ -71,6 +73,7 @@ fn main() {
     for schema in all_types {
         derived_schema.push(get_schema(&schema));
     }
+    derived_schema.sort_by_key(|x| x.root_type.name.clone());
 
     let prompt = write_schema_prompt(derived_schema);
     println!("{}", prompt);

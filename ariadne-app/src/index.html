@@ -80,6 +80,12 @@
             display: flex;
             align-items: center;
             margin-bottom: 5px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .legend-item:not(.active) {
+            opacity: 0.5;
         }
 
         .legend-swatch {
@@ -205,7 +211,7 @@
             .selectAll("line")
             .data(links)
             .enter().append("line")
-            .attr("class", "link")
+            .attr("class", d => `link link-${d.edge_type.replace(/\s+/g, '-')}`)
             .style("stroke", d => edge_color(d.edge_type))
             .attr("marker-end", d => `url(#arrow-${d.edge_type.replace(/\s+/g, '-')})`);
 
@@ -308,7 +314,7 @@
         const nodeItems = nodeLegend.selectAll(".legend-item")
             .data(node_domain)
             .enter().append("div")
-            .attr("class", "legend-item");
+            .attr("class", "legend-item active")
 
         nodeItems.append("div")
             .attr("class", "legend-swatch")
@@ -320,11 +326,20 @@
 
         // Edge Legend
         const edgeLegend = d3.select("#edge-legend");
-        edgeLegend.append("h4").text("Edge Types");
+        edgeLegend.append("h4").text("Edge Types (click to toggle visibility)");
         const edgeItems = edgeLegend.selectAll(".legend-item")
             .data(edge_domain)
             .enter().append("div")
-            .attr("class", "legend-item");
+            .attr("class", "legend-item active")
+            .on("click", (event, d) => {
+                const item = d3.select(event.currentTarget);
+                const isActive = item.classed("active");
+                item.classed("active", !isActive);
+
+                const linksToToggle = d3.selectAll(`.link-${d.replace(/\s+/g, '-')}`);
+                linksToToggle.style("display", isActive ? "none" : null);
+            });
+
 
         edgeItems.append("div")
             .attr("class", "legend-swatch edge")

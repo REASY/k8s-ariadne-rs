@@ -16,6 +16,8 @@ pub enum ErrorKind {
     KubeClientError(#[from] kube::Error),
     #[error("KubeconfigError: {0}")]
     KubeconfigError(#[from] kube::config::KubeconfigError),
+    #[error("KubeconfigInferError: {0}")]
+    KubeconfigInferError(#[from] kube::config::InClusterError),
     #[error("MemgraphError: {0}")]
     MemgraphError(#[from] memgraph::MemgraphError),
 }

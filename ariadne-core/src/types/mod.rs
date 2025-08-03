@@ -1,7 +1,7 @@
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
@@ -36,6 +36,7 @@ pub enum ResourceType {
 
     // Cluster Infrastructure
     Node,
+    Namespace,
 
     // Identity & Access Control
     ServiceAccount,
@@ -44,10 +45,14 @@ pub enum ResourceType {
     IngressServiceBackend, //  Represents a backend in an Ingress spec
     EndpointAddress,       // Represents a single IP address in an Endpoints object
     Host,                  // Represents a hostname claimed by an Ingress
+    Cluster,               // Represents a cluster in which K8s objects exist
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, EnumIter)]
 pub enum Edge {
+    PartOf,    // e.g. Node -> Cluster
+    BelongsTo, // e.g. Pod -> Namespace
+
     // Workload Management
     Manages, // e.g., Deployment -> ReplicaSet -> Pod
 
@@ -81,6 +86,9 @@ pub enum Edge {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum ResourceAttributes {
+    Namespace {
+        namespace: Namespace,
+    },
     Node {
         node: Node,
     },
@@ -141,6 +149,9 @@ pub enum ResourceAttributes {
     Host {
         host: Host,
     },
+    Cluster {
+        cluster: Cluster,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq, Hash, Ord, PartialOrd)]
@@ -156,6 +167,111 @@ pub struct GenericObject {
     pub id: ObjectIdentifier,
     pub resource_type: ResourceType,
     pub attributes: Option<Box<ResourceAttributes>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Cluster {
+    pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+    pub name: String,
+    pub cluster_url: String,
+    pub info: k8s_openapi::apimachinery::pkg::version::Info,
+}
+impl Cluster {
+    pub fn new(
+        id: ObjectIdentifier,
+        server: &str,
+        info: k8s_openapi::apimachinery::pkg::version::Info,
+    ) -> Self {
+        let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+            annotations: None,
+            creation_timestamp: None,
+            deletion_grace_period_seconds: None,
+            deletion_timestamp: None,
+            finalizers: None,
+            generate_name: None,
+            generation: None,
+            labels: None,
+            managed_fields: None,
+            name: Some(id.name.to_string()),
+            namespace: None,
+            owner_references: None,
+            resource_version: id.resource_version.clone(),
+            self_link: None,
+            uid: Some(id.uid.clone()),
+        };
+        Self {
+            metadata: md,
+            name: id.name.clone(),
+            cluster_url: server.to_string(),
+            info,
+        }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for Cluster {
+    fn schema_name() -> String {
+        "Cluster".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(
+                Box::new(k8s_openapi::schemars::schema::InstanceType::Object),
+            )),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "name".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(
+                            k8s_openapi::schemars::schema::SchemaObject {
+                                instance_type: Some(
+                                    k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
+                                        k8s_openapi::schemars::schema::InstanceType::String,
+                                    )),
+                                ),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    (
+                        "cluster_url".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(
+                            k8s_openapi::schemars::schema::SchemaObject {
+                                instance_type: Some(
+                                    k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
+                                        k8s_openapi::schemars::schema::InstanceType::String,
+                                    )),
+                                ),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    ("info".into(), {
+                        let schema_obj = __gen
+                            .subschema_for::<k8s_openapi::apimachinery::pkg::version::Info>()
+                            .into_object();
+                        k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                    }),
+                ]
+                .into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

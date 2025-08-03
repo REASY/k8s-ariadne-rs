@@ -139,10 +139,6 @@ fn get_type_name(schema: &Schema) -> String {
     // If the property is a reference to another definition (e.g., "$ref": "#/definitions/..."),
     // we extract and return the referenced type's short name.
     if let Some(ref_path) = &obj.reference {
-        assert_ne!(
-            ref_path,
-            "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
-        );
         return ref_path.to_string();
     }
 

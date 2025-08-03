@@ -7,7 +7,7 @@ use crate::types::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
@@ -22,6 +22,7 @@ use std::fmt::Debug;
 use tracing::log;
 
 pub struct ClusterStateResolver {
+    cluster: Cluster,
     kube_client: Box<dyn KubeClient>,
     #[allow(unused)]
     should_export_snapshot: bool,
@@ -29,6 +30,7 @@ pub struct ClusterStateResolver {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClusterSnapshot {
+    namespaces: Vec<Namespace>,
     pods: Vec<Pod>,
     deployments: Vec<Deployment>,
     stateful_sets: Vec<StatefulSet>,
@@ -54,6 +56,7 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
         ClusterSnapshot {
+            namespaces: vec![],
             pods: vec![],
             deployments: vec![],
             stateful_sets: vec![],
@@ -75,15 +78,31 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
 });
 
 impl ClusterStateResolver {
-    pub async fn new(options: &KubeConfigOptions, namespace: &str) -> Result<Self> {
-        let kube_client = KubeClientImpl::new(options, namespace).await?;
+    pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
+        let kube_client = KubeClientImpl::new(options, maybe_ns).await?;
+        let cluster_url = kube_client.get_cluster_url().await?;
+        let cluster_name = options.context.as_deref().unwrap_or("#NOT_DEFINED#");
+        let info = kube_client.apiserver_version().await?;
+        let cluster = Cluster::new(
+            ObjectIdentifier {
+                uid: format!("cluster_{}", cluster_name),
+                name: cluster_name.to_string(),
+                namespace: None,
+                resource_version: None,
+            },
+            cluster_url.as_ref(),
+            info,
+        );
+
         Ok(ClusterStateResolver {
+            cluster: cluster,
             kube_client: Box::new(kube_client),
             should_export_snapshot: false,
         })
     }
 
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
+        let namespaces: Vec<Namespace> = self.kube_client.get_namespaces().await?;
         let nodes: Vec<Node> = self.kube_client.get_nodes().await.or_else(|err| {
             log::error!("Failed to get nodes: {}", err);
             Result::Ok(vec![])
@@ -117,6 +136,7 @@ impl ClusterStateResolver {
         let service_accounts: Vec<ServiceAccount> = self.kube_client.get_service_accounts().await?;
 
         let snapshot = ClusterSnapshot {
+            namespaces,
             pods,
             deployments,
             stateful_sets,
@@ -139,61 +159,179 @@ impl ClusterStateResolver {
 
     pub async fn resolve(&self) -> Result<ClusterState> {
         let snapshot = self.get_snapshot().await?;
-        let state = Self::create_state(&snapshot);
+        let state = Self::create_state(self.cluster.clone(), &snapshot);
         Ok(state)
     }
 
-    fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {
+    fn create_state(cluster: Cluster, snapshot: &ClusterSnapshot) -> ClusterState {
         let mut state = ClusterState::new();
+        let cluster_uid: String = {
+            let obj_id = ObjectIdentifier {
+                uid: format!("cluster_{}", cluster.name),
+                name: cluster.name.clone(),
+                namespace: None,
+                resource_version: None,
+            };
+            let cluster_node = GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::Cluster,
+                attributes: Some(Box::new(ResourceAttributes::Cluster { cluster: cluster })),
+            };
+            state.add_node(cluster_node);
+            obj_id.uid.clone()
+        };
+
+        // Namespaces
+        for item in &snapshot.namespaces {
+            let node = create_generic_object!(item.clone(), Namespace, Namespace, namespace);
+            state.add_node(node);
+
+            state.add_edge(
+                item.metadata.uid.as_ref().unwrap(),
+                cluster_uid.as_str(),
+                Edge::PartOf,
+            );
+        }
+        let namespace_name_to_uid: HashMap<&str, &str> =
+            Self::name_to_uid(snapshot.namespaces.iter().map(|x| &x.metadata));
+
         // Core Workloads
         for item in &snapshot.pods {
             let node = create_generic_object!(item.clone(), Pod, Pod, pod);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.deployments {
             let node = create_generic_object!(item.clone(), Deployment, Deployment, deployment);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.stateful_sets {
             let node = create_generic_object!(item.clone(), StatefulSet, StatefulSet, stateful_set);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.replica_sets {
             let node = create_generic_object!(item.clone(), ReplicaSet, ReplicaSet, replica_set);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.daemon_sets {
             let node = create_generic_object!(item.clone(), DaemonSet, DaemonSet, daemon_set);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.jobs {
             let node = create_generic_object!(item.clone(), Job, Job, job);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         // Networking & Discovery
         for item in &snapshot.ingresses {
             let node = create_generic_object!(item.clone(), Ingress, Ingress, ingress);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.services {
             let node = create_generic_object!(item.clone(), Service, Service, service);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.endpoints {
             let node = create_generic_object!(item.clone(), Endpoints, Endpoints, endpoints);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.network_policies {
             let node =
                 create_generic_object!(item.clone(), NetworkPolicy, NetworkPolicy, network_policy);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         // Configuration
         for item in &snapshot.config_maps {
             let node = create_generic_object!(item.clone(), ConfigMap, ConfigMap, config_map);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         let mut unique_provisoners: HashSet<&str> = HashSet::new();
@@ -214,10 +352,26 @@ impl ClusterStateResolver {
                         provisioner: Provisioner::new(&obj_id, provisoner.as_str()),
                     })),
                 });
+
+                Self::connect_part_of_and_belongs_to(
+                    &mut state,
+                    &namespace_name_to_uid,
+                    cluster_uid.as_str(),
+                    obj_id.uid.as_str(),
+                    obj_id.namespace.as_deref(),
+                );
             }
             let node =
                 create_generic_object!(item.clone(), StorageClass, StorageClass, storage_class);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
 
             state.add_edge(
                 item.metadata.uid.as_ref().unwrap(),
@@ -228,6 +382,14 @@ impl ClusterStateResolver {
         for item in &snapshot.persistent_volumes {
             let node = create_generic_object!(item.clone(), PersistentVolume, PersistentVolume, pv);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
         for item in &snapshot.persistent_volume_claims {
             let node = create_generic_object!(
@@ -237,12 +399,28 @@ impl ClusterStateResolver {
                 pvc
             );
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         // Cluster Infrastructure
         for item in &snapshot.nodes {
             let node = create_generic_object!(item.clone(), Node, Node, node);
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         // Identity & Access Control
@@ -254,6 +432,14 @@ impl ClusterStateResolver {
                 service_account
             );
             state.add_node(node);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
         }
 
         Self::set_manages_edge_all(&snapshot, &mut state);
@@ -519,6 +705,22 @@ impl ClusterStateResolver {
                         });
                     });
                 });
+            });
+        });
+    }
+
+    fn connect_part_of_and_belongs_to(
+        state: &mut ClusterState,
+        namespace_name_to_uid: &HashMap<&str, &str>,
+        cluster_uid: &str,
+        item_uid: &str,
+        namespace: Option<&str>,
+    ) {
+        state.add_edge(item_uid, cluster_uid, Edge::PartOf);
+
+        namespace.inspect(|ns| {
+            namespace_name_to_uid.get(*ns).inspect(|ns_uid| {
+                state.add_edge(item_uid, ns_uid, Edge::BelongsTo);
             });
         });
     }
