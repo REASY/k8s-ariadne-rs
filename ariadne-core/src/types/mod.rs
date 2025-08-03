@@ -163,6 +163,7 @@ pub struct Provisioner {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
 }
+
 impl Provisioner {
     pub fn new(id: &ObjectIdentifier, name: &str) -> Self {
         let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
@@ -186,6 +187,48 @@ impl Provisioner {
             metadata: md,
             name: name.to_string(),
         }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for Provisioner {
+    fn schema_name() -> String {
+        "Provisioner".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "name".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                ].into(),
+                required: [
+                    "metadata".into(),
+                    "name".into(),
+                ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
     }
 }
 
@@ -223,6 +266,63 @@ impl IngressServiceBackend {
             name: backend.name.clone(),
             port: backend.port.clone(),
         }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for IngressServiceBackend {
+    fn schema_name() -> String {
+        "IngressServiceBackend".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                description: Some("IngressServiceBackend references a Kubernetes Service as a Backend.".into()),
+                ..Default::default()
+            })),
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "name".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("name is the referenced service. The service must exist in the same namespace as the Ingress object.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "port".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::networking::v1::ServiceBackendPort>().into_object();
+                            schema_obj.metadata = Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("port of the referenced service. A port name or port number is required for a IngressServiceBackend.".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    )
+                ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
     }
 }
 
@@ -267,6 +367,82 @@ impl EndpointAddress {
     }
 }
 
+impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
+    fn schema_name() -> String {
+        "EndpointAddress".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "hostname".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("The Hostname of this endpoint".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "ip".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("The IP of this endpoint. May not be loopback (127.0.0.0/8 or ::1), link-local (169.254.0.0/16 or fe80::/10), or link-local multicast (224.0.0.0/24 or ff02::/16).".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "nodeName".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Optional: Node hosting this endpoint. This can be used to determine endpoints local to a node.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "targetRef".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::core::v1::ObjectReference>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Reference to object providing the endpoint.".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    )
+
+                ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Host {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
@@ -295,5 +471,43 @@ impl Host {
             metadata: md,
             host: host.to_string(),
         }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for Host {
+    fn schema_name() -> String {
+        "Host".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "name".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    )
+                ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
     }
 }

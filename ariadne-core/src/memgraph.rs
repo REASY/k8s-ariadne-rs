@@ -1,12 +1,8 @@
 use crate::prelude::*;
 use crate::state::ClusterState;
-use crate::types::{Edge, GenericObject, ObjectIdentifier, ResourceAttributes, ResourceType};
-use k8s_openapi::api::core::v1::Pod;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use k8s_openapi::schemars::schema_for;
-use k8s_openapi::DeepMerge;
+use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
 use rsmgclient::{ConnectParams, Connection, ConnectionStatus};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Instant;
 use thiserror::Error;
@@ -98,12 +94,6 @@ impl Memgraph {
                 source_type, edge_type, target_type
             );
         }
-
-        // println!("`schema_for!(Pod)` to_string length: {}", serde_json::to_string(&schema_for!(Pod)).unwrap().len());
-        // println!("`schema_for!(Pod)` to_string_pretty length: {}", serde_json::to_string_pretty(&schema_for!(Pod)).unwrap().len());
-        //
-        // println!("`schema_for!(ObjectMeta)` to_string length: {}", serde_json::to_string(&schema_for!(ObjectMeta)).unwrap().len());
-        // println!("`schema_for!(ObjectMeta)` to_string_pretty length: {}", serde_json::to_string_pretty(&schema_for!(ObjectMeta)).unwrap().len());
 
         Result::Ok(())
     }
@@ -225,12 +215,10 @@ impl Memgraph {
                 )
             }
             ResourceType::Host => {
-                let mut host_json = Value::Object(Map::from_iter([(
-                    "value".to_string(),
-                    Value::String(obj.id.name.clone()),
-                )]));
-                host_json.merge_from(Self::get_metadata_v2(&obj.id));
-                format!(r#"CREATE (n:Host {})"#, Self::json_to_cypher(&host_json))
+                format!(
+                    r#"CREATE (n:Host {})"#,
+                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                )
             }
         };
         Ok(r)
@@ -341,73 +329,6 @@ impl Memgraph {
         };
 
         Ok(v)
-    }
-
-    fn get_metadata_v2(obj_id: &ObjectIdentifier) -> Value {
-        let mut map = Map::new();
-        map.insert("uid".to_string(), Value::String(obj_id.uid.clone()));
-        map.insert("name".to_string(), Value::String(obj_id.name.clone()));
-        match obj_id.namespace.as_ref() {
-            None => {
-                map.insert("namespace".to_string(), Value::Null);
-            }
-            Some(namespace) => {
-                map.insert("namespace".to_string(), Value::String(namespace.clone()));
-            }
-        }
-        match obj_id.resource_version.as_ref() {
-            None => {
-                map.insert("resource_version".to_string(), Value::Null);
-            }
-            Some(resource_version) => {
-                map.insert(
-                    "resource_version".to_string(),
-                    Value::String(resource_version.clone()),
-                );
-            }
-        }
-        Value::Object(Map::from_iter([(
-            "metadata".to_string(),
-            Value::Object(map),
-        )]))
-    }
-
-    #[allow(unused)]
-    fn get_metadata(obj_id: &ObjectIdentifier) -> String {
-        let mut cypher_query = String::new();
-        cypher_query.push_str("{uid: '");
-        cypher_query.push_str(&obj_id.uid);
-        cypher_query.push_str("', ");
-
-        cypher_query.push_str("name: '");
-        cypher_query.push_str(&obj_id.name);
-        cypher_query.push_str("', ");
-
-        cypher_query.push_str("namespace: ");
-        match obj_id.namespace.as_ref() {
-            None => {
-                cypher_query.push_str("NULL");
-            }
-            Some(namespace) => {
-                cypher_query.push_str("'");
-                cypher_query.push_str(namespace);
-                cypher_query.push_str("'");
-            }
-        }
-        cypher_query.push_str(", resource_version: ");
-        match obj_id.resource_version.as_ref() {
-            None => {
-                cypher_query.push_str("NULL");
-            }
-            Some(resource_version) => {
-                cypher_query.push_str("'");
-                cypher_query.push_str(resource_version);
-                cypher_query.push_str("'");
-            }
-        }
-        cypher_query.push_str("}");
-
-        cypher_query
     }
 
     fn get_create_indices_query(rt: &ResourceType) -> Vec<String> {

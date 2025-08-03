@@ -17,3 +17,12 @@ services:
     environment:
       - QUICK_CONNECT_MG_HOST=memgraph
       - QUICK_CONNECT_MG_PORT=7687
+
+#  neo4j:
+#    image: neo4j:latest
+#    environment:
+#      - NEO4J_AUTH=neo4j/your_password
+#    ports:
+#      - "7474:7474"
+#      - "7688:7687"
+#    restart: always
