@@ -14,6 +14,7 @@ Node properties:
   Ingress: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.IngressSpec, status: #/definitions/io.k8s.api.networking.v1.IngressStatus)
   IngressServiceBackend: 3 properties (metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, port: #/definitions/io.k8s.api.networking.v1.ServiceBackendPort)
   Job: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.batch.v1.JobSpec, status: #/definitions/io.k8s.api.batch.v1.JobStatus)
+  Logs: 2 properties (content: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
   Namespace: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.NamespaceSpec, status: #/definitions/io.k8s.api.core.v1.NamespaceStatus)
   NetworkPolicy: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.networking.v1.NetworkPolicySpec)
   Node: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.core.v1.NodeSpec, status: #/definitions/io.k8s.api.core.v1.NodeStatus)
@@ -297,6 +298,7 @@ Referenced types (used via `#/definitions/`):
 (:PersistentVolumeClaim)-[:BelongsTo]->(:Namespace)
 (:Service)-[:PartOf]->(:Cluster)
 (:DaemonSet)-[:PartOf]->(:Cluster)
+(:Pod)-[:HasLogs]->(:Logs)
 ```
 ## Rules for Cypher query generation
 When generating Cypher queries, follow these rules:

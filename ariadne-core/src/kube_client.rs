@@ -10,7 +10,7 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::version::Info;
-use kube::api::ListParams;
+use kube::api::{ListParams, LogParams};
 use kube::config::KubeConfigOptions;
 use kube::{Api, Client, Config};
 use serde::de::DeserializeOwned;
@@ -38,6 +38,7 @@ pub trait KubeClient: Sync + Send {
     async fn get_service_accounts(&self) -> Result<Vec<ServiceAccount>>;
     async fn apiserver_version(&self) -> Result<Info>;
     async fn get_cluster_url(&self) -> Result<String>;
+    async fn get_pod_logs(&self, namespace: &str, pod_name: &str) -> Result<String>;
 }
 
 pub struct KubeClientImpl {
@@ -228,5 +229,22 @@ impl KubeClient for KubeClientImpl {
 
     async fn get_cluster_url(&self) -> Result<String> {
         Ok(self.config.cluster_url.to_string())
+    }
+
+    async fn get_pod_logs(&self, namespace: &str, pod_name: &str) -> Result<String> {
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let log_params = LogParams {
+            container: None,
+            follow: false,
+            limit_bytes: None,
+            pretty: false,
+            previous: false,
+            since_seconds: None,
+            since_time: None,
+            tail_lines: Some(1000),
+            timestamps: true,
+        };
+        let logs = api.logs(pod_name, &log_params).await?;
+        Ok(logs)
     }
 }

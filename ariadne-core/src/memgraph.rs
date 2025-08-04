@@ -228,10 +228,16 @@ impl Memgraph {
                     Self::json_to_cypher(&Self::get_as_json(&obj)?)
                 )
             }
-
             ResourceType::Cluster => {
                 format!(
                     r#"CREATE (n:Cluster {})"#,
+                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                )
+            }
+
+            ResourceType::Logs => {
+                format!(
+                    r#"CREATE (n:Logs {})"#,
                     Self::json_to_cypher(&Self::get_as_json(&obj)?)
                 )
             }
@@ -348,6 +354,7 @@ impl Memgraph {
             }
             ResourceAttributes::Host { host } => serde_json::to_value(host)?,
             ResourceAttributes::Cluster { cluster: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Logs { logs: context } => serde_json::to_value(context)?,
         };
 
         Ok(v)

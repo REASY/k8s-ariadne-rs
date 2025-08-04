@@ -46,6 +46,7 @@ pub enum ResourceType {
     EndpointAddress,       // Represents a single IP address in an Endpoints object
     Host,                  // Represents a hostname claimed by an Ingress
     Cluster,               // Represents a cluster in which K8s objects exist
+    Logs,                  // Represents logs of a pod
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, EnumIter)]
@@ -57,7 +58,8 @@ pub enum Edge {
     Manages, // e.g., Deployment -> ReplicaSet -> Pod
 
     // Pod & Node
-    RunsOn, // e.g., Pod -> Node
+    RunsOn,  // e.g., Pod -> Node
+    HasLogs, // e.g., Pod -> Logs
 
     // Networking & Routing
     Selects,        // e.g., Service -> Pod
@@ -151,6 +153,9 @@ pub enum ResourceAttributes {
     },
     Cluster {
         cluster: Cluster,
+    },
+    Logs {
+        logs: Logs,
     },
 }
 
@@ -621,6 +626,86 @@ impl k8s_openapi::schemars::JsonSchema for Host {
                         },
                     )
                 ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Logs {
+    pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+    pub pod_uid: String,
+    pub content: String,
+}
+
+impl Logs {
+    pub fn new(namespace: &str, name: &str, pod_uid: &str, content: String) -> Self {
+        let uid = format!("logs_{}", pod_uid);
+        let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+            annotations: None,
+            creation_timestamp: None,
+            deletion_grace_period_seconds: None,
+            deletion_timestamp: None,
+            finalizers: None,
+            generate_name: None,
+            generation: None,
+            labels: None,
+            managed_fields: None,
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            owner_references: None,
+            resource_version: None,
+            self_link: None,
+            uid: Some(uid),
+        };
+        Self {
+            metadata: md,
+            pod_uid: pod_uid.to_string(),
+            content,
+        }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for Logs {
+    fn schema_name() -> String {
+        "Logs".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(
+                Box::new(k8s_openapi::schemars::schema::InstanceType::Object),
+            )),
+            object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [(
+                    "content".into(),
+                    k8s_openapi::schemars::schema::Schema::Object(
+                        k8s_openapi::schemars::schema::SchemaObject {
+                            instance_type: Some(
+                                k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
+                                    k8s_openapi::schemars::schema::InstanceType::String,
+                                )),
+                            ),
+                            ..Default::default()
+                        },
+                    ),
+                ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    )]
+                .into(),
                 ..Default::default()
             })),
             ..Default::default()

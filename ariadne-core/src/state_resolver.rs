@@ -32,6 +32,7 @@ pub struct ClusterStateResolver {
 struct ClusterSnapshot {
     namespaces: Vec<Namespace>,
     pods: Vec<Pod>,
+    pods_logs: Vec<Option<Logs>>,
     deployments: Vec<Deployment>,
     stateful_sets: Vec<StatefulSet>,
     replica_sets: Vec<ReplicaSet>,
@@ -58,6 +59,7 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
         ClusterSnapshot {
             namespaces: vec![],
             pods: vec![],
+            pods_logs: vec![],
             deployments: vec![],
             stateful_sets: vec![],
             replica_sets: vec![],
@@ -108,6 +110,24 @@ impl ClusterStateResolver {
             Result::Ok(vec![])
         })?;
         let pods: Vec<Pod> = self.kube_client.get_pods().await?;
+        let mut logs: Vec<Option<Logs>> = Vec::with_capacity(pods.len());
+
+        for p in &pods {
+            if let (Some(ns), Some(name)) =
+                (p.metadata.namespace.as_deref(), p.metadata.name.as_deref())
+            {
+                match self.kube_client.get_pod_logs(ns, name).await {
+                    Ok(content) => {
+                        let pod_uid = p.metadata.uid.as_ref().unwrap();
+                        let this_logs = Logs::new(ns, name, pod_uid, content);
+                        logs.push(Some(this_logs));
+                    }
+                    Err(_) => {
+                        logs.push(None);
+                    }
+                }
+            };
+        }
         let deployments: Vec<Deployment> = self.kube_client.get_deployments().await?;
         let stateful_sets: Vec<StatefulSet> = self.kube_client.get_stateful_sets().await?;
         let replica_sets: Vec<ReplicaSet> = self.kube_client.get_replica_sets().await?;
@@ -121,10 +141,14 @@ impl ClusterStateResolver {
 
         let config_maps: Vec<ConfigMap> = self.kube_client.get_config_maps().await?;
 
-        let storage_classes: Vec<StorageClass> = self.kube_client.get_storage_classes().await.or_else(|err| {
-            log::error!("Failed to get StorageClasses: {}", err);
-            Result::Ok(vec![])
-        })?;
+        let storage_classes: Vec<StorageClass> = self
+            .kube_client
+            .get_storage_classes()
+            .await
+            .or_else(|err| {
+                log::error!("Failed to get StorageClasses: {}", err);
+                Result::Ok(vec![])
+            })?;
         let persistent_volumes: Vec<PersistentVolume> = self
             .kube_client
             .get_persistent_volumes()
@@ -133,8 +157,11 @@ impl ClusterStateResolver {
                 log::error!("Failed to get PersistentVolumes: {}", err);
                 Result::Ok(vec![])
             })?;
-        let persistent_volume_claims: Vec<PersistentVolumeClaim> =
-            self.kube_client.get_persistent_volume_claims().await.or_else(|err| {
+        let persistent_volume_claims: Vec<PersistentVolumeClaim> = self
+            .kube_client
+            .get_persistent_volume_claims()
+            .await
+            .or_else(|err| {
                 log::error!("Failed to get PersistentVolumeClaimes: {}", err);
                 Result::Ok(vec![])
             })?;
@@ -144,6 +171,7 @@ impl ClusterStateResolver {
         let snapshot = ClusterSnapshot {
             namespaces,
             pods,
+            pods_logs: logs,
             deployments,
             stateful_sets,
             replica_sets,
@@ -214,6 +242,25 @@ impl ClusterStateResolver {
                 item.metadata.namespace.as_deref(),
             );
         }
+
+        for logs in snapshot.pods_logs.clone() {
+            if let Some(logs) = logs {
+                let obj_id = ObjectIdentifier {
+                    uid: logs.metadata.uid.as_ref().unwrap().clone(),
+                    name: logs.metadata.name.as_ref().unwrap().clone(),
+                    namespace: logs.metadata.namespace.clone(),
+                    resource_version: None,
+                };
+                let pod_uid = logs.pod_uid.clone();
+                state.add_node(GenericObject {
+                    id: obj_id.clone(),
+                    resource_type: ResourceType::Logs,
+                    attributes: Some(Box::new(ResourceAttributes::Logs { logs })),
+                });
+                state.add_edge(pod_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
+            }
+        }
+
         for item in &snapshot.deployments {
             let node = create_generic_object!(item.clone(), Deployment, Deployment, deployment);
             state.add_node(node);
