@@ -104,7 +104,7 @@ impl ClusterStateResolver {
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
         let namespaces: Vec<Namespace> = self.kube_client.get_namespaces().await?;
         let nodes: Vec<Node> = self.kube_client.get_nodes().await.or_else(|err| {
-            log::error!("Failed to get nodes: {}", err);
+            log::error!("Failed to get Nodes: {}", err);
             Result::Ok(vec![])
         })?;
         let pods: Vec<Pod> = self.kube_client.get_pods().await?;
@@ -121,17 +121,23 @@ impl ClusterStateResolver {
 
         let config_maps: Vec<ConfigMap> = self.kube_client.get_config_maps().await?;
 
-        let storage_classes: Vec<StorageClass> = self.kube_client.get_storage_classes().await?;
+        let storage_classes: Vec<StorageClass> = self.kube_client.get_storage_classes().await.or_else(|err| {
+            log::error!("Failed to get StorageClasses: {}", err);
+            Result::Ok(vec![])
+        })?;
         let persistent_volumes: Vec<PersistentVolume> = self
             .kube_client
             .get_persistent_volumes()
             .await
             .or_else(|err| {
-                log::error!("Failed to get PVs: {}", err);
+                log::error!("Failed to get PersistentVolumes: {}", err);
                 Result::Ok(vec![])
             })?;
         let persistent_volume_claims: Vec<PersistentVolumeClaim> =
-            self.kube_client.get_persistent_volume_claims().await?;
+            self.kube_client.get_persistent_volume_claims().await.or_else(|err| {
+                log::error!("Failed to get PersistentVolumeClaimes: {}", err);
+                Result::Ok(vec![])
+            })?;
 
         let service_accounts: Vec<ServiceAccount> = self.kube_client.get_service_accounts().await?;
 

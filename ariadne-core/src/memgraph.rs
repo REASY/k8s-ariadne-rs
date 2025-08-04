@@ -395,7 +395,7 @@ impl Memgraph {
                 }
                 Value::String(s) => {
                     cypher_data.push_str("\"");
-                    let escaped = s.replace("\"", "\\\"");
+                    let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
                     cypher_data.push_str(escaped.as_str());
                     cypher_data.push_str("\"");
                 }
