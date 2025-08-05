@@ -4,6 +4,7 @@ use crate::create_generic_object;
 use crate::kube_client::{KubeClient, KubeClientImpl};
 use crate::state::ClusterState;
 use crate::types::*;
+use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
@@ -19,17 +20,20 @@ use kube::ResourceExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use tracing::log;
+use std::sync::Arc;
+use std::time::Instant;
+use tracing::{info, log};
 
 pub struct ClusterStateResolver {
-    cluster: Cluster,
-    kube_client: Box<dyn KubeClient>,
+    cluster_name: String,
+    kube_client: Arc<Box<dyn KubeClient>>,
     #[allow(unused)]
     should_export_snapshot: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClusterSnapshot {
+    cluster: Cluster,
     namespaces: Vec<Namespace>,
     pods: Vec<Pod>,
     pods_logs: Vec<Option<Logs>>,
@@ -57,6 +61,13 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
         ClusterSnapshot {
+            cluster: Cluster {
+                metadata: Default::default(),
+                name: "".to_string(),
+                cluster_url: "".to_string(),
+                info: Default::default(),
+                retrieved_at: Default::default(),
+            },
             namespaces: vec![],
             pods: vec![],
             pods_logs: vec![],
@@ -82,64 +93,62 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
 impl ClusterStateResolver {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
         let kube_client = KubeClientImpl::new(options, maybe_ns).await?;
-        let cluster_url = kube_client.get_cluster_url().await?;
-        let cluster_name = options.context.as_deref().unwrap_or("#NOT_DEFINED#");
-        let info = kube_client.apiserver_version().await?;
-        let cluster = Cluster::new(
-            ObjectIdentifier {
-                uid: format!("cluster_{}", cluster_name),
-                name: cluster_name.to_string(),
-                namespace: None,
-                resource_version: None,
-            },
-            cluster_url.as_ref(),
-            info,
-        );
-
+        let cluster_name = options
+            .context
+            .as_deref()
+            .unwrap_or("#NOT_DEFINED#")
+            .to_string();
         Ok(ClusterStateResolver {
-            cluster: cluster,
-            kube_client: Box::new(kube_client),
+            cluster_name,
+            kube_client: Arc::new(Box::new(kube_client)),
             should_export_snapshot: false,
         })
     }
 
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
-        let namespaces: Vec<Namespace> = self.kube_client.get_namespaces().await?;
-        let nodes: Vec<Node> = self.kube_client.get_nodes().await.or_else(|err| {
+        let client = self.kube_client.clone();
+        let namespaces: Vec<Namespace> = client.get_namespaces().await?;
+        let nodes: Vec<Node> = client.get_nodes().await.or_else(|err| {
             log::error!("Failed to get Nodes: {}", err);
             Result::Ok(vec![])
         })?;
-        let pods: Vec<Pod> = self.kube_client.get_pods().await?;
+        let pods: Vec<Pod> = client.get_pods().await?;
         let mut logs: Vec<Option<Logs>> = Vec::with_capacity(pods.len());
+        let mut handles = Vec::new();
 
         for p in &pods {
             if let (Some(ns), Some(name)) =
                 (p.metadata.namespace.as_deref(), p.metadata.name.as_deref())
             {
-                match self.kube_client.get_pod_logs(ns, name).await {
-                    Ok(content) => {
-                        let pod_uid = p.metadata.uid.as_ref().unwrap();
-                        let this_logs = Logs::new(ns, name, pod_uid, content);
-                        logs.push(Some(this_logs));
+                let ns = ns.to_string();
+                let name = name.to_string();
+                let pod_uid = p.metadata.uid.as_ref().unwrap().to_string();
+
+                let client = client.clone();
+                handles.push(tokio::spawn(async move {
+                    match client.get_pod_logs(&ns, &name).await {
+                        Ok(content) => Some(Logs::new(&ns, &name, &pod_uid, content)),
+                        Err(_) => None,
                     }
-                    Err(_) => {
-                        logs.push(None);
-                    }
-                }
-            };
+                }));
+            }
         }
-        let deployments: Vec<Deployment> = self.kube_client.get_deployments().await?;
-        let stateful_sets: Vec<StatefulSet> = self.kube_client.get_stateful_sets().await?;
-        let replica_sets: Vec<ReplicaSet> = self.kube_client.get_replica_sets().await?;
-        let daemon_sets: Vec<DaemonSet> = self.kube_client.get_daemon_sets().await?;
-        let jobs: Vec<Job> = self.kube_client.get_jobs().await?;
+        for handle in handles {
+            logs.push(handle.await.unwrap_or(None));
+        }
 
-        let ingresses: Vec<Ingress> = self.kube_client.get_ingresses().await?;
-        let services: Vec<Service> = self.kube_client.get_services().await?;
-        let endpoints: Vec<Endpoints> = self.kube_client.get_endpoints().await?;
-        let network_policies: Vec<NetworkPolicy> = self.kube_client.get_network_policies().await?;
+        let deployments: Vec<Deployment> = client.get_deployments().await?;
+        let stateful_sets: Vec<StatefulSet> = client.get_stateful_sets().await?;
+        let replica_sets: Vec<ReplicaSet> = client.get_replica_sets().await?;
+        let daemon_sets: Vec<DaemonSet> = client.get_daemon_sets().await?;
+        let jobs: Vec<Job> = client.get_jobs().await?;
 
-        let config_maps: Vec<ConfigMap> = self.kube_client.get_config_maps().await?;
+        let ingresses: Vec<Ingress> = client.get_ingresses().await?;
+        let services: Vec<Service> = client.get_services().await?;
+        let endpoints: Vec<Endpoints> = client.get_endpoints().await?;
+        let network_policies: Vec<NetworkPolicy> = client.get_network_policies().await?;
+
+        let config_maps: Vec<ConfigMap> = client.get_config_maps().await?;
 
         let storage_classes: Vec<StorageClass> = self
             .kube_client
@@ -166,9 +175,24 @@ impl ClusterStateResolver {
                 Result::Ok(vec![])
             })?;
 
-        let service_accounts: Vec<ServiceAccount> = self.kube_client.get_service_accounts().await?;
+        let service_accounts: Vec<ServiceAccount> = client.get_service_accounts().await?;
+        let cluster_url = client.get_cluster_url().await?;
+        let info = client.apiserver_version().await?;
+        let retrieved_at = Utc::now();
+        let cluster: Cluster = Cluster::new(
+            ObjectIdentifier {
+                uid: format!("cluster_{}", self.cluster_name),
+                name: self.cluster_name.to_string(),
+                namespace: None,
+                resource_version: None,
+            },
+            cluster_url.as_ref(),
+            info,
+            retrieved_at,
+        );
 
         let snapshot = ClusterSnapshot {
+            cluster,
             namespaces,
             pods,
             pods_logs: logs,
@@ -192,24 +216,29 @@ impl ClusterStateResolver {
     }
 
     pub async fn resolve(&self) -> Result<ClusterState> {
+        let s = Instant::now();
         let snapshot = self.get_snapshot().await?;
-        let state = Self::create_state(self.cluster.clone(), &snapshot);
+        info!("Retrieved snapshot in {}ms", s.elapsed().as_millis());
+
+        let state = Self::create_state(&snapshot);
         Ok(state)
     }
 
-    fn create_state(cluster: Cluster, snapshot: &ClusterSnapshot) -> ClusterState {
+    fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {
         let mut state = ClusterState::new();
         let cluster_uid: String = {
             let obj_id = ObjectIdentifier {
-                uid: format!("cluster_{}", cluster.name),
-                name: cluster.name.clone(),
+                uid: snapshot.cluster.metadata.uid.as_ref().unwrap().to_string(),
+                name: snapshot.cluster.metadata.name.as_ref().unwrap().to_string(),
                 namespace: None,
                 resource_version: None,
             };
             let cluster_node = GenericObject {
                 id: obj_id.clone(),
                 resource_type: ResourceType::Cluster,
-                attributes: Some(Box::new(ResourceAttributes::Cluster { cluster: cluster })),
+                attributes: Some(Box::new(ResourceAttributes::Cluster {
+                    cluster: snapshot.cluster.clone(),
+                })),
             };
             state.add_node(cluster_node);
             obj_id.uid.clone()

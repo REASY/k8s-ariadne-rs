@@ -180,12 +180,14 @@ pub struct Cluster {
     pub name: String,
     pub cluster_url: String,
     pub info: k8s_openapi::apimachinery::pkg::version::Info,
+    pub retrieved_at: chrono::DateTime<chrono::Utc>,
 }
 impl Cluster {
     pub fn new(
         id: ObjectIdentifier,
         server: &str,
         info: k8s_openapi::apimachinery::pkg::version::Info,
+        retrieved_at: chrono::DateTime<chrono::Utc>,
     ) -> Self {
         let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
             annotations: None,
@@ -209,6 +211,7 @@ impl Cluster {
             name: id.name.clone(),
             cluster_url: server.to_string(),
             info,
+            retrieved_at,
         }
     }
 }
@@ -264,12 +267,22 @@ impl k8s_openapi::schemars::JsonSchema for Cluster {
                             },
                         ),
                     ),
-                    ("info".into(), {
-                        let schema_obj = __gen
-                            .subschema_for::<k8s_openapi::apimachinery::pkg::version::Info>()
-                            .into_object();
-                        k8s_openapi::schemars::schema::Schema::Object(schema_obj)
-                    }),
+                    (
+                        "info".into(),
+                        {
+                            let schema_obj = __gen
+                                .subschema_for::<k8s_openapi::apimachinery::pkg::version::Info>()
+                                .into_object();
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        }
+                    ),
+                    (
+                        "retrieved_at".into(),
+                        {
+                            let schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::Time>().into_object();
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        }
+                    ),
                 ]
                 .into(),
                 ..Default::default()

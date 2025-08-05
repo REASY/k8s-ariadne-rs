@@ -18,7 +18,7 @@ Always use single quotes (') around property names when accessing properties, es
 
 ## Detailed graph schema
 Node properties:
-  Cluster: 4 properties (cluster_url: STRING, info: #/definitions/io.k8s.apimachinery.pkg.version.Info, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
+  Cluster: 5 properties (cluster_url: STRING, info: #/definitions/io.k8s.apimachinery.pkg.version.Info, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, retrieved_at: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time)
   ConfigMap: 6 properties (apiVersion: STRING, binaryData: MAP, data: MAP, immutable: BOOLEAN, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
   DaemonSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DaemonSetSpec, status: #/definitions/io.k8s.api.apps.v1.DaemonSetStatus)
   Deployment: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DeploymentSpec, status: #/definitions/io.k8s.api.apps.v1.DeploymentStatus)

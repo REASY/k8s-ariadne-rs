@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Instant;
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, trace};
 
 #[derive(Error, Debug)]
 pub enum MemgraphError {
@@ -52,7 +52,7 @@ impl Memgraph {
         let mut unique_types: HashSet<ResourceType> = HashSet::new();
         for node in cluster_state.get_nodes() {
             let create_query = Self::get_create_query(&node)?;
-            println!("{}", create_query);
+            trace!("{}", create_query);
             self.connection
                 .execute_without_results(&create_query)
                 .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
@@ -63,7 +63,7 @@ impl Memgraph {
         // Create indices
         for resource_type in unique_types {
             for create_index_query in Self::get_create_indices_query(&resource_type) {
-                println!("{}", create_index_query);
+                trace!("{}", create_index_query);
                 self.connection
                     .execute_without_results(&create_index_query)
                     .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
@@ -73,7 +73,7 @@ impl Memgraph {
         let mut unique_edges: HashSet<(ResourceType, ResourceType, Edge)> = HashSet::new();
         for edge in cluster_state.get_edges() {
             let create_edge_query = format!("MATCH (u:{:?}), (v:{:?}) WHERE u.metadata.uid = '{}' AND v.metadata.uid = '{}' CREATE (u)-[:{:?}]->(v);",  edge.source_type, edge.target_type, edge.source, edge.target, edge.edge_type);
-            println!("{}", create_edge_query);
+            trace!("{}", create_edge_query);
             unique_edges.insert((edge.source_type, edge.target_type, edge.edge_type));
             self.connection
                 .execute_without_results(&create_edge_query)
@@ -88,7 +88,14 @@ impl Memgraph {
             cluster_state.get_edge_count(),
             s.elapsed().as_millis()
         );
-        println!("unique_edges: {}", unique_edges.len());
+        info!("There are {} edges in this graph", unique_edges.len());
+        for (source_type, target_type, edge_type) in &unique_edges {
+            info!(
+                "(:{:?})-[:{:?}]->(:{:?})",
+                source_type, edge_type, target_type
+            );
+        }
+
         for (source_type, target_type, edge_type) in unique_edges {
             println!(
                 "(:{:?})-[:{:?}]->(:{:?})",
