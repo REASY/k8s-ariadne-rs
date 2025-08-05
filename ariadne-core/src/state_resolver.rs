@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, log, warn};
+use tracing::info;
 
 pub struct ClusterStateResolver {
     cluster_name: String,
@@ -94,13 +94,12 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
 });
 
 impl ClusterStateResolver {
-    pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
+    pub async fn new(
+        cluster_name: String,
+        options: &KubeConfigOptions,
+        maybe_ns: Option<&str>,
+    ) -> Result<Self> {
         let kube_client = KubeClientImpl::new(options, maybe_ns).await?;
-        let cluster_name = options
-            .context
-            .as_deref()
-            .unwrap_or("#NOT_DEFINED#")
-            .to_string();
         Ok(ClusterStateResolver {
             cluster_name,
             kube_client: Arc::new(Box::new(kube_client)),
@@ -112,10 +111,10 @@ impl ClusterStateResolver {
         let client = self.kube_client.clone();
         let namespaces: Vec<Namespace> = client.get_namespaces().await?;
         let events: Vec<Event> = Self::get_events(&client, namespaces.as_slice()).await;
-        let nodes: Vec<Node> = client.get_nodes().await.or_else(|err| {
-            log::error!("Failed to get Nodes: {err}");
-            Result::Ok(vec![])
-        })?;
+        let nodes: Vec<Node> = client
+            .get_nodes()
+            .await
+            .or_else(|_err| Result::Ok(vec![]))?;
         let pods: Vec<Pod> = client.get_pods().await?;
         let logs: Vec<Option<Logs>> = Self::get_logs(&client, &pods).await;
         let deployments: Vec<Deployment> = client.get_deployments().await?;
@@ -135,26 +134,17 @@ impl ClusterStateResolver {
             .kube_client
             .get_storage_classes()
             .await
-            .or_else(|err| {
-                log::error!("Failed to get StorageClasses: {err}");
-                Result::Ok(vec![])
-            })?;
+            .or_else(|_err| Result::Ok(vec![]))?;
         let persistent_volumes: Vec<PersistentVolume> = self
             .kube_client
             .get_persistent_volumes()
             .await
-            .or_else(|err| {
-                log::error!("Failed to get PersistentVolumes: {err}");
-                Result::Ok(vec![])
-            })?;
+            .or_else(|_err| Result::Ok(vec![]))?;
         let persistent_volume_claims: Vec<PersistentVolumeClaim> = self
             .kube_client
             .get_persistent_volume_claims()
             .await
-            .or_else(|err| {
-                log::error!("Failed to get PersistentVolumeClaimes: {err}");
-                Result::Ok(vec![])
-            })?;
+            .or_else(|_err| Result::Ok(vec![]))?;
 
         let service_accounts: Vec<ServiceAccount> = client.get_service_accounts().await?;
         let cluster_url = client.get_cluster_url().await?;
@@ -212,16 +202,7 @@ impl ClusterStateResolver {
                 let client = client.clone();
                 handles.push(tokio::spawn(async move {
                     match client.get_pod_logs(&ns, &name).await {
-                        Ok(content) => {
-                            println!(
-                                "Logs for pod {}/{} has length {} and {} lines",
-                                ns,
-                                name,
-                                content.len(),
-                                content.lines().count()
-                            );
-                            Some(Logs::new(&ns, &name, &pod_uid, content))
-                        }
+                        Ok(content) => Some(Logs::new(&ns, &name, &pod_uid, content)),
                         Err(_) => None,
                     }
                 }));
@@ -241,15 +222,9 @@ impl ClusterStateResolver {
             if let Some(ns) = p.metadata.name.as_deref() {
                 let ns = ns.to_string();
                 let client = client.clone();
-                handles.push(tokio::spawn(async move {
-                    match client.get_events(&ns).await {
-                        Ok(events) => Some(events),
-                        Err(err) => {
-                            warn!("Could not fetch events for namespace {}: {}", ns, err);
-                            None
-                        }
-                    }
-                }));
+                handles.push(tokio::spawn(
+                    async move { (client.get_events(&ns).await).ok() },
+                ));
             }
         }
         for handle in handles {

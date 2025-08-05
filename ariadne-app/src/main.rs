@@ -1,4 +1,5 @@
 use ariadne_core::memgraph;
+use ariadne_core::prelude::*;
 use ariadne_core::state::{ClusterState, SharedClusterState};
 use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
@@ -8,7 +9,6 @@ use axum::routing::get;
 use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
 use kube::config::KubeConfigOptions;
-use rsmgclient::ConnectParams;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
 use std::sync::Mutex;
@@ -24,6 +24,7 @@ use tower_http::trace;
 use tracing::info;
 
 pub mod errors;
+mod kube_tool;
 pub mod logger;
 mod routes;
 
@@ -46,41 +47,30 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
 }
 
 async fn fetch_state(
-    context: Option<String>,
-    namespace: Option<String>,
+    memgraph_uri: String,
+    resolver: ClusterStateResolver,
     cluster_state: SharedClusterState,
     token: CancellationToken,
 ) -> errors::Result<()> {
     info!("Starting fetch_state");
     let mut id: usize = 0;
-    let kube_opts = KubeConfigOptions {
-        context,
-        cluster: None,
-        user: None,
-    };
-    let resolver = ClusterStateResolver::new(&kube_opts, namespace.as_deref()).await?;
     loop {
-        if token.is_cancelled() {
-            break;
+        tokio::select! {
+            _ = token.cancelled() => {
+                break;
+            },
+            _ = sleep(Duration::from_secs(10)) => {
+                let new_state = resolver.resolve().await?;
+                create_db_state(memgraph_uri.clone(), &new_state).await?;
+
+                {
+                    let mut old_locked_state = cluster_state.lock().unwrap();
+                    *old_locked_state = new_state;
+                }
+
+                id += 1;
+            },
         }
-        let new_state = resolver.resolve().await?;
-
-        {
-            let mut mem_graph = memgraph::Memgraph::try_new(ConnectParams {
-                host: Some(String::from("localhost")),
-                ..Default::default()
-            })?;
-
-            mem_graph.create(&new_state)?;
-        }
-
-        {
-            let mut old_locked_state = cluster_state.lock().unwrap();
-            *old_locked_state = new_state;
-        }
-
-        sleep(Duration::from_millis(400000)).await;
-        id += 1;
     }
     info!("Stopped fetch_state, number of loops {id}");
     Ok(())
@@ -89,25 +79,47 @@ async fn fetch_state(
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> errors::Result<()> {
     logger::setup("INFO");
+    let cluster_name: String =
+        std::env::var("CLUSTER").expect("Env variable `CLUSTER` is required but not present");
+    info!("CLUSTER: {}", cluster_name);
 
-    let context: Option<String> = std::env::var("KUBE_CONTEXT").ok();
-    let namespace: Option<String> = std::env::var("KUBE_NAMESPACE").ok();
-    info!("context: {context:?}, namespace: {namespace:?}");
+    let memgraph_uri: String = std::env::var("MEMGRAPH_URI")
+        .ok()
+        .unwrap_or_else(|| "bolt://localhost:7687".to_string());
+
+    let kube_context: Option<String> = std::env::var("KUBE_CONTEXT").ok();
+    let kube_namespace: Option<String> = std::env::var("KUBE_NAMESPACE").ok();
+    info!("KUBE_CONTEXT: {kube_context:?}, KUBE_NAMESPACE: {kube_namespace:?}");
+
+    let kube_opts = KubeConfigOptions {
+        context: kube_context,
+        cluster: None,
+        user: None,
+    };
+    let resolver =
+        ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
+            .await?;
+    let init_state = resolver.resolve().await?;
+    create_db_state(memgraph_uri.clone(), &init_state).await?;
+    let cluster_state: SharedClusterState = SharedClusterState::new(Mutex::new(init_state));
 
     let token = CancellationToken::new();
 
-    let cluster_state: SharedClusterState =
-        SharedClusterState::new(Mutex::new(ClusterState::new()));
-
     let c0 = cluster_state.clone();
     let t0 = token.clone();
-    let fetch_state_handle =
-        tokio::spawn(async move { fetch_state(context, namespace, c0, t0).await.unwrap() });
+    let memgraph_uri_clone = memgraph_uri.clone();
+    let fetch_state_handle = tokio::spawn(async move {
+        fetch_state(memgraph_uri_clone, resolver, c0, t0)
+            .await
+            .unwrap()
+    });
     info!("Created fetch_state_handle");
 
+    let main_router =
+        routes::create_route(cluster_name, cluster_state.clone(), memgraph_uri).await?;
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
     let route = Router::new()
-        .merge(routes::create_route(cluster_state.clone()).await)
+        .merge(main_router)
         .route("/metrics", get(|| async move { metric_handle.render() }))
         .layer(prometheus_layer)
         .layer(map_response(set_version_header))
@@ -150,6 +162,12 @@ async fn main() -> errors::Result<()> {
     f1.unwrap();
     info!("Server shutdown");
 
+    Ok(())
+}
+
+async fn create_db_state(memgraph_uri: String, new_state: &ClusterState) -> Result<()> {
+    let mut mem_graph = memgraph::Memgraph::try_new_from_url(memgraph_uri.as_str())?;
+    mem_graph.create(new_state)?;
     Ok(())
 }
 

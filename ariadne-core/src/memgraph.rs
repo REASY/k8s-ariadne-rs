@@ -2,9 +2,11 @@ use crate::prelude::*;
 use crate::state::ClusterState;
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
 use k8s_openapi::Metadata;
-use rsmgclient::{ConnectParams, Connection, ConnectionStatus};
-use serde_json::Value;
-use std::collections::HashSet;
+use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record};
+use serde::Serialize;
+use serde_json::{Number, Value};
+use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::time::Instant;
 use thiserror::Error;
 use tracing::{info, trace};
@@ -24,8 +26,26 @@ pub struct Memgraph {
 }
 
 impl Memgraph {
+    pub fn try_new_from_url(url: &str) -> Result<Self> {
+        let binding = url.replace("bolt://", "");
+        let vec = binding.split(":").collect::<Vec<_>>();
+        assert_eq!(vec.len(), 2);
+        let host = vec[0].to_string();
+        let port: u16 = vec[1].parse().map_err(|err| {
+            MemgraphError::ConnectionError(format!("Failed to parse port from url: {err:?}"))
+        })?;
+
+        info!("Connecting to memgraph at {}:{}", host, port);
+
+        let params = ConnectParams {
+            port,
+            host: Some(host),
+            ..Default::default()
+        };
+        Self::try_new(params)
+    }
     pub fn try_new(params: ConnectParams) -> Result<Self> {
-        let mut connection: Connection = Connection::connect(&params)
+        let connection: Connection = Connection::connect(&params)
             .map_err(|e| MemgraphError::ConnectionError(e.to_string()))?;
         let status = connection.status();
         if status != ConnectionStatus::Ready {
@@ -34,19 +54,18 @@ impl Memgraph {
                 "Connection status {status:?}"
             )))?;
         }
-        // Clear the graph.
-        connection
-            .execute_without_results("MATCH (n) DETACH DELETE n;")
-            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
-        connection
-            .commit()
-            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
 
         Ok(Self { connection })
     }
 
     pub fn create(&mut self, cluster_state: &ClusterState) -> Result<()> {
         let s = Instant::now();
+
+        // Clear the graph.
+        self.connection
+            .execute_without_results("MATCH (n) DETACH DELETE n;")
+            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+
         // Create nodes
         let mut unique_types: HashSet<ResourceType> = HashSet::new();
         for node in cluster_state.get_nodes() {
@@ -71,7 +90,7 @@ impl Memgraph {
         // Create edges
         let mut unique_edges: HashSet<(ResourceType, ResourceType, Edge)> = HashSet::new();
         for edge in cluster_state.get_edges() {
-            let create_edge_query = format!("MATCH (u:{:?}), (v:{:?}) WHERE u.metadata.uid = '{}' AND v.metadata.uid = '{}' CREATE (u)-[:{:?}]->(v);",  edge.source_type, edge.target_type, edge.source, edge.target, edge.edge_type);
+            let create_edge_query = format!("MATCH (u:{:?}), (v:{:?}) WHERE u.metadata.uid = '{}' AND v.metadata.uid = '{}' CREATE (u)-[:{:?}]->(v);", edge.source_type, edge.target_type, edge.source, edge.target, edge.edge_type);
             trace!("{}", create_edge_query);
             unique_edges.insert((edge.source_type, edge.target_type, edge.edge_type));
             self.connection
@@ -94,17 +113,36 @@ impl Memgraph {
 
         info!("There are {} edges in this graph", unique_edges.len());
         for (source_type, target_type, edge_type) in &unique_edges {
-            info!(
+            trace!(
                 "(:{:?})-[:{:?}]->(:{:?})",
-                source_type, edge_type, target_type
+                source_type,
+                edge_type,
+                target_type
             );
         }
 
-        for (source_type, target_type, edge_type) in unique_edges {
-            println!("(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})");
-        }
+        // for (source_type, target_type, edge_type) in unique_edges {
+        //     println!("(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})");
+        // }
 
         Result::Ok(())
+    }
+
+    pub fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
+        let cols = self
+            .connection
+            .execute(query, None)
+            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+        let records = self
+            .connection
+            .fetchall()
+            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+        println!("Columns: {:?}, records: {}", cols, records.len());
+        let mut result: Vec<Value> = Vec::with_capacity(records.len());
+        for records in records {
+            result.push(Self::record_to_json(cols.as_slice(), &records)?);
+        }
+        Ok(result)
     }
 
     fn get_create_query(obj: &GenericObject) -> Result<String> {
@@ -456,5 +494,167 @@ impl Memgraph {
         }
         to_cypher_data0(value, &mut cypher_data);
         cypher_data
+    }
+
+    fn record_to_json(columns: &[String], value: &Record) -> Result<Value> {
+        let mut map = serde_json::Map::new();
+        for (col, value) in columns.iter().zip(value.values.as_slice()) {
+            map.insert(col.to_string(), record_to_json0(value)?);
+        }
+        Ok(Value::Object(map))
+    }
+}
+
+fn record_to_json0(value: &rsmgclient::Value) -> Result<Value> {
+    let r = match value {
+        rsmgclient::Value::Null => Value::Null,
+        rsmgclient::Value::Bool(v) => Value::Bool(*v),
+        rsmgclient::Value::Int(n) => Value::Number(Number::from(*n)),
+        rsmgclient::Value::Float(n) => Value::Number(Number::from_f64(*n).unwrap()),
+        rsmgclient::Value::String(s) => Value::String(s.clone()),
+        rsmgclient::Value::List(xs) => {
+            let mut v = Vec::new();
+            for x in xs {
+                v.push(record_to_json0(x)?);
+            }
+            Value::Array(v)
+        }
+        rsmgclient::Value::Date(d) => Value::String(d.format("%Y-%m-%d").to_string()),
+        rsmgclient::Value::LocalTime(lt) => Value::String(lt.format("%H:%M:%S").to_string()),
+        rsmgclient::Value::LocalDateTime(dt) => Value::String(dt.and_utc().to_rfc3339()),
+        rsmgclient::Value::Duration(d) => Value::String(d.to_string()),
+        rsmgclient::Value::Map(m) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in m {
+                map.insert(k.clone(), record_to_json0(v)?);
+            }
+            Value::Object(map)
+        }
+        rsmgclient::Value::Node(n) => serde_json::to_value(Node::try_new(n)?)?,
+        rsmgclient::Value::Relationship(rel) => serde_json::to_value(Relationship::try_new(rel)?)?,
+        rsmgclient::Value::UnboundRelationship(rel) => {
+            serde_json::to_value(UnboundRelationship::try_new(rel)?)?
+        }
+        rsmgclient::Value::Path(path) => serde_json::to_value(Path::try_new(path)?)?,
+    };
+    Ok(r)
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+struct Node {
+    pub id: i64,
+    pub label_count: u32,
+    pub labels: Vec<String>,
+    pub properties: HashMap<String, Value>,
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl Node {
+    pub fn try_new(n: &rsmgclient::Node) -> Result<Self> {
+        let properties = {
+            let mut map = HashMap::new();
+            for (k, v) in &n.properties {
+                map.insert(k.clone(), record_to_json0(v)?);
+            }
+            map
+        };
+        Ok(Self {
+            id: n.id,
+            label_count: n.label_count,
+            labels: n.labels.clone(),
+            properties,
+            type_: "node".to_string(),
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+struct Relationship {
+    pub id: i64,
+    pub start_id: i64,
+    pub end_id: i64,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub properties: HashMap<String, Value>,
+}
+impl Relationship {
+    fn try_new(r: &rsmgclient::Relationship) -> Result<Self> {
+        let properties = {
+            let mut map = HashMap::new();
+            for (k, v) in &r.properties {
+                map.insert(k.clone(), record_to_json0(v)?);
+            }
+            map
+        };
+        Ok(Self {
+            id: r.id,
+            start_id: r.start_id,
+            end_id: r.end_id,
+            label: r.type_.clone(),
+            type_: "relationship".to_string(),
+            properties,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+struct UnboundRelationship {
+    pub id: i64,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub properties: HashMap<String, Value>,
+}
+
+impl UnboundRelationship {
+    fn try_new(r: &rsmgclient::UnboundRelationship) -> Result<Self> {
+        let properties = {
+            let mut map = HashMap::new();
+            for (k, v) in &r.properties {
+                map.insert(k.clone(), record_to_json0(v)?);
+            }
+            map
+        };
+        Ok(Self {
+            id: r.id,
+            label: r.type_.clone(),
+            type_: "unbound_relationship".to_string(),
+            properties,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+struct Path {
+    pub node_count: u32,
+    pub relationship_count: u32,
+    pub nodes: Vec<Node>,
+    pub relationships: Vec<UnboundRelationship>,
+}
+
+impl Path {
+    pub fn try_new(p: &rsmgclient::Path) -> Result<Self> {
+        let nodes = {
+            let mut vec = Vec::new();
+            for n in &p.nodes {
+                vec.push(Node::try_new(n)?);
+            }
+            vec
+        };
+        let relationships = {
+            let mut vec = Vec::new();
+            for r in &p.relationships {
+                vec.push(UnboundRelationship::try_new(r)?);
+            }
+            vec
+        };
+        Ok(Self {
+            node_count: p.node_count,
+            relationship_count: p.relationship_count,
+            nodes,
+            relationships,
+        })
     }
 }

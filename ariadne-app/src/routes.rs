@@ -1,9 +1,14 @@
+use crate::kube_tool::KubeTool;
+use ariadne_core::prelude::*;
 use ariadne_core::state::{DirectedGraph, SharedClusterState};
 use ariadne_core::types::{Edge, ResourceType};
 use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;
 use axum::{Json, Router};
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpService,
+};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
@@ -12,14 +17,30 @@ struct AppState {
     cluster_state: SharedClusterState,
 }
 
-pub async fn create_route(cluster_state: SharedClusterState) -> Router {
+pub async fn create_route(
+    cluster_name: String,
+    cluster_state: SharedClusterState,
+    memgraph_uri: String,
+) -> Result<Router> {
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(KubeTool::new_tool(
+                cluster_name.clone(),
+                memgraph_uri.clone(),
+            ))
+        },
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+
     let state = AppState { cluster_state };
     let get_layer_route = Router::new()
         .route("/index.html", get(html))
         .route("/v1/graph", get(get_graph))
         .route("/v1/metadata", get(get_metadata))
+        .nest_service("/mcp", service)
         .with_state(state);
-    Router::new().merge(get_layer_route)
+    Ok(Router::new().merge(get_layer_route))
 }
 
 #[tracing::instrument(level = "INFO")]
