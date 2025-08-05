@@ -2,6 +2,20 @@ As an expert in Cypher Query Language and Memgraph graph database, please help m
 
 # Important considerations:
 
+## Rules for Cypher query generation
+When generating Cypher queries, follow these rules:
+1. Variable Usage:
+Always reference variables directly, without square brackets.
+- Correct: p['status']['phase']
+- Incorrect: [p]['status']['phase']
+2. Filtering:
+- Use only the WHERE clause for filtering nodes or relationships. Do not use other filtering mechanisms. For example, instead of `MATCH (p:Pod {metadata: {name: 'pyroscope-compactor-2'}})-[:HasLogs]->(l:Logs) RETURN l.content AS logs LIMIT 1` use `MATCH (p:Pod)-[:HasLogs]->(l:Logs) WHERE p.metadata.name = 'pyroscope-compactor-2' RETURN l.content AS logs LIMIT 1`.
+- The EXISTS function is is designed to check for the presence of a specific pattern or path. It expects a single, unambiguous relationship or a simple pattern involving a single relation type and its connected nodes. To achieve the desired outcome of checking for multiple conditions, you should use separate EXISTS calls or structure your query to clearly define the single relation being checked within each EXISTS clause.
+3. Property Names:
+Always use single quotes (') around property names when accessing properties, especially if they may contain special characters.
+- Correct: p['status']['phase']
+- Incorrect: p[status][phase] or p["status"]["phase"]
+
 ## Detailed graph schema
 Node properties:
   Cluster: 4 properties (cluster_url: STRING, info: #/definitions/io.k8s.apimachinery.pkg.version.Info, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
@@ -300,20 +314,6 @@ Referenced types (used via `#/definitions/`):
 (:DaemonSet)-[:PartOf]->(:Cluster)
 (:Pod)-[:HasLogs]->(:Logs)
 ```
-## Rules for Cypher query generation
-When generating Cypher queries, follow these rules:
-1. Variable Usage:
-Always reference variables directly, without square brackets.
-- Correct: p['status']['phase']
-- Incorrect: [p]['status']['phase']
-2. Filtering:
-- Use only the WHERE clause for filtering nodes or relationships. Do not use other filtering mechanisms. For example, instead of `MATCH (p:Pod {metadata: {name: 'pyroscope-compactor-2'}})-[:HasLogs]->(l:Logs) RETURN l.content AS logs LIMIT 1` use `MATCH (p:Pod)-[:HasLogs]->(l:Logs) WHERE p.metadata.name = 'pyroscope-compactor-2' RETURN l.content AS logs LIMIT 1`.
-- The EXISTS function is is designed to check for the presence of a specific pattern or path. It expects a single, unambiguous relationship or a simple pattern involving a single relation type and its connected nodes. To achieve the desired outcome of checking for multiple conditions, you should use separate EXISTS calls or structure your query to clearly define the single relation being checked within each EXISTS clause.
-3. Property Names:
-Always use single quotes (') around property names when accessing properties, especially if they may contain special characters.
-- Correct: p['status']['phase']
-- Incorrect: p[status][phase] or p["status"]["phase"]
-
 ## Hints
 When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Limits and requests for memory are measured in bytes.
 It can be expresses memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. Or the power-of-two equivalents can be used: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: 128974848, 129e6, 129M,  128974848000m, 123Mi. Pay attention to the case of the suffixes.
