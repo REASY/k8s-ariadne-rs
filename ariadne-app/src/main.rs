@@ -79,6 +79,7 @@ async fn fetch_state(
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> errors::Result<()> {
     logger::setup("INFO");
+
     let cluster_name: String =
         std::env::var("CLUSTER").expect("Env variable `CLUSTER` is required but not present");
     info!("CLUSTER: {}", cluster_name);
@@ -108,12 +109,6 @@ async fn main() -> errors::Result<()> {
     let c0 = cluster_state.clone();
     let t0 = token.clone();
     let memgraph_uri_clone = memgraph_uri.clone();
-    let fetch_state_handle = tokio::spawn(async move {
-        fetch_state(memgraph_uri_clone, resolver, c0, t0)
-            .await
-            .unwrap()
-    });
-    info!("Created fetch_state_handle");
 
     let main_router =
         routes::create_route(cluster_name, cluster_state.clone(), memgraph_uri).await?;
@@ -145,10 +140,9 @@ async fn main() -> errors::Result<()> {
         // production.
         .layer(CorsLayer::permissive());
 
-    let http_addr: SocketAddr = format!("{}:{}", "127.0.0.1", "18080").parse().unwrap();
-
-    info!("Server listening for HTTP on http://{}", &http_addr);
-    info!("Index page is on http://{}/index.html", &http_addr);
+    let http_host = std::env::var("HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
+    let http_addr: SocketAddr = format!("{}:{}", http_host, http_port).parse().unwrap();
     let svc = route.into_make_service_with_connect_info::<SocketAddr>();
     let http_listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
     let f = tokio::spawn(async move {
@@ -157,6 +151,16 @@ async fn main() -> errors::Result<()> {
             .await
             .expect("Failed to start server")
     });
+
+    info!("Ariadne is running on http://{} with index page on http://{}/index.html", &http_addr, &http_addr);
+
+    let fetch_state_handle = tokio::spawn(async move {
+        fetch_state(memgraph_uri_clone, resolver, c0, t0)
+            .await
+            .unwrap()
+    });
+    info!("Created fetch_state_handle");
+
     let (f0, f1) = tokio::join!(f, fetch_state_handle);
     f0.unwrap();
     f1.unwrap();

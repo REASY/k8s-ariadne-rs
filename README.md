@@ -43,3 +43,12 @@ KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
 ## Open browser at http://127.0.0.1:18080/index.html
 
 ![img.png](doc/img.png)
+
+# Build docker image
+Run the command below from the root folder of the project
+```console
+docker build --platform linux/amd64 --build-arg BUILD_DATE="$(date +'%Y-%m-%dT%H:%M:%S%z')" \
+    --build-arg COMMIT_SHA=$(git rev-parse HEAD) \
+    . -f docker/Dockerfile \
+   -t k8s-ariadne-rs:0.2.1
+```
