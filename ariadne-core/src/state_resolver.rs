@@ -11,6 +11,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -22,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, log};
+use tracing::{info, log, warn};
 
 pub struct ClusterStateResolver {
     cluster_name: String,
@@ -52,6 +53,7 @@ struct ClusterSnapshot {
     persistent_volume_claims: Vec<PersistentVolumeClaim>,
     nodes: Vec<Node>,
     service_accounts: Vec<ServiceAccount>,
+    events: Vec<Event>,
 }
 
 #[allow(unused)]
@@ -86,6 +88,7 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
             persistent_volume_claims: vec![],
             nodes: vec![],
             service_accounts: vec![],
+            events: vec![],
         }
     }
 });
@@ -108,35 +111,13 @@ impl ClusterStateResolver {
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
         let client = self.kube_client.clone();
         let namespaces: Vec<Namespace> = client.get_namespaces().await?;
+        let events: Vec<Event> = Self::get_events(&client, namespaces.as_slice()).await;
         let nodes: Vec<Node> = client.get_nodes().await.or_else(|err| {
             log::error!("Failed to get Nodes: {err}");
             Result::Ok(vec![])
         })?;
         let pods: Vec<Pod> = client.get_pods().await?;
-        let mut logs: Vec<Option<Logs>> = Vec::with_capacity(pods.len());
-        let mut handles = Vec::new();
-
-        for p in &pods {
-            if let (Some(ns), Some(name)) =
-                (p.metadata.namespace.as_deref(), p.metadata.name.as_deref())
-            {
-                let ns = ns.to_string();
-                let name = name.to_string();
-                let pod_uid = p.metadata.uid.as_ref().unwrap().to_string();
-
-                let client = client.clone();
-                handles.push(tokio::spawn(async move {
-                    match client.get_pod_logs(&ns, &name).await {
-                        Ok(content) => Some(Logs::new(&ns, &name, &pod_uid, content)),
-                        Err(_) => None,
-                    }
-                }));
-            }
-        }
-        for handle in handles {
-            logs.push(handle.await.unwrap_or(None));
-        }
-
+        let logs: Vec<Option<Logs>> = Self::get_logs(&client, &pods).await;
         let deployments: Vec<Deployment> = client.get_deployments().await?;
         let stateful_sets: Vec<StatefulSet> = client.get_stateful_sets().await?;
         let replica_sets: Vec<ReplicaSet> = client.get_replica_sets().await?;
@@ -211,8 +192,75 @@ impl ClusterStateResolver {
             persistent_volume_claims,
             nodes,
             service_accounts,
+            events,
         };
         Ok(snapshot)
+    }
+
+    async fn get_logs(client: &Arc<Box<dyn KubeClient>>, pods: &[Pod]) -> Vec<Option<Logs>> {
+        let mut logs: Vec<Option<Logs>> = Vec::with_capacity(pods.len());
+        let mut handles = Vec::new();
+
+        for p in pods {
+            if let (Some(ns), Some(name)) =
+                (p.metadata.namespace.as_deref(), p.metadata.name.as_deref())
+            {
+                let ns = ns.to_string();
+                let name = name.to_string();
+                let pod_uid = p.metadata.uid.as_ref().unwrap().to_string();
+
+                let client = client.clone();
+                handles.push(tokio::spawn(async move {
+                    match client.get_pod_logs(&ns, &name).await {
+                        Ok(content) => {
+                            println!(
+                                "Logs for pod {}/{} has length {} and {} lines",
+                                ns,
+                                name,
+                                content.len(),
+                                content.lines().count()
+                            );
+                            Some(Logs::new(&ns, &name, &pod_uid, content))
+                        }
+                        Err(_) => None,
+                    }
+                }));
+            }
+        }
+        for handle in handles {
+            logs.push(handle.await.unwrap_or(None));
+        }
+        logs
+    }
+
+    async fn get_events(client: &Arc<Box<dyn KubeClient>>, namespaces: &[Namespace]) -> Vec<Event> {
+        let mut events: Vec<Event> = Vec::with_capacity(namespaces.len());
+        let mut handles = Vec::new();
+
+        for p in namespaces {
+            if let Some(ns) = p.metadata.name.as_deref() {
+                let ns = ns.to_string();
+                let client = client.clone();
+                handles.push(tokio::spawn(async move {
+                    match client.get_events(&ns).await {
+                        Ok(events) => Some(events),
+                        Err(err) => {
+                            warn!("Could not fetch events for namespace {}: {}", ns, err);
+                            None
+                        }
+                    }
+                }));
+            }
+        }
+        for handle in handles {
+            match handle.await.unwrap_or(None) {
+                None => {}
+                Some(mut this_events) => {
+                    events.append(&mut this_events);
+                }
+            }
+        }
+        events
     }
 
     pub async fn resolve(&self) -> Result<ClusterState> {
@@ -272,22 +320,20 @@ impl ClusterStateResolver {
             );
         }
 
-        for logs in snapshot.pods_logs.clone() {
-            if let Some(logs) = logs {
-                let obj_id = ObjectIdentifier {
-                    uid: logs.metadata.uid.as_ref().unwrap().clone(),
-                    name: logs.metadata.name.as_ref().unwrap().clone(),
-                    namespace: logs.metadata.namespace.clone(),
-                    resource_version: None,
-                };
-                let pod_uid = logs.pod_uid.clone();
-                state.add_node(GenericObject {
-                    id: obj_id.clone(),
-                    resource_type: ResourceType::Logs,
-                    attributes: Some(Box::new(ResourceAttributes::Logs { logs })),
-                });
-                state.add_edge(pod_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
-            }
+        for logs in snapshot.pods_logs.clone().into_iter().flatten() {
+            let obj_id = ObjectIdentifier {
+                uid: logs.metadata.uid.as_ref().unwrap().clone(),
+                name: logs.metadata.name.as_ref().unwrap().clone(),
+                namespace: logs.metadata.namespace.clone(),
+                resource_version: None,
+            };
+            let pod_uid = logs.pod_uid.clone();
+            state.add_node(GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::Logs,
+                attributes: Some(Box::new(ResourceAttributes::Logs { logs })),
+            });
+            state.add_edge(pod_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
         }
 
         for item in &snapshot.deployments {
@@ -591,6 +637,31 @@ impl ClusterStateResolver {
         Self::ingress_to_service(&snapshot.ingresses, &snapshot.services, &mut state);
 
         Self::endpoint_to_pod(&snapshot.endpoints, &mut state);
+
+        for item in &snapshot.events {
+            item.metadata.uid.as_ref().inspect(|uid| {
+                state.add_node(GenericObject {
+                    id: ObjectIdentifier {
+                        uid: uid.to_string(),
+                        name: item.metadata.name.as_ref().unwrap().clone(),
+                        namespace: item.metadata.namespace.clone(),
+                        resource_version: None,
+                    },
+                    resource_type: ResourceType::Event,
+                    attributes: Some(Box::new(ResourceAttributes::Event {
+                        event: item.clone(),
+                    })),
+                })
+            });
+
+            let uid = item.metadata.uid.as_ref().unwrap();
+            item.regarding.as_ref().inspect(|regarding| {
+                regarding.uid.as_ref().inspect(|regarding_uid| {
+                    state.add_edge(uid, regarding_uid, Edge::Concerns);
+                });
+            });
+        }
+
         state
     }
 
@@ -608,10 +679,7 @@ impl ClusterStateResolver {
     fn set_runs_on_edge(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
         let node_name_to_node = Self::name_to_uid(nodes.iter().map(|n| &n.metadata));
         for pod in pods {
-            let node_uid = pod
-                .spec
-                .as_ref()
-                .and_then(|s| s.node_name.as_deref());
+            let node_uid = pod.spec.as_ref().and_then(|s| s.node_name.as_deref());
             match node_uid {
                 None => {}
                 Some(node_name) => {
@@ -619,11 +687,9 @@ impl ClusterStateResolver {
                         .get(node_name)
                         .as_ref()
                         .inspect(|node_uid| {
-                            pod.metadata
-                                .uid.as_deref()
-                                .inspect(|pod_uid| {
-                                    state.add_edge(pod_uid, node_uid, Edge::RunsOn);
-                                });
+                            pod.metadata.uid.as_deref().inspect(|pod_uid| {
+                                state.add_edge(pod_uid, node_uid, Edge::RunsOn);
+                            });
                         });
                 }
             }

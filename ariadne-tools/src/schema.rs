@@ -57,7 +57,8 @@ pub fn get_schema(schema: &RootSchema) -> SchemaInfo {
         .as_ref()
         .expect("Root schema should have metadata")
         .title
-        .as_deref().map(|t| t.split('.').next_back().unwrap_or(t))
+        .as_deref()
+        .map(|t| t.split('.').next_back().unwrap_or(t))
         .expect("Root schema metadata should have a title");
 
     let root_type: Type =
@@ -181,11 +182,15 @@ fn get_type_name(schema: &Schema) -> String {
                 panic!("all_of should not contain bools");
             }
             Schema::Object(r) => {
-                let ref_type = r.reference.as_ref().unwrap();
-                if ref_type == "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time" {
-                    "DATETIME_UTC".to_string()
-                } else {
-                    ref_type.to_string()
+                let ref_type = r.reference.as_ref().unwrap().as_str();
+                match ref_type {
+                    "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time" => {
+                        "DATETIME_UTC".to_string()
+                    }
+                    "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.MicroTime" => {
+                        "DATETIME_UTC".to_string()
+                    }
+                    _ => ref_type.to_string(),
                 }
             }
         }

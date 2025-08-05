@@ -5,6 +5,7 @@ use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
     ConfigMap, Endpoints, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
 };
+use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::schemars::schema::RootSchema;
@@ -69,6 +70,7 @@ fn main() {
         schema_for!(Node),
         schema_for!(Namespace),
         schema_for!(ServiceAccount),
+        schema_for!(Event),
     ];
     let mut all_types = logical_types;
     all_types.extend(k8s_types);

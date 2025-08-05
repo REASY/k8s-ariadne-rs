@@ -105,10 +105,7 @@ impl ClusterState {
     }
 
     pub fn to_directed_graph(&self) -> DirectedGraph {
-        let mut vertices: Vec<GraphVertex> = self
-            .get_nodes()
-            .map(GraphVertex::new)
-            .collect();
+        let mut vertices: Vec<GraphVertex> = self.get_nodes().map(GraphVertex::new).collect();
         vertices.sort_by_key(|v| v.id.clone());
 
         let mut edges: Vec<GraphEdge> = self.get_edges().collect();

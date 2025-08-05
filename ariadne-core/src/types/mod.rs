@@ -4,12 +4,13 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
-#[derive(Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Clone, EnumIter)]
+#[derive(Debug, Serialize, Deserialize, PartialOrd, Ord, Eq, Hash, PartialEq, Clone, EnumIter)]
 pub enum ResourceType {
     // Core Workloads
     Pod,
@@ -40,6 +41,9 @@ pub enum ResourceType {
 
     // Identity & Access Control
     ServiceAccount,
+
+    // Event
+    Event,
 
     // Logical resource types
     IngressServiceBackend, //  Represents a backend in an Ingress spec
@@ -84,6 +88,9 @@ pub enum Edge {
 
     // Policy
     AppliesTo, // e.g., NetworkPolicy -> Pod
+
+    // Events
+    Concerns, // e.g. Event -> Pod
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -156,6 +163,9 @@ pub enum ResourceAttributes {
     },
     Logs {
         logs: Logs,
+    },
+    Event {
+        event: Event,
     },
 }
 
