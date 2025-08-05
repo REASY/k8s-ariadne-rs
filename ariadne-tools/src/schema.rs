@@ -57,8 +57,7 @@ pub fn get_schema(schema: &RootSchema) -> SchemaInfo {
         .as_ref()
         .expect("Root schema should have metadata")
         .title
-        .as_deref()
-        .and_then(|t| Some(t.split('.').last().unwrap_or(t)))
+        .as_deref().map(|t| t.split('.').next_back().unwrap_or(t))
         .expect("Root schema metadata should have a title");
 
     let root_type: Type =
@@ -163,7 +162,7 @@ fn get_type_name(schema: &Schema) -> String {
                             SingleOrVec::Vec(_) => "TUPLE".to_string(),
                         })
                         .unwrap_or_else(|| "ANY".to_string());
-                    format!("[{}]", item_type)
+                    format!("[{item_type}]")
                 }
             },
             // The property can be one of several types.

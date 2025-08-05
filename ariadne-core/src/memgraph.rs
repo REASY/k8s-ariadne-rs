@@ -29,10 +29,9 @@ impl Memgraph {
             .map_err(|e| MemgraphError::ConnectionError(e.to_string()))?;
         let status = connection.status();
         if status != ConnectionStatus::Ready {
-            println!("Connection failed with status: {:?}", status);
+            println!("Connection failed with status: {status:?}");
             return Err(MemgraphError::ConnectionError(format!(
-                "Connection status {:?}",
-                status
+                "Connection status {status:?}"
             )))?;
         }
         // Clear the graph.
@@ -51,7 +50,7 @@ impl Memgraph {
         // Create nodes
         let mut unique_types: HashSet<ResourceType> = HashSet::new();
         for node in cluster_state.get_nodes() {
-            let create_query = Self::get_create_query(&node)?;
+            let create_query = Self::get_create_query(node)?;
             trace!("{}", create_query);
             self.connection
                 .execute_without_results(&create_query)
@@ -98,8 +97,7 @@ impl Memgraph {
 
         for (source_type, target_type, edge_type) in unique_edges {
             println!(
-                "(:{:?})-[:{:?}]->(:{:?})",
-                source_type, edge_type, target_type
+                "(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})"
             );
         }
 
@@ -111,141 +109,141 @@ impl Memgraph {
             ResourceType::Pod => {
                 format!(
                     r#"CREATE (n:Pod {});"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Deployment => {
                 format!(
                     r#"CREATE (n:Deployment {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::StatefulSet => {
                 format!(
                     r#"CREATE (n:StatefulSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::ReplicaSet => {
                 format!(
                     r#"CREATE (n:ReplicaSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::DaemonSet => {
                 format!(
                     r#"CREATE (n:DaemonSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Job => {
                 format!(
                     r#"CREATE (n:Job {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Ingress => {
                 format!(
                     r#"CREATE (n:Ingress {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Service => {
                 format!(
                     r#"CREATE (n:Service {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Endpoints => {
                 format!(
                     r#"CREATE (n:Endpoints {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::NetworkPolicy => {
                 format!(
                     r#"CREATE (n:NetworkPolicy {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::ConfigMap => {
                 format!(
                     r#"CREATE (n:ConfigMap {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Provisioner => {
                 format!(
                     r#"CREATE (n:Provisioner {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::StorageClass => {
                 format!(
                     r#"CREATE (n:StorageClass {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::PersistentVolumeClaim => {
                 format!(
                     r#"CREATE (n:PersistentVolumeClaim {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::PersistentVolume => {
                 format!(
                     r#"CREATE (n:PersistentVolume {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Node => {
                 format!(
                     r#"CREATE (n:Node {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
 
             ResourceType::Namespace => {
                 format!(
                     r#"CREATE (n:Namespace {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::ServiceAccount => {
                 format!(
                     r#"CREATE (n:ServiceAccount {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::IngressServiceBackend => {
                 format!(
                     r#"CREATE (n:IngressServiceBackend {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::EndpointAddress => {
                 format!(
                     r#"CREATE (n:EndpointAddress {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Host => {
                 format!(
                     r#"CREATE (n:Host {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
             ResourceType::Cluster => {
                 format!(
                     r#"CREATE (n:Cluster {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
 
             ResourceType::Logs => {
                 format!(
                     r#"CREATE (n:Logs {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(&obj)?)
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
         };
@@ -381,13 +379,11 @@ impl Memgraph {
     }
 
     fn get_create_indices_query(rt: &ResourceType) -> Vec<String> {
-        match rt {
-            _ => vec![
-                format!("CREATE INDEX ON :{rt:?}(metadata.name)"),
-                format!("CREATE INDEX ON :{rt:?}(metadata.uid)"),
-                format!("CREATE INDEX ON :{rt:?}(metadata.namespace)"),
-            ],
-        }
+        vec![
+            format!("CREATE INDEX ON :{rt:?}(metadata.name)"),
+            format!("CREATE INDEX ON :{rt:?}(metadata.uid)"),
+            format!("CREATE INDEX ON :{rt:?}(metadata.namespace)"),
+        ]
     }
 
     fn json_to_cypher(value: &Value) -> String {
@@ -408,34 +404,34 @@ impl Memgraph {
                     cypher_data.push_str(&n.to_string());
                 }
                 Value::String(s) => {
-                    cypher_data.push_str("\"");
+                    cypher_data.push('"');
                     let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
                     cypher_data.push_str(escaped.as_str());
-                    cypher_data.push_str("\"");
+                    cypher_data.push('"');
                 }
                 Value::Array(xs) => {
-                    cypher_data.push_str("[");
+                    cypher_data.push('[');
                     for (idx, x) in xs.iter().enumerate() {
                         to_cypher_data0(x, cypher_data);
                         if idx != xs.len() - 1 {
                             cypher_data.push_str(", ");
                         }
                     }
-                    cypher_data.push_str("]");
+                    cypher_data.push(']');
                 }
                 Value::Object(obj) => {
-                    cypher_data.push_str("{");
+                    cypher_data.push('{');
                     for (idx, (k, v)) in obj.iter().enumerate() {
                         let must_escape = k.contains(".")
                             || k.contains("-")
                             || k.contains(":")
                             || k.contains("/");
                         if must_escape {
-                            cypher_data.push_str("`");
+                            cypher_data.push('`');
                         }
                         cypher_data.push_str(k);
                         if must_escape {
-                            cypher_data.push_str("`");
+                            cypher_data.push('`');
                         }
 
                         cypher_data.push_str(": ");
@@ -444,7 +440,7 @@ impl Memgraph {
                             cypher_data.push_str(", ");
                         }
                     }
-                    cypher_data.push_str("}");
+                    cypher_data.push('}');
                 }
             }
         }

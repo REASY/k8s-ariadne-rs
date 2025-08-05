@@ -79,5 +79,5 @@ fn main() {
     derived_schema.sort_by_key(|x| x.root_type.name.clone());
 
     let prompt = write_schema_prompt(derived_schema);
-    println!("{}", prompt);
+    println!("{prompt}");
 }

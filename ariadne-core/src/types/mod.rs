@@ -655,7 +655,7 @@ pub struct Logs {
 
 impl Logs {
     pub fn new(namespace: &str, name: &str, pod_uid: &str, content: String) -> Self {
-        let uid = format!("logs_{}", pod_uid);
+        let uid = format!("logs_{pod_uid}");
         let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
             annotations: None,
             creation_timestamp: None,

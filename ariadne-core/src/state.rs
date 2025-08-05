@@ -107,7 +107,7 @@ impl ClusterState {
     pub fn to_directed_graph(&self) -> DirectedGraph {
         let mut vertices: Vec<GraphVertex> = self
             .get_nodes()
-            .map(|node| GraphVertex::new(node))
+            .map(GraphVertex::new)
             .collect();
         vertices.sort_by_key(|v| v.id.clone());
 
@@ -133,9 +133,9 @@ impl ClusterState {
 
     pub fn get_edges(&self) -> impl Iterator<Item = GraphEdge> + use<'_> {
         self.graph.all_edges().map(|(from, to, t)| {
-            let source = String::from(self.id_gen.get_by_id(from).unwrap());
+            let source = self.id_gen.get_by_id(from).unwrap();
             let source_resource_type = self.id_to_node.get(&from).unwrap().resource_type.clone();
-            let target = String::from(self.id_gen.get_by_id(to).unwrap());
+            let target = self.id_gen.get_by_id(to).unwrap();
             let target_resource_type = self.id_to_node.get(&to).unwrap().resource_type.clone();
             GraphEdge {
                 source,

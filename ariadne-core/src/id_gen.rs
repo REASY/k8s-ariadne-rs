@@ -38,10 +38,10 @@ impl IdGen {
     }
 
     pub fn get_by_id(&self, id: u32) -> Option<String> {
-        self.id_to_str.get(&id).map(|r| r.clone())
+        self.id_to_str.get(&id).cloned()
     }
 
     pub fn get_id(&self, str: &str) -> Option<u32> {
-        self.str_to_id.get(str).map(|r| *r)
+        self.str_to_id.get(str).copied()
     }
 }

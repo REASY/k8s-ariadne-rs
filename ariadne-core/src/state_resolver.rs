@@ -109,7 +109,7 @@ impl ClusterStateResolver {
         let client = self.kube_client.clone();
         let namespaces: Vec<Namespace> = client.get_namespaces().await?;
         let nodes: Vec<Node> = client.get_nodes().await.or_else(|err| {
-            log::error!("Failed to get Nodes: {}", err);
+            log::error!("Failed to get Nodes: {err}");
             Result::Ok(vec![])
         })?;
         let pods: Vec<Pod> = client.get_pods().await?;
@@ -155,7 +155,7 @@ impl ClusterStateResolver {
             .get_storage_classes()
             .await
             .or_else(|err| {
-                log::error!("Failed to get StorageClasses: {}", err);
+                log::error!("Failed to get StorageClasses: {err}");
                 Result::Ok(vec![])
             })?;
         let persistent_volumes: Vec<PersistentVolume> = self
@@ -163,7 +163,7 @@ impl ClusterStateResolver {
             .get_persistent_volumes()
             .await
             .or_else(|err| {
-                log::error!("Failed to get PersistentVolumes: {}", err);
+                log::error!("Failed to get PersistentVolumes: {err}");
                 Result::Ok(vec![])
             })?;
         let persistent_volume_claims: Vec<PersistentVolumeClaim> = self
@@ -171,7 +171,7 @@ impl ClusterStateResolver {
             .get_persistent_volume_claims()
             .await
             .or_else(|err| {
-                log::error!("Failed to get PersistentVolumeClaimes: {}", err);
+                log::error!("Failed to get PersistentVolumeClaimes: {err}");
                 Result::Ok(vec![])
             })?;
 
@@ -524,13 +524,13 @@ impl ClusterStateResolver {
             );
         }
 
-        Self::set_manages_edge_all(&snapshot, &mut state);
+        Self::set_manages_edge_all(snapshot, &mut state);
 
         let mut service_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
             Vec::new();
         for item in &snapshot.services {
             item.metadata.uid.as_ref().inspect(|uid| {
-                let maybe_selector = item.spec.as_ref().map(|s| s.selector.as_ref()).flatten();
+                let maybe_selector = item.spec.as_ref().and_then(|s| s.selector.as_ref());
                 maybe_selector.inspect(|tree| {
                     service_selectors.push((uid.as_str(), tree));
                 });
@@ -557,8 +557,8 @@ impl ClusterStateResolver {
                                 let claim_name = pvc.claim_name.as_str();
                                 let pvc_uid = pvc_name_to_uid
                                     .get(claim_name)
-                                    .expect(format!("PVC `{}` not found", claim_name).as_str());
-                                state.add_edge(*pod_uid, pvc_uid, Edge::ClaimsVolume);
+                                    .unwrap_or_else(|| panic!("PVC `{claim_name}` not found"));
+                                state.add_edge(pod_uid, pvc_uid, Edge::ClaimsVolume);
                             });
                         });
                     });
@@ -571,7 +571,7 @@ impl ClusterStateResolver {
                                 pod_selector.get(name).map(|v| v == value).unwrap_or(false)
                             });
                             if is_connected {
-                                state.add_edge(*uid, pod_uid.as_str(), Edge::Selects);
+                                state.add_edge(uid, pod_uid.as_str(), Edge::Selects);
                             }
                         }
                     }
@@ -594,15 +594,15 @@ impl ClusterStateResolver {
         state
     }
 
-    fn set_manages_edge_all(snapshot: &ClusterSnapshot, mut state: &mut ClusterState) {
-        Self::set_manages_edge(&snapshot.pods, &mut state);
-        Self::set_manages_edge(&snapshot.replica_sets, &mut state);
-        Self::set_manages_edge(&snapshot.stateful_sets, &mut state);
-        Self::set_manages_edge(&snapshot.daemon_sets, &mut state);
-        Self::set_manages_edge(&snapshot.deployments, &mut state);
-        Self::set_manages_edge(&snapshot.endpoints, &mut state);
-        Self::set_manages_edge(&snapshot.persistent_volume_claims, &mut state);
-        Self::set_manages_edge(&snapshot.ingresses, &mut state);
+    fn set_manages_edge_all(snapshot: &ClusterSnapshot, state: &mut ClusterState) {
+        Self::set_manages_edge(&snapshot.pods, state);
+        Self::set_manages_edge(&snapshot.replica_sets, state);
+        Self::set_manages_edge(&snapshot.stateful_sets, state);
+        Self::set_manages_edge(&snapshot.daemon_sets, state);
+        Self::set_manages_edge(&snapshot.deployments, state);
+        Self::set_manages_edge(&snapshot.endpoints, state);
+        Self::set_manages_edge(&snapshot.persistent_volume_claims, state);
+        Self::set_manages_edge(&snapshot.ingresses, state);
     }
 
     fn set_runs_on_edge(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
@@ -611,8 +611,7 @@ impl ClusterStateResolver {
             let node_uid = pod
                 .spec
                 .as_ref()
-                .map(|s| s.node_name.as_ref().map(|x| x.as_str()))
-                .flatten();
+                .and_then(|s| s.node_name.as_deref());
             match node_uid {
                 None => {}
                 Some(node_name) => {
@@ -621,9 +620,7 @@ impl ClusterStateResolver {
                         .as_ref()
                         .inspect(|node_uid| {
                             pod.metadata
-                                .uid
-                                .as_ref()
-                                .map(|x| x.as_str())
+                                .uid.as_deref()
                                 .inspect(|pod_uid| {
                                     state.add_edge(pod_uid, node_uid, Edge::RunsOn);
                                 });
@@ -680,7 +677,7 @@ impl ClusterStateResolver {
                     spec.rules.as_ref().inspect(|rules| {
                         rules.iter().for_each(|rule| {
                             rule.host.as_ref().inspect(|host| {
-                                let host_uid = format!("{}_{}", ingress_id, host);
+                                let host_uid = format!("{ingress_id}_{host}");
                                 let obj_id = ObjectIdentifier {
                                     uid: host_uid.clone(),
                                     name: (*host).clone(),
@@ -702,7 +699,7 @@ impl ClusterStateResolver {
                                     p.backend.service.as_ref().inspect(|s| {
                                         let service_name = s.name.as_str();
                                         let ingress_svc_backend_uid =
-                                            format!("{}_{}", ingress_id, service_name);
+                                            format!("{ingress_id}_{service_name}");
                                         // Prepare for the edges:
                                         // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
                                         // 2. (IngressBackend) [:TargetsService]-> Service
@@ -719,12 +716,12 @@ impl ClusterStateResolver {
                                             attributes: Some(Box::new(
                                                 ResourceAttributes::IngressServiceBackend {
                                                     ingress_service_backend:
-                                                        IngressServiceBackend::new(&obj_id, &s),
+                                                        IngressServiceBackend::new(&obj_id, s),
                                                 },
                                             )),
                                         });
                                         state.add_edge(
-                                            &ingress_id,
+                                            ingress_id,
                                             &ingress_svc_backend_uid,
                                             Edge::DefinesBackend,
                                         );
@@ -767,7 +764,7 @@ impl ClusterStateResolver {
                                     attributes: Some(Box::new(
                                         ResourceAttributes::EndpointAddress {
                                             endpoint_address: EndpointAddress::new(
-                                                &obj_id, &address,
+                                                &obj_id, address,
                                             ),
                                         },
                                     )),
