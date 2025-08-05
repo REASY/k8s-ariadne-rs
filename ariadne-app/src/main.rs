@@ -152,7 +152,10 @@ async fn main() -> errors::Result<()> {
             .expect("Failed to start server")
     });
 
-    info!("Ariadne is running on http://{} with index page on http://{}/index.html", &http_addr, &http_addr);
+    info!(
+        "Ariadne is running on http://{} with index page on http://{}/index.html",
+        &http_addr, &http_addr
+    );
 
     let fetch_state_handle = tokio::spawn(async move {
         fetch_state(memgraph_uri_clone, resolver, c0, t0)

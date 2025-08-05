@@ -115,8 +115,13 @@
 </div>
 
 <script>
-    const metadata_url = `http://${window.location.host}/v1/metadata`;
-    const graph_url = `http://${window.location.host}/v1/graph`;
+    const server_url = `${window.location.protocol}//${window.location.host}`;
+    const metadata_url = `${server_url}/v1/metadata`;
+    const graph_url = `${server_url}/v1/graph`;
+
+    console.log(`Using server URL: ${server_url}`);
+    console.log(`Using metadata URL: ${metadata_url}`);
+    console.log(`Using graph URL: ${graph_url}`);
 
     // --- 2. Main Application Logic ---
     document.addEventListener("DOMContentLoaded", () => {

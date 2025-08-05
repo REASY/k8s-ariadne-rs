@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct ClusterStateResolver {
     cluster_name: String,
@@ -201,9 +201,12 @@ impl ClusterStateResolver {
 
                 let client = client.clone();
                 handles.push(tokio::spawn(async move {
-                    match client.get_pod_logs(&ns, &name).await {
+                    match client.get_pod_logs(&ns, &name, None).await {
                         Ok(content) => Some(Logs::new(&ns, &name, &pod_uid, content)),
-                        Err(_) => None,
+                        Err(err) => {
+                            warn!("Unable to fetch the logs for pod {ns}/{name}: {}", err);
+                            None
+                        }
                     }
                 }));
             }

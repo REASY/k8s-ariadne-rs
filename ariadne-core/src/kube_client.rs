@@ -39,7 +39,12 @@ pub trait KubeClient: Sync + Send {
     async fn get_service_accounts(&self) -> Result<Vec<ServiceAccount>>;
     async fn apiserver_version(&self) -> Result<Info>;
     async fn get_cluster_url(&self) -> Result<String>;
-    async fn get_pod_logs(&self, namespace: &str, pod_name: &str) -> Result<String>;
+    async fn get_pod_logs(
+        &self,
+        namespace: &str,
+        pod_name: &str,
+        container: Option<String>,
+    ) -> Result<String>;
     async fn get_events(&self, namespace: &str) -> Result<Vec<Event>>;
 }
 
@@ -235,10 +240,15 @@ impl KubeClient for KubeClientImpl {
         Ok(self.config.cluster_url.to_string())
     }
 
-    async fn get_pod_logs(&self, namespace: &str, pod_name: &str) -> Result<String> {
+    async fn get_pod_logs(
+        &self,
+        namespace: &str,
+        pod_name: &str,
+        container: Option<String>,
+    ) -> Result<String> {
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
         let log_params = LogParams {
-            container: None,
+            container: container,
             follow: false,
             limit_bytes: None,
             pretty: false,
