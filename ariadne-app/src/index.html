@@ -115,11 +115,8 @@
 </div>
 
 <script>
-
-
-    const metadata_url = "http://127.0.0.1:18080/v1/metadata";
-    const graph_url = "http://127.0.0.1:18080/v1/graph";
-
+    const metadata_url = `http://${window.location.host}/v1/metadata`;
+    const graph_url = `http://${window.location.host}/v1/graph`;
 
     // --- 2. Main Application Logic ---
     document.addEventListener("DOMContentLoaded", () => {
