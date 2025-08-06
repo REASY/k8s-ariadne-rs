@@ -35,9 +35,9 @@ pub async fn create_route(
 
     let state = AppState { cluster_state };
     let get_layer_route = Router::new()
-        .route("/index.html", get(html))
-        .route("/v1/graph", get(get_graph))
-        .route("/v1/metadata", get(get_metadata))
+        .route("/render/index.html", get(html))
+        .route("/render/v1/graph", get(get_graph))
+        .route("/render/v1/metadata", get(get_metadata))
         .nest_service("/mcp", service)
         .with_state(state);
     Ok(Router::new().merge(get_layer_route))

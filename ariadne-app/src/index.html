@@ -115,7 +115,8 @@
 </div>
 
 <script>
-    const server_url = `${window.location.protocol}//${window.location.host}`;
+    const path = window.location.pathname.replace("/index.html", "");
+    const server_url = `${window.location.protocol}//${window.location.host}${path}`;
     const metadata_url = `${server_url}/v1/metadata`;
     const graph_url = `${server_url}/v1/graph`;
 

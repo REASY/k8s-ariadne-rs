@@ -153,7 +153,7 @@ async fn main() -> errors::Result<()> {
     });
 
     info!(
-        "Ariadne is running on http://{} with index page on http://{}/index.html",
+        "Ariadne is running on http://{} with index page on http://{}/render/index.html",
         &http_addr, &http_addr
     );
 
