@@ -8,6 +8,7 @@ FROM ubuntu:25.04
 
 ARG COMMIT_SHA
 ARG BUILD_DATE
+ARG VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -20,7 +21,7 @@ LABEL \
     org.opencontainers.image.description="Ariadne" \
     org.opencontainers.image.url="https://github.com/REASY/k8s-ariadne-rs" \
     org.opencontainers.image.source="https://github.com/REASY/k8s-ariadne-rs.git" \
-    org.opencontainers.image.version="1.0" \
+    org.opencontainers.image.version="$VERSION" \
     org.opencontainers.image.licenses="MIT License" \
     org.opencontainers.image.authors="Artavazd Balaian <reasyu@gmail.com>" \
     org.opencontainers.image.base.name="ubuntu:25.04" \

@@ -47,8 +47,9 @@ KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
 # Build docker image
 Run the command below from the root folder of the project
 ```console
-docker build --platform linux/amd64 --build-arg BUILD_DATE="$(date +'%Y-%m-%dT%H:%M:%S%z')" \
+APP_VERSION=$(cargo pkgid --manifest-path ariadne-app/Cargo.toml | cut -d '#' -f2); docker build --platform linux/amd64 --build-arg BUILD_DATE="$(date +'%Y-%m-%dT%H:%M:%S%z')" \
     --build-arg COMMIT_SHA=$(git rev-parse HEAD) \
+    --build-arg VERSION=$(cargo pkgid --manifest-path ariadne-app/Cargo.toml | cut -d '#' -f2) \
     . -f docker/Dockerfile \
-   -t k8s-ariadne-rs:0.2.1
+   -t k8s-ariadne-rs:$APP_VERSION
 ```
