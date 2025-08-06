@@ -13,7 +13,7 @@ edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
 rust-version = "1.87.0"
-version = "0.2.4"
+version = "0.2.5"
 
 [workspace.dependencies]
 ariadne-app = { path = "ariadne-app" }
@@ -48,6 +48,8 @@ inherits = "release"
 debug = true
 strip = false
 
+[profile.release]
+debug = true
 
 [workspace.lints.clippy]
 # Detects large stack-allocated futures that may cause stack overflow crashes (see threshold in clippy.toml)

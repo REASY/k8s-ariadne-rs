@@ -137,7 +137,6 @@ impl Memgraph {
             .connection
             .fetchall()
             .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
-        println!("Columns: {:?}, records: {}", cols, records.len());
         let mut result: Vec<Value> = Vec::with_capacity(records.len());
         for records in records {
             result.push(Self::record_to_json(cols.as_slice(), &records)?);

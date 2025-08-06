@@ -12,7 +12,7 @@ ARG VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update -y && apt-get install iputils-ping net-tools curl -y && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get install iputils-ping net-tools curl binutils python3 pkg-config libdw-dev libssl-dev libsasl2-dev git unzip -y && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/cargo/bin/ariadne-app /usr/local/bin/ariadne-app
 CMD ["ariadne-app"]
 

@@ -21,7 +21,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace;
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod errors;
 mod kube_tool;
@@ -51,23 +51,32 @@ async fn fetch_state(
     resolver: ClusterStateResolver,
     cluster_state: SharedClusterState,
     token: CancellationToken,
+    poll_interval: Duration,
 ) -> errors::Result<()> {
-    info!("Starting fetch_state");
+    info!("Starting fetch_state with poll_interval {poll_interval:?}");
     let mut id: usize = 0;
+
+    let fetch_and_save_fn = || async {
+        let new_state = resolver.resolve().await?;
+        create_db_state(memgraph_uri.clone(), &new_state).await?;
+        {
+            let mut old_locked_state = cluster_state.lock().unwrap();
+            *old_locked_state = new_state;
+        }
+        errors::Result::Ok(())
+    };
     loop {
         tokio::select! {
             _ = token.cancelled() => {
                 break;
             },
-            _ = sleep(Duration::from_secs(10)) => {
-                let new_state = resolver.resolve().await?;
-                create_db_state(memgraph_uri.clone(), &new_state).await?;
-
-                {
-                    let mut old_locked_state = cluster_state.lock().unwrap();
-                    *old_locked_state = new_state;
+            _ = sleep(poll_interval) => {
+                match fetch_and_save_fn().await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!("Error in fetch_and_save_fn at iteration {id}: {:?}", err);
+                    }
                 }
-
                 id += 1;
             },
         }
@@ -157,8 +166,15 @@ async fn main() -> errors::Result<()> {
         &http_addr, &http_addr
     );
 
+    let poll_interval = Duration::from_secs(
+        std::env::var("POLL_INTERVAL_SECONDS")
+            .iter()
+            .flat_map(|s| s.parse())
+            .next()
+            .unwrap_or(30),
+    );
     let fetch_state_handle = tokio::spawn(async move {
-        fetch_state(memgraph_uri_clone, resolver, c0, t0)
+        fetch_state(memgraph_uri_clone, resolver, c0, t0, poll_interval)
             .await
             .unwrap()
     });

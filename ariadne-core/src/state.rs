@@ -1,10 +1,10 @@
 use crate::id_gen::{GetNextIdResult, IdGen};
-use crate::types::{Edge, GenericObject, ResourceType};
+use crate::types::{Cluster, Edge, GenericObject, ResourceType};
 use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::warn;
+use tracing::trace;
 
 pub type NodeId = u32;
 
@@ -62,16 +62,18 @@ macro_rules! create_generic_object {
     };
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ClusterState {
+    pub cluster: Cluster,
     graph: DiGraphMap<NodeId, Edge>,
     id_gen: IdGen,
     id_to_node: HashMap<NodeId, GenericObject>,
 }
 
 impl ClusterState {
-    pub fn new() -> Self {
+    pub fn new(cluster: Cluster) -> Self {
         ClusterState {
+            cluster,
             graph: DiGraphMap::new(),
             id_gen: IdGen::new(),
             id_to_node: HashMap::new(),
@@ -99,7 +101,7 @@ impl ClusterState {
                 self.graph.add_edge(from, to, edge);
             }
             (from_id, to_id) => {
-                warn!("Node(s) do not exist, source: {source}, from_id: {from_id:?}, target: {target}, to_id: {to_id:?}, edge: {edge:?}")
+                trace!("Node(s) do not exist, source: {source}, from_id: {from_id:?}, target: {target}, to_id: {to_id:?}, edge: {edge:?}")
             }
         }
     }

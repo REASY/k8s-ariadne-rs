@@ -139,6 +139,8 @@
         async function initializeGraph() {
             try {
                 const graphMetadata = await fetch_graph(metadata_url);
+                console.log("Cluster info");
+                console.log(graphMetadata.cluster);
 
                 // --- 1. Data and Color Scales ---
                 const node_domain = graphMetadata.resource_types;

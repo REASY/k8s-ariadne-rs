@@ -1,7 +1,7 @@
 use crate::kube_tool::KubeTool;
 use ariadne_core::prelude::*;
 use ariadne_core::state::{DirectedGraph, SharedClusterState};
-use ariadne_core::types::{Edge, ResourceType};
+use ariadne_core::types::{Cluster, Edge, ResourceType};
 use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;
@@ -53,6 +53,7 @@ async fn get_graph(State(state): State<AppState>) -> Json<DirectedGraph> {
 pub struct GraphMetadata {
     resource_types: Vec<ResourceType>,
     edge_types: Vec<Edge>,
+    cluster: Cluster,
 }
 
 #[tracing::instrument(level = "INFO")]
@@ -60,7 +61,13 @@ async fn get_metadata(State(state): State<AppState>) -> Json<GraphMetadata> {
     let resource_types: Vec<ResourceType> = ResourceType::iter().collect();
     let edge_types: Vec<Edge> = Edge::iter().collect();
 
+    let cluster = {
+        let lock = state.cluster_state.lock().unwrap();
+        lock.cluster.clone()
+    };
+
     Json(GraphMetadata {
+        cluster: cluster,
         resource_types,
         edge_types,
     })

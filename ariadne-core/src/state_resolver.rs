@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{info, trace};
 
 pub struct ClusterStateResolver {
     cluster_name: String,
@@ -209,7 +209,7 @@ impl ClusterStateResolver {
                     match client.get_pod_logs(&ns, pod_name.as_str(), Some(container_name.clone())).await {
                         Ok(content) => Some(Logs::new(&ns, &container_name, &container_uid, content)),
                         Err(err) => {
-                            warn!("Unable to fetch the logs for pod {ns}/{pod_name} and container {container_name}: {}", err);
+                            trace!("Unable to fetch the logs for pod {ns}/{pod_name} and container {container_name}: {}", err);
                             None
                         }
                     }
@@ -258,7 +258,7 @@ impl ClusterStateResolver {
     }
 
     fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {
-        let mut state = ClusterState::new();
+        let mut state = ClusterState::new(snapshot.cluster.clone());
         let cluster_uid: String = {
             let obj_id = ObjectIdentifier {
                 uid: snapshot.cluster.metadata.uid.as_ref().unwrap().to_string(),
