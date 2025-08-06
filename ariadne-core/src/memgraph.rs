@@ -120,10 +120,10 @@ impl Memgraph {
                 target_type
             );
         }
-
-        // for (source_type, target_type, edge_type) in unique_edges {
-        //     println!("(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})");
-        // }
+        println!("There are {} edges in this graph", unique_edges.len());
+        for (source_type, target_type, edge_type) in unique_edges {
+            println!("(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})");
+        }
 
         Result::Ok(())
     }
@@ -286,7 +286,12 @@ impl Memgraph {
                     Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
-
+            ResourceType::Container => {
+                format!(
+                    r#"CREATE (n:Container {})"#,
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
+                )
+            }
             ResourceType::Logs => {
                 format!(
                     r#"CREATE (n:Logs {})"#,
@@ -408,6 +413,7 @@ impl Memgraph {
             }
             ResourceAttributes::Host { host } => serde_json::to_value(host)?,
             ResourceAttributes::Cluster { cluster: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Container { container: context } => serde_json::to_value(context)?,
         };
 
         Ok(v)

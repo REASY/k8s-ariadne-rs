@@ -248,7 +248,7 @@ impl KubeClient for KubeClientImpl {
     ) -> Result<String> {
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
         let log_params = LogParams {
-            container: container,
+            container,
             follow: false,
             limit_bytes: None,
             pretty: false,

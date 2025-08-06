@@ -16,7 +16,7 @@ mod schema;
 
 use crate::schema::{get_schema, write_schema_prompt, SchemaInfo};
 use ariadne_core::types::{
-    Cluster, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
+    Cluster, Container, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
 };
 use k8s_openapi::schemars::schema_for;
 
@@ -52,6 +52,7 @@ fn main() {
         schema_for!(Host),
         schema_for!(Cluster),
         schema_for!(Logs),
+        schema_for!(Container),
     ];
     let k8s_types: Vec<RootSchema> = vec![
         schema_for!(Pod),

@@ -37,7 +37,8 @@ struct ClusterSnapshot {
     cluster: Cluster,
     namespaces: Vec<Namespace>,
     pods: Vec<Pod>,
-    pods_logs: Vec<Option<Logs>>,
+    containers: Vec<Container>,
+    container_logs: Vec<Logs>,
     deployments: Vec<Deployment>,
     stateful_sets: Vec<StatefulSet>,
     replica_sets: Vec<ReplicaSet>,
@@ -71,8 +72,9 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
                 retrieved_at: Default::default(),
             },
             namespaces: vec![],
+            containers: vec![],
             pods: vec![],
-            pods_logs: vec![],
+            container_logs: vec![],
             deployments: vec![],
             stateful_sets: vec![],
             replica_sets: vec![],
@@ -116,7 +118,8 @@ impl ClusterStateResolver {
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
         let pods: Vec<Pod> = client.get_pods().await?;
-        let logs: Vec<Option<Logs>> = Self::get_logs(&client, &pods).await;
+        let containers: Vec<Container> = Self::get_containers(&pods)?;
+        let logs: Vec<Logs> = Self::get_logs(&client, &containers).await;
         let deployments: Vec<Deployment> = client.get_deployments().await?;
         let stateful_sets: Vec<StatefulSet> = client.get_stateful_sets().await?;
         let replica_sets: Vec<ReplicaSet> = client.get_replica_sets().await?;
@@ -166,7 +169,8 @@ impl ClusterStateResolver {
             cluster,
             namespaces,
             pods,
-            pods_logs: logs,
+            containers,
+            container_logs: logs,
             deployments,
             stateful_sets,
             replica_sets,
@@ -187,24 +191,25 @@ impl ClusterStateResolver {
         Ok(snapshot)
     }
 
-    async fn get_logs(client: &Arc<Box<dyn KubeClient>>, pods: &[Pod]) -> Vec<Option<Logs>> {
-        let mut logs: Vec<Option<Logs>> = Vec::with_capacity(pods.len());
+    async fn get_logs(client: &Arc<Box<dyn KubeClient>>, containers: &[Container]) -> Vec<Logs> {
+        let mut all_logs: Vec<Logs> = Vec::with_capacity(containers.len());
         let mut handles = Vec::new();
 
-        for p in pods {
+        for c in containers {
             if let (Some(ns), Some(name)) =
-                (p.metadata.namespace.as_deref(), p.metadata.name.as_deref())
+                (c.metadata.namespace.as_deref(), c.metadata.name.as_deref())
             {
                 let ns = ns.to_string();
-                let name = name.to_string();
-                let pod_uid = p.metadata.uid.as_ref().unwrap().to_string();
+                let pod_name = c.pod_name.to_string();
+                let container_name = name.to_string();
+                let container_uid = c.metadata.uid.as_ref().unwrap().to_string();
 
                 let client = client.clone();
                 handles.push(tokio::spawn(async move {
-                    match client.get_pod_logs(&ns, &name, None).await {
-                        Ok(content) => Some(Logs::new(&ns, &name, &pod_uid, content)),
+                    match client.get_pod_logs(&ns, pod_name.as_str(), Some(container_name.clone())).await {
+                        Ok(content) => Some(Logs::new(&ns, &container_name, &container_uid, content)),
                         Err(err) => {
-                            warn!("Unable to fetch the logs for pod {ns}/{name}: {}", err);
+                            warn!("Unable to fetch the logs for pod {ns}/{pod_name} and container {container_name}: {}", err);
                             None
                         }
                     }
@@ -212,9 +217,11 @@ impl ClusterStateResolver {
             }
         }
         for handle in handles {
-            logs.push(handle.await.unwrap_or(None));
+            if let Ok(Some(logs)) = handle.await {
+                all_logs.push(logs);
+            }
         }
-        logs
+        all_logs
     }
 
     async fn get_events(client: &Arc<Box<dyn KubeClient>>, namespaces: &[Namespace]) -> Vec<Event> {
@@ -297,21 +304,55 @@ impl ClusterStateResolver {
                 item.metadata.namespace.as_deref(),
             );
         }
+        for item in &snapshot.containers {
+            let obj_id = ObjectIdentifier {
+                uid: item.metadata.uid.as_ref().unwrap().clone(),
+                name: item.metadata.name.as_ref().unwrap().clone(),
+                namespace: item.metadata.namespace.clone(),
+                resource_version: None,
+            };
+            state.add_node(GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::Container,
+                attributes: Some(Box::new(ResourceAttributes::Container {
+                    container: item.clone(),
+                })),
+            });
 
-        for logs in snapshot.pods_logs.clone().into_iter().flatten() {
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                item.metadata.uid.as_deref().unwrap(),
+                item.metadata.namespace.as_deref(),
+            );
+
+            let container_uid = item.metadata.uid.as_ref().unwrap().to_string();
+            state.add_edge(container_uid.as_str(), item.pod_uid.as_str(), Edge::Runs);
+        }
+        for logs in &snapshot.container_logs {
             let obj_id = ObjectIdentifier {
                 uid: logs.metadata.uid.as_ref().unwrap().clone(),
                 name: logs.metadata.name.as_ref().unwrap().clone(),
                 namespace: logs.metadata.namespace.clone(),
                 resource_version: None,
             };
-            let pod_uid = logs.pod_uid.clone();
+            let container_uid = logs.container_uid.clone();
             state.add_node(GenericObject {
                 id: obj_id.clone(),
                 resource_type: ResourceType::Logs,
-                attributes: Some(Box::new(ResourceAttributes::Logs { logs })),
+                attributes: Some(Box::new(ResourceAttributes::Logs { logs: logs.clone() })),
             });
-            state.add_edge(pod_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
+
+            Self::connect_part_of_and_belongs_to(
+                &mut state,
+                &namespace_name_to_uid,
+                cluster_uid.as_str(),
+                obj_id.uid.as_str(),
+                obj_id.namespace.as_deref(),
+            );
+
+            state.add_edge(container_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
         }
 
         for item in &snapshot.deployments {
@@ -846,6 +887,43 @@ impl ClusterStateResolver {
                 state.add_edge(item_uid, ns_uid, Edge::BelongsTo);
             });
         });
+    }
+
+    fn get_containers(pods: &[Pod]) -> Result<Vec<Container>> {
+        let mut containers: Vec<Container> = Vec::new();
+        for pod in pods {
+            if let Some(name) = pod.metadata.name.as_ref() {
+                if let Some(ns) = pod.metadata.namespace.as_ref() {
+                    if let Some(uid) = pod.metadata.uid.as_ref() {
+                        if let Some(spec) = pod.spec.as_ref() {
+                            if let Some(inits) = spec.init_containers.as_ref() {
+                                for c in inits {
+                                    let container = Container::new(
+                                        ns,
+                                        name,
+                                        uid,
+                                        c.clone(),
+                                        ContainerType::Init,
+                                    );
+                                    containers.push(container);
+                                }
+                            }
+                            for c in &spec.containers {
+                                let container = Container::new(
+                                    ns,
+                                    name,
+                                    uid,
+                                    c.clone(),
+                                    ContainerType::Standard,
+                                );
+                                containers.push(container);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(containers)
     }
 
     fn name_to_uid<'a, I>(items: I) -> HashMap<&'a str, &'a str>

@@ -47,6 +47,7 @@ You MUST consult this reference before generating any query. This is your single
 ### Node properties:
   Cluster: 5 properties (cluster_url: STRING, info: #/definitions/io.k8s.apimachinery.pkg.version.Info, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, retrieved_at: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time)
   ConfigMap: 6 properties (apiVersion: STRING, binaryData: MAP, data: MAP, immutable: BOOLEAN, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
+  Container: 4 properties (container_type: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, pod_name: STRING, spec: #/definitions/io.k8s.api.core.v1.Container)
   DaemonSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DaemonSetSpec, status: #/definitions/io.k8s.api.apps.v1.DaemonSetStatus)
   Deployment: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/definitions/io.k8s.api.apps.v1.DeploymentSpec, status: #/definitions/io.k8s.api.apps.v1.DeploymentStatus)
   EndpointAddress: 5 properties (hostname: STRING, ip: STRING, metadata: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, nodeName: STRING, targetRef: #/definitions/io.k8s.api.core.v1.ObjectReference)
@@ -299,7 +300,6 @@ You MUST consult this reference before generating any query. This is your single
 This section defines the valid relationships for traversing between nodes.
 ```
 (:Pod)-[:PartOf]->(:Cluster)
-(:Pod)-[:HasLogs]->(:Logs)
 (:Pod)-[:RunsOn]->(:Node)
 (:Pod)-[:BelongsTo]->(:Namespace)
 (:Pod)-[:ClaimsVolume]->(:PersistentVolumeClaim)
@@ -355,4 +355,8 @@ This section defines the valid relationships for traversing between nodes.
 (:EndpointAddress)-[:ListedIn]->(:Endpoints)
 (:EndpointAddress)-[:IsAddressOf]->(:Pod)
 (:Host)-[:IsClaimedBy]->(:Ingress)
+(:Container)-[:Runs]->(:Pod)
+(:Container)-[:BelongsTo]->(:Namespace)
+(:Container)-[:PartOf]->(:Cluster)
+(:Container)-[:HasLogs]->(:Logs)
 ```
