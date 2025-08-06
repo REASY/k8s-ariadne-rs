@@ -7,9 +7,9 @@ When generating Cypher queries, you MUST follow these rules:
 1. Variable Usage: Always reference variables directly, without square brackets.
    - Correct: `p['status']['phase']`
    - Incorrect: `[p]['status']['phase']`
-2. Filtering: Use ONLY the `WHERE` clause for filtering.
-   - Correct: `MATCH (p:Pod)-[:HasLogs]->(l:Logs) WHERE p.metadata.name = 'pyroscope-compactor-2' RETURN l.content AS logs LIMIT 1`
-   - Incorrect: `MATCH (p:Pod {metadata: {name: 'pyroscope-compactor-2'}})-[:HasLogs]->(l:Logs) RETURN l.content AS logs LIMIT 1`
+2. Filtering: Use the `WHERE` clause when filtering nested properties. This is very important because it will cause returning empty result!
+   - Correct: `MATCH (c:Container)-[:HasLogs]->(l:Logs) WHERE c.metadata.name = 'compactor' RETURN l.content AS logs LIMIT 1`
+   - Incorrect: `MATCH (c:Container {metadata: {name: 'compactor'}})-[:HasLogs]->(l:Logs) RETURN l.content AS logs LIMIT 1`
 3. `EXISTS` Function: The `EXISTS` function is designed to check for a single pattern. For multiple conditions, you should use separate `EXISTS` calls.
 4. Property Names: Always use single quotes (') for property names when accessing them.
    - Correct: `p['status']['phase']`
