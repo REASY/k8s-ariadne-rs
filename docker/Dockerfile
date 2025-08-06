@@ -6,13 +6,14 @@ RUN apt-get update -y && apt-get install cmake libclang-dev -y && rm -rf /var/li
 
 FROM ubuntu:25.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -y && apt-get install iputils-ping net-tools curl binutils python3 pkg-config libdw-dev libssl-dev libsasl2-dev git unzip -y && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 ARG COMMIT_SHA
 ARG BUILD_DATE
 ARG VERSION
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update -y && apt-get install iputils-ping net-tools curl binutils python3 pkg-config libdw-dev libssl-dev libsasl2-dev git unzip -y && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/cargo/bin/ariadne-app /usr/local/bin/ariadne-app
 CMD ["ariadne-app"]
 

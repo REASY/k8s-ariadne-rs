@@ -67,7 +67,7 @@ async fn get_metadata(State(state): State<AppState>) -> Json<GraphMetadata> {
     };
 
     Json(GraphMetadata {
-        cluster: cluster,
+        cluster,
         resource_types,
         edge_types,
     })

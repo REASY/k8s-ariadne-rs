@@ -551,7 +551,7 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
                         }),
                     ),
                     (
-                        "nodeName".into(),
+                        "node_name".into(),
                         k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
                             metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
                                 description: Some("Optional: Node hosting this endpoint. This can be used to determine endpoints local to a node.".into()),
@@ -562,7 +562,7 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
                         }),
                     ),
                     (
-                        "targetRef".into(),
+                        "target_ref".into(),
                         {
                             let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::core::v1::ObjectReference>().into_object();
                             schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
@@ -595,7 +595,7 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Host {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-    pub host: String,
+    pub name: String,
 }
 impl Host {
     pub fn new(id: &ObjectIdentifier, host: &str) -> Self {
@@ -618,7 +618,7 @@ impl Host {
         };
         Self {
             metadata: md,
-            host: host.to_string(),
+            name: host.to_string(),
         }
     }
 }
@@ -724,6 +724,13 @@ impl k8s_openapi::schemars::JsonSchema for Container {
                         }),
                     ),
                     (
+                        "pod_uid".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
                         "container_type".into(),
                         k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
                             instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
@@ -804,19 +811,33 @@ impl k8s_openapi::schemars::JsonSchema for Logs {
                 Box::new(k8s_openapi::schemars::schema::InstanceType::Object),
             )),
             object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
-                properties: [(
-                    "content".into(),
-                    k8s_openapi::schemars::schema::Schema::Object(
-                        k8s_openapi::schemars::schema::SchemaObject {
-                            instance_type: Some(
-                                k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
-                                    k8s_openapi::schemars::schema::InstanceType::String,
-                                )),
-                            ),
-                            ..Default::default()
-                        },
+                properties: [
+                    (
+                        "content".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(
+                            k8s_openapi::schemars::schema::SchemaObject {
+                                instance_type: Some(
+                                    k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
+                                        k8s_openapi::schemars::schema::InstanceType::String,
+                                    )),
+                                ),
+                                ..Default::default()
+                            },
+                        ),
                     ),
-                ),
+                    (
+                        "container_uid".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(
+                            k8s_openapi::schemars::schema::SchemaObject {
+                                instance_type: Some(
+                                    k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(
+                                        k8s_openapi::schemars::schema::InstanceType::String,
+                                    )),
+                                ),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                     (
                         "metadata".into(),
                         {
