@@ -13,7 +13,7 @@ edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
 rust-version = "1.87.0"
-version = "0.2.6"
+version = "0.2.7"
 
 [workspace.dependencies]
 ariadne-app = { path = "ariadne-app" }
@@ -29,7 +29,7 @@ k8s-openapi = { version = "0.25.0", features = ["v1_31", "schemars"] }
 kube = "1.1.0"
 petgraph = { version = "0.8.2", features = ["serde-1"] }
 rmcp = { version = "0.3", features = ["server", "transport-streamable-http-server", "macros", "transport-worker"] }
-rsmgclient = { git = "https://github.com/memgraph/rsmgclient.git", rev = "c14a02be2770de89ef9077754fe5b877682c6f22" }
+rsmgclient = { git = "https://github.com/REASY/rsmgclient", rev = "0c9db758e379b743fb53e7d2a02c167a8457607f" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shadow-rs = "1.2.0"
