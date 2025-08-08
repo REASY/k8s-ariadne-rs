@@ -5,7 +5,7 @@ services:
     ports:
       - "7687:7687"
       - "7444:7444"
-    command: ["--log-level=TRACE", "--schema-info-enabled"]
+    command: ["--log-level=INFO", "--schema-info-enabled"]
 
   lab:
     image: memgraph/lab:latest
