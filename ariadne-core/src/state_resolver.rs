@@ -21,6 +21,7 @@ use kube::ResourceExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info, trace};
@@ -32,7 +33,7 @@ pub struct ClusterStateResolver {
     should_export_snapshot: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ClusterSnapshot {
     cluster: Cluster,
     namespaces: Vec<Namespace>,
@@ -60,7 +61,7 @@ struct ClusterSnapshot {
 #[allow(unused)]
 static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
     if true {
-        let bytes = std::fs::read("/home/user/Downloads/snapshot.json").unwrap();
+        let bytes = fs::read("/tmp/snapshot.json").unwrap();
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
         ClusterSnapshot {
@@ -105,7 +106,7 @@ impl ClusterStateResolver {
         Ok(ClusterStateResolver {
             cluster_name,
             kube_client: Arc::new(Box::new(kube_client)),
-            should_export_snapshot: false,
+            should_export_snapshot: true,
         })
     }
 
@@ -250,8 +251,14 @@ impl ClusterStateResolver {
 
     pub async fn resolve(&self) -> Result<ClusterState> {
         let s = Instant::now();
-        let snapshot = self.get_snapshot().await?;
+        let snapshot = CLUSTER_STATE.clone(); // self.get_snapshot().await?;
         info!("Retrieved snapshot in {}ms", s.elapsed().as_millis());
+        if self.should_export_snapshot {
+            let v = serde_json::to_value(&snapshot)?;
+            let json = serde_json::to_string_pretty(&v)?;
+            let path = format!("/tmp/snapshot.json");
+            fs::write(path, json)?;
+        }
 
         let state = Self::create_state(&snapshot);
         Ok(state)
