@@ -60,7 +60,7 @@ struct ClusterSnapshot {
 
 #[allow(unused)]
 static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
-    if true {
+    if false {
         let bytes = fs::read("/tmp/snapshot.json").unwrap();
         serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
     } else {
@@ -106,7 +106,7 @@ impl ClusterStateResolver {
         Ok(ClusterStateResolver {
             cluster_name,
             kube_client: Arc::new(Box::new(kube_client)),
-            should_export_snapshot: true,
+            should_export_snapshot: false,
         })
     }
 
@@ -251,7 +251,7 @@ impl ClusterStateResolver {
 
     pub async fn resolve(&self) -> Result<ClusterState> {
         let s = Instant::now();
-        let snapshot = CLUSTER_STATE.clone(); // self.get_snapshot().await?;
+        let snapshot = self.get_snapshot().await?;
         info!("Retrieved snapshot in {}ms", s.elapsed().as_millis());
         if self.should_export_snapshot {
             let v = serde_json::to_value(&snapshot)?;
