@@ -213,7 +213,7 @@ impl Memgraph {
             }
             ResourceType::EndpointSlice => {
                 format!(
-                    r#"CREATE (n:Endpoints {})"#,
+                    r#"CREATE (n:EndpointSlice {})"#,
                     Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }

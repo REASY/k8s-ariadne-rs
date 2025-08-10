@@ -115,7 +115,6 @@ pub enum Edge {
     Runs,    // e.g., Pod -> Container
 
     // Networking & Routing
-    Selects,        // e.g., Service -> Pod
     DefinesBackend, // e.g., Ingress -> IngressBackend
     TargetsService, // e.g., IngressBackend -> Service
     IsClaimedBy,    // e.g., Host -> Ingress

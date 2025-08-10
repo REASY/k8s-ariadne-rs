@@ -677,26 +677,6 @@ impl ClusterStateResolver {
                             });
                         });
                     });
-
-                match pod.metadata.labels.as_ref() {
-                    None => {}
-                    Some(pod_selector) => {
-                        for (uid, selector) in &service_selectors {
-                            let is_connected = (*selector).iter().all(|(name, value)| {
-                                pod_selector.get(name).map(|v| v == value).unwrap_or(false)
-                            });
-                            if is_connected {
-                                state.add_edge(
-                                    uid,
-                                    ResourceType::Service,
-                                    pod_uid.as_str(),
-                                    ResourceType::Pod,
-                                    Edge::Selects,
-                                );
-                            }
-                        }
-                    }
-                }
             });
         }
         Self::set_runs_on_edge(&snapshot.nodes, &snapshot.pods, &mut state);
@@ -809,22 +789,23 @@ impl ClusterStateResolver {
         cluster_state: &mut ClusterState,
     ) {
         for item in objs {
-            for owner in item.owner_references() {
-                item.uid()
-                    .inspect(|uid| match ResourceType::try_new(owner.kind.as_str()) {
-                        Ok(target_resource_type) => {
+            if let Some(item_uid) = item.uid() {
+                for owner in item.owner_references() {
+                    match ResourceType::try_new(owner.kind.as_str()) {
+                        Ok(owner_resource_type) => {
                             cluster_state.add_edge(
                                 owner.uid.as_ref(),
+                                owner_resource_type,
+                                item_uid.as_ref(),
                                 resource_type.clone(),
-                                uid,
-                                target_resource_type,
                                 Edge::Manages,
                             );
                         }
-                        Err(_) => {
-                            warn!("")
+                        Err(err) => {
+                            warn!("Unable to parse resource type of {:?} from owner reference: {}", owner, err);
                         }
-                    });
+                    }
+                }
             }
         }
     }

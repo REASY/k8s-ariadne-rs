@@ -367,7 +367,6 @@ This section defines the valid relationships for traversing between nodes.
 (:Service)-[:Manages]->(:EndpointSlice)
 (:Service)-[:Concerns]->(:Event)
 (:Service)-[:BelongsTo]->(:Namespace)
-(:Service)-[:Selects]->(:Pod)
 (:ServiceAccount)-[:PartOf]->(:Cluster)
 (:ServiceAccount)-[:Concerns]->(:Event)
 (:ServiceAccount)-[:BelongsTo]->(:Namespace)
