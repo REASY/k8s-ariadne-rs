@@ -1,6 +1,5 @@
 use crate::build::PROJECT_NAME;
 use crate::APP_VERSION;
-use ariadne_core::memgraph;
 use rmcp::model::{
     CallToolResult, Content, GetPromptRequestParam, GetPromptResult, Implementation,
     InitializeRequestParam, InitializeResult, ListPromptsResult, PaginatedRequestParam, Prompt,
@@ -12,6 +11,7 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler,
 };
 
+use ariadne_core::memgraph_async::MemgraphAsync;
 use rmcp::service::RequestContext;
 use std::future::Future;
 
@@ -23,16 +23,16 @@ pub struct ExecuteCypherQueryRequest {
 #[derive(Debug, Clone)]
 pub struct KubeTool {
     cluster_name: String,
-    memgraph_uri: String,
+    memgraph: MemgraphAsync,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl KubeTool {
-    pub fn new_tool(cluster_name: String, memgraph_uri: String) -> Self {
+    pub fn new_tool(cluster_name: String, memgraph: MemgraphAsync) -> Self {
         Self {
             cluster_name,
-            memgraph_uri,
+            memgraph,
             tool_router: Self::tool_router(),
         }
     }
@@ -43,10 +43,10 @@ impl KubeTool {
         Parameters(ExecuteCypherQueryRequest { query }): Parameters<ExecuteCypherQueryRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         let records = {
-            let mut mem_graph = memgraph::Memgraph::try_new_from_url(&self.memgraph_uri)
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-            let records = mem_graph
+            let records = self
+                .memgraph
                 .execute_query(query.as_str())
+                .await
                 .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
             records
         };

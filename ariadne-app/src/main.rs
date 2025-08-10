@@ -1,6 +1,5 @@
-use ariadne_core::memgraph;
-use ariadne_core::prelude::*;
-use ariadne_core::state::{ClusterState, SharedClusterState};
+use ariadne_core::memgraph_async::MemgraphAsync;
+use ariadne_core::state::SharedClusterState;
 use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
 use axum::middleware::map_response;
@@ -47,8 +46,8 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
 }
 
 async fn fetch_state(
-    memgraph_uri: String,
     resolver: ClusterStateResolver,
+    memgraph: MemgraphAsync,
     cluster_state: SharedClusterState,
     token: CancellationToken,
     poll_interval: Duration,
@@ -58,11 +57,12 @@ async fn fetch_state(
 
     let fetch_and_save_fn = || async {
         let new_state = resolver.resolve().await?;
-        create_db_state(memgraph_uri.clone(), &new_state).await?;
         {
             let mut old_locked_state = cluster_state.lock().unwrap();
             *old_locked_state = new_state;
         }
+        memgraph.create(cluster_state.clone()).await?;
+
         errors::Result::Ok(())
     };
     loop {
@@ -106,21 +106,23 @@ async fn main() -> errors::Result<()> {
         cluster: None,
         user: None,
     };
+
+    let memgraph: MemgraphAsync = MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?;
+
     let resolver =
         ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
             .await?;
     let init_state = resolver.resolve().await?;
-    create_db_state(memgraph_uri.clone(), &init_state).await?;
     let cluster_state: SharedClusterState = SharedClusterState::new(Mutex::new(init_state));
+    memgraph.create(cluster_state.clone()).await?;
 
     let token = CancellationToken::new();
 
     let c0 = cluster_state.clone();
     let t0 = token.clone();
-    let memgraph_uri_clone = memgraph_uri.clone();
 
     let main_router =
-        routes::create_route(cluster_name, cluster_state.clone(), memgraph_uri).await?;
+        routes::create_route(cluster_name, cluster_state.clone(), memgraph.clone()).await?;
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
     let route = Router::new()
         .merge(main_router)
@@ -174,7 +176,7 @@ async fn main() -> errors::Result<()> {
             .unwrap_or(30),
     );
     let fetch_state_handle = tokio::spawn(async move {
-        fetch_state(memgraph_uri_clone, resolver, c0, t0, poll_interval)
+        fetch_state(resolver, memgraph, c0, t0, poll_interval)
             .await
             .unwrap()
     });
@@ -185,12 +187,6 @@ async fn main() -> errors::Result<()> {
     f1.unwrap();
     info!("Server shutdown");
 
-    Ok(())
-}
-
-async fn create_db_state(memgraph_uri: String, new_state: &ClusterState) -> Result<()> {
-    let mut mem_graph = memgraph::Memgraph::try_new_from_url(memgraph_uri.as_str())?;
-    mem_graph.create(new_state)?;
     Ok(())
 }
 
