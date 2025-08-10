@@ -3,8 +3,9 @@ use clap::Parser;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
+    ConfigMap, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -16,7 +17,7 @@ mod schema;
 
 use crate::schema::{get_schema, write_schema_prompt, SchemaInfo};
 use ariadne_core::types::{
-    Cluster, Container, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
+    Cluster, Container, Endpoint, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
 };
 use k8s_openapi::schemars::schema_for;
 
@@ -46,32 +47,33 @@ fn main() {
     info!("Received args: {:?}", args);
 
     let logical_types: Vec<RootSchema> = vec![
-        schema_for!(Provisioner),
-        schema_for!(IngressServiceBackend),
+        schema_for!(Cluster),
+        schema_for!(Container),
+        schema_for!(Endpoint),
         schema_for!(EndpointAddress),
         schema_for!(Host),
-        schema_for!(Cluster),
+        schema_for!(IngressServiceBackend),
         schema_for!(Logs),
-        schema_for!(Container),
+        schema_for!(Provisioner),
     ];
     let k8s_types: Vec<RootSchema> = vec![
-        schema_for!(Pod),
-        schema_for!(Deployment),
-        schema_for!(StatefulSet),
-        schema_for!(ReplicaSet),
-        schema_for!(DaemonSet),
-        schema_for!(Job),
-        schema_for!(Ingress),
-        schema_for!(Service),
-        schema_for!(Endpoints),
-        schema_for!(NetworkPolicy),
         schema_for!(ConfigMap),
-        schema_for!(StorageClass),
-        schema_for!(PersistentVolume),
-        schema_for!(Node),
-        schema_for!(Namespace),
-        schema_for!(ServiceAccount),
+        schema_for!(DaemonSet),
+        schema_for!(Deployment),
+        schema_for!(EndpointSlice),
         schema_for!(Event),
+        schema_for!(Ingress),
+        schema_for!(Job),
+        schema_for!(Namespace),
+        schema_for!(NetworkPolicy),
+        schema_for!(Node),
+        schema_for!(PersistentVolume),
+        schema_for!(Pod),
+        schema_for!(ReplicaSet),
+        schema_for!(Service),
+        schema_for!(ServiceAccount),
+        schema_for!(StatefulSet),
+        schema_for!(StorageClass),
     ];
     let mut all_types = logical_types;
     all_types.extend(k8s_types);

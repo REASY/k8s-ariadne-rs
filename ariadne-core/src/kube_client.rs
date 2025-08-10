@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -29,7 +30,7 @@ pub trait KubeClient: Sync + Send {
     async fn get_jobs(&self) -> Result<Vec<Job>>;
     async fn get_ingresses(&self) -> Result<Vec<Ingress>>;
     async fn get_services(&self) -> Result<Vec<Service>>;
-    async fn get_endpoints(&self) -> Result<Vec<Endpoints>>;
+    async fn get_endpoint_slices(&self) -> Result<Vec<EndpointSlice>>;
     async fn get_network_policies(&self) -> Result<Vec<NetworkPolicy>>;
     async fn get_config_maps(&self) -> Result<Vec<ConfigMap>>;
     async fn get_storage_classes(&self) -> Result<Vec<StorageClass>>;
@@ -60,7 +61,7 @@ pub struct KubeClientImpl {
     job_api: Api<Job>,
     ingress_api: Api<Ingress>,
     service_api: Api<Service>,
-    endpoints_api: Api<Endpoints>,
+    endpoint_slices_api: Api<EndpointSlice>,
     network_policy_api: Api<NetworkPolicy>,
     config_map_api: Api<ConfigMap>,
     storage_class_api: Api<StorageClass>,
@@ -116,7 +117,7 @@ impl KubeClientImpl {
             service_api: maybe_ns
                 .map(|ns| Api::namespaced(client.clone(), ns))
                 .unwrap_or_else(|| Api::all(client.clone())),
-            endpoints_api: maybe_ns
+            endpoint_slices_api: maybe_ns
                 .map(|ns| Api::namespaced(client.clone(), ns))
                 .unwrap_or_else(|| Api::all(client.clone())),
             network_policy_api: maybe_ns
@@ -199,8 +200,8 @@ impl KubeClient for KubeClientImpl {
         Self::get_object(&self.service_api).await
     }
 
-    async fn get_endpoints(&self) -> Result<Vec<Endpoints>> {
-        Self::get_object(&self.endpoints_api).await
+    async fn get_endpoint_slices(&self) -> Result<Vec<EndpointSlice>> {
+        Self::get_object(&self.endpoint_slices_api).await
     }
 
     async fn get_network_policies(&self) -> Result<Vec<NetworkPolicy>> {

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::state::ClusterState;
-use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
+use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
 use k8s_openapi::Metadata;
 use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record};
 use serde::Serialize;
@@ -8,6 +8,7 @@ use serde_json::{Number, Value};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::time::Instant;
+use strum::IntoEnumIterator;
 use thiserror::Error;
 use tracing::{info, trace};
 
@@ -106,10 +107,26 @@ impl Memgraph {
             cluster_state.get_edge_count(),
             s.elapsed().as_millis()
         );
+
+        fn is_logical_type(rt: &ResourceType) -> bool {
+            LOGICAL_RESOURCE_TYPES.contains(rt)
+        }
+
+        let all_types_that_can_have_events =
+            ResourceType::iter().filter(|rt| rt != &ResourceType::Event && !is_logical_type(rt));
+        for rt in all_types_that_can_have_events {
+            unique_edges.insert((rt, ResourceType::Event, Edge::Concerns));
+        }
+
         let mut unique_edges: Vec<(ResourceType, ResourceType, Edge)> =
             unique_edges.into_iter().collect::<Vec<_>>();
 
-        unique_edges.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        unique_edges.sort_by(|a, b| {
+            a.0.to_string()
+                .cmp(&b.0.to_string())
+                .then(a.1.to_string().cmp(&b.1.to_string()))
+                .then(a.2.to_string().cmp(&b.2.to_string()))
+        });
 
         info!("There are {} edges in this graph", unique_edges.len());
         for (source_type, target_type, edge_type) in &unique_edges {
@@ -194,7 +211,7 @@ impl Memgraph {
                     Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
-            ResourceType::Endpoints => {
+            ResourceType::EndpointSlice => {
                 format!(
                     r#"CREATE (n:Endpoints {})"#,
                     Self::json_to_cypher(&Self::get_as_json(obj)?)
@@ -270,6 +287,12 @@ impl Memgraph {
             ResourceType::EndpointAddress => {
                 format!(
                     r#"CREATE (n:EndpointAddress {})"#,
+                    Self::json_to_cypher(&Self::get_as_json(obj)?)
+                )
+            }
+            ResourceType::Endpoint => {
+                format!(
+                    r#"CREATE (n:Endpoint {})"#,
                     Self::json_to_cypher(&Self::get_as_json(obj)?)
                 )
             }
@@ -358,7 +381,9 @@ impl Memgraph {
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
-            ResourceAttributes::Endpoints { endpoints: value } => {
+            ResourceAttributes::EndpointSlice {
+                endpoint_slice: value,
+            } => {
                 let mut fixed = value.clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
@@ -413,6 +438,7 @@ impl Memgraph {
             ResourceAttributes::Host { host } => serde_json::to_value(host)?,
             ResourceAttributes::Cluster { cluster: context } => serde_json::to_value(context)?,
             ResourceAttributes::Container { container: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Endpoint { endpoint: context } => serde_json::to_value(context)?,
         };
 
         Ok(v)

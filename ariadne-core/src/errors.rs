@@ -20,6 +20,8 @@ pub enum ErrorKind {
     KubeconfigInferError(#[from] kube::config::InClusterError),
     #[error("MemgraphError: {0}")]
     MemgraphError(#[from] memgraph::MemgraphError),
+    #[error("InvalidResourceTypeError: {0}")]
+    InvalidResourceTypeError(String),
 }
 
 impl<E> From<E> for AriadneError

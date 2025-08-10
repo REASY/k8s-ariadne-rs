@@ -1,16 +1,32 @@
+use crate::errors::{AriadneError, ErrorKind};
+use crate::prelude::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use serde::{Deserialize, Serialize};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use strum_macros::{Display, EnumIter};
 
-#[derive(Debug, Serialize, Deserialize, PartialOrd, Ord, Eq, Hash, PartialEq, Clone, EnumIter)]
+pub static LOGICAL_RESOURCE_TYPES: &[ResourceType] = &[
+    ResourceType::IngressServiceBackend,
+    ResourceType::EndpointAddress,
+    ResourceType::Endpoint,
+    ResourceType::Host,
+    ResourceType::Cluster,
+    ResourceType::Logs,
+    ResourceType::Container,
+];
+
+#[derive(
+    Debug, Display, Serialize, Deserialize, PartialOrd, Ord, Eq, Hash, PartialEq, Clone, EnumIter,
+)]
 pub enum ResourceType {
     // Core Workloads
     Pod,
@@ -23,7 +39,7 @@ pub enum ResourceType {
     // Networking & Discovery
     Ingress,
     Service,
-    Endpoints,
+    EndpointSlice,
     NetworkPolicy,
 
     // Configuration
@@ -48,13 +64,44 @@ pub enum ResourceType {
     // Logical resource types
     IngressServiceBackend, //  Represents a backend in an Ingress spec
     EndpointAddress,       // Represents a single IP address in an Endpoints object
+    Endpoint,              //
     Host,                  // Represents a hostname claimed by an Ingress
     Cluster,               // Represents a cluster in which K8s objects exist
     Logs,                  // Represents logs of a pod
     Container,             // Represents a container of a pod
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, EnumIter)]
+impl ResourceType {
+    pub fn try_new(kind: &str) -> Result<Self> {
+        match kind {
+            "Pod" => Ok(ResourceType::Pod),
+            "Deployment" => Ok(ResourceType::Deployment),
+            "StatefulSet" => Ok(ResourceType::StatefulSet),
+            "ReplicaSet" => Ok(ResourceType::ReplicaSet),
+            "DaemonSet" => Ok(ResourceType::DaemonSet),
+            "Job" => Ok(ResourceType::Job),
+            "Ingress" => Ok(ResourceType::Ingress),
+            "Service" => Ok(ResourceType::Service),
+            "EndpointSlice" => Ok(ResourceType::EndpointSlice),
+            "NetworkPolicy" => Ok(ResourceType::NetworkPolicy),
+            "ConfigMap" => Ok(ResourceType::ConfigMap),
+            "StorageClass" => Ok(ResourceType::StorageClass),
+            "PersistentVolumeClaim" => Ok(ResourceType::PersistentVolumeClaim),
+            "PersistentVolume" => Ok(ResourceType::PersistentVolume),
+            "Node" => Ok(ResourceType::Node),
+            "Namespace" => Ok(ResourceType::Namespace),
+            "ServiceAccount" => Ok(ResourceType::ServiceAccount),
+            "Event" => Ok(ResourceType::Event),
+            _ => Err(AriadneError::from(ErrorKind::InvalidResourceTypeError(
+                kind.to_string(),
+            ))),
+        }
+    }
+}
+
+#[derive(
+    Debug, Display, Serialize, Deserialize, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, EnumIter,
+)]
 pub enum Edge {
     PartOf,    // e.g. Node -> Cluster
     BelongsTo, // e.g. Pod -> Namespace
@@ -72,7 +119,7 @@ pub enum Edge {
     DefinesBackend, // e.g., Ingress -> IngressBackend
     TargetsService, // e.g., IngressBackend -> Service
     IsClaimedBy,    // e.g., Host -> Ingress
-    ListedIn,       // e.g., EndpointAddress -> Endpoints
+    ListedIn,       // e.g., EndpointAddress -> EndpointSlice
     IsAddressOf,    // e.g., EndpointAddress -> Pod
 
     // Configuration
@@ -93,6 +140,9 @@ pub enum Edge {
 
     // Events
     Concerns, // e.g. Event -> Pod
+
+    ContainsEndpoint, // EndpointSlice -> Endpoint
+    HasAddress,       // Endpoint -> EndpointAddress
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -127,8 +177,8 @@ pub enum ResourceAttributes {
     Service {
         service: Service,
     },
-    Endpoints {
-        endpoints: Endpoints,
+    Endpoint {
+        endpoint: Endpoint,
     },
     NetworkPolicy {
         network_policy: NetworkPolicy,
@@ -153,6 +203,9 @@ pub enum ResourceAttributes {
     },
     IngressServiceBackend {
         ingress_service_backend: IngressServiceBackend,
+    },
+    EndpointSlice {
+        endpoint_slice: EndpointSlice,
     },
     EndpointAddress {
         endpoint_address: EndpointAddress,
@@ -478,40 +531,14 @@ impl k8s_openapi::schemars::JsonSchema for IngressServiceBackend {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EndpointAddress {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-    pub hostname: Option<String>,
-    pub ip: String,
-    pub node_name: Option<String>,
-    pub target_ref: Option<k8s_openapi::api::core::v1::ObjectReference>,
+    pub address: String,
 }
 
 impl EndpointAddress {
-    pub fn new(
-        id: &ObjectIdentifier,
-        backend: &k8s_openapi::api::core::v1::EndpointAddress,
-    ) -> Self {
-        let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-            annotations: None,
-            creation_timestamp: None,
-            deletion_grace_period_seconds: None,
-            deletion_timestamp: None,
-            finalizers: None,
-            generate_name: None,
-            generation: None,
-            labels: None,
-            managed_fields: None,
-            name: Some(id.name.to_string()),
-            namespace: id.namespace.clone(),
-            owner_references: None,
-            resource_version: id.resource_version.clone(),
-            self_link: None,
-            uid: Some(id.uid.clone()),
-        };
+    pub fn new(id: &ObjectIdentifier, address: String) -> Self {
         Self {
-            metadata: md,
-            hostname: backend.hostname.clone(),
-            ip: backend.ip.clone(),
-            node_name: backend.node_name.clone(),
-            target_ref: backend.target_ref.clone(),
+            metadata: as_object_meta(id),
+            address,
         }
     }
 }
@@ -529,50 +556,6 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
             object: Some(Box::new(k8s_openapi::schemars::schema::ObjectValidation {
                 properties: [
                     (
-                        "hostname".into(),
-                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
-                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
-                                description: Some("The Hostname of this endpoint".into()),
-                                ..Default::default()
-                            })),
-                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
-                            ..Default::default()
-                        }),
-                    ),
-                    (
-                        "ip".into(),
-                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
-                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
-                                description: Some("The IP of this endpoint. May not be loopback (127.0.0.0/8 or ::1), link-local (169.254.0.0/16 or fe80::/10), or link-local multicast (224.0.0.0/24 or ff02::/16).".into()),
-                                ..Default::default()
-                            })),
-                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
-                            ..Default::default()
-                        }),
-                    ),
-                    (
-                        "node_name".into(),
-                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
-                            metadata: Some(Box::new(k8s_openapi::schemars::schema::Metadata {
-                                description: Some("Optional: Node hosting this endpoint. This can be used to determine endpoints local to a node.".into()),
-                                ..Default::default()
-                            })),
-                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
-                            ..Default::default()
-                        }),
-                    ),
-                    (
-                        "target_ref".into(),
-                        {
-                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::core::v1::ObjectReference>().into_object();
-                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
-                                description: Some("Reference to object providing the endpoint.".into()),
-                                ..Default::default()
-                            }));
-                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
-                        },
-                    ),
-                    (
                         "metadata".into(),
                         {
                             let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
@@ -582,6 +565,13 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
                             }));
                             k8s_openapi::schemars::schema::Schema::Object(schema_obj)
                         },
+                    ),
+                    (
+                        "address".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
                     )
 
                 ].into(),
@@ -599,25 +589,8 @@ pub struct Host {
 }
 impl Host {
     pub fn new(id: &ObjectIdentifier, host: &str) -> Self {
-        let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-            annotations: None,
-            creation_timestamp: None,
-            deletion_grace_period_seconds: None,
-            deletion_timestamp: None,
-            finalizers: None,
-            generate_name: None,
-            generation: None,
-            labels: None,
-            managed_fields: None,
-            name: Some(id.name.to_string()),
-            namespace: id.namespace.clone(),
-            owner_references: None,
-            resource_version: id.resource_version.clone(),
-            self_link: None,
-            uid: Some(id.uid.clone()),
-        };
         Self {
-            metadata: md,
+            metadata: as_object_meta(id),
             name: host.to_string(),
         }
     }
@@ -854,5 +827,247 @@ impl k8s_openapi::schemars::JsonSchema for Logs {
             })),
             ..Default::default()
         })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Endpoint {
+    pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+    pub addresses: Vec<String>,
+    pub conditions: Option<k8s_openapi::api::discovery::v1::EndpointConditions>,
+    pub hints: Option<k8s_openapi::api::discovery::v1::EndpointHints>,
+    pub hostname: Option<String>,
+    pub node_name: Option<String>,
+    pub target_ref: Option<k8s_openapi::api::core::v1::ObjectReference>,
+    pub zone: Option<String>,
+}
+
+impl Endpoint {
+    pub fn new(id: &ObjectIdentifier, endpoint: k8s_openapi::api::discovery::v1::Endpoint) -> Self {
+        Self {
+            metadata: as_object_meta(id),
+            addresses: endpoint.addresses,
+            conditions: endpoint.conditions,
+            hints: endpoint.hints,
+            hostname: endpoint.hostname,
+            node_name: endpoint.node_name,
+            target_ref: endpoint.target_ref,
+            zone: endpoint.zone,
+        }
+    }
+}
+
+impl k8s_openapi::schemars::JsonSchema for Endpoint {
+    fn schema_name() -> String {
+        "Endpoint".into()
+    }
+
+    fn json_schema(
+        __gen: &mut k8s_openapi::schemars::gen::SchemaGenerator,
+    ) -> k8s_openapi::schemars::schema::Schema {
+        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                description: Some("Endpoint represents a single logical \"backend\" implementing a service.".into()),
+                ..Default::default()
+            })),
+            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+            object: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                properties: [
+                    (
+                        "addresses".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("addresses of this endpoint. The contents of this field are interpreted according to the corresponding EndpointSlice addressType field. Consumers must handle different types of addresses in the context of their own capabilities. This must contain at least one address but no more than 100. These are all assumed to be fungible and clients may choose to only use the first element. Refer to: https://issue.k8s.io/106267".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::Array))),
+                            array: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::ArrayValidation {
+                                items: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(
+                                    k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                                        instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                                        ..Default::default()
+                                    })
+                                ))),
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "conditions".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::discovery::v1::EndpointConditions>().into_object();
+                            schema_obj.metadata = Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("conditions contains information about the current status of the endpoint.".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "deprecatedTopology".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("deprecatedTopology contains topology information part of the v1beta1 API. This field is deprecated, and will be removed when the v1beta1 API is removed (no sooner than kubernetes v1.24).  While this field can hold values, it is not writable through the v1 API, and any attempts to write to it will be silently ignored. Topology information can be found in the zone and nodeName fields instead.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::Object))),
+                            object: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::ObjectValidation {
+                                additional_properties: Some(std::boxed::Box::new(
+                                    k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                                        instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                                        ..Default::default()
+                                    })
+                                )),
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "hints".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::discovery::v1::EndpointHints>().into_object();
+                            schema_obj.metadata = Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("hints contains information associated with how an endpoint should be consumed.".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "hostname".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("hostname of this endpoint. This field may be used by consumers of endpoints to distinguish endpoints from each other (e.g. in DNS names). Multiple endpoints which use the same hostname should be considered fungible (e.g. multiple A values in DNS). Must be lowercase and pass DNS Label (RFC 1123) validation.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "nodeName".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("nodeName represents the name of the Node hosting this endpoint. This can be used to determine endpoints local to a Node.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "targetRef".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::api::core::v1::ObjectReference>().into_object();
+                            schema_obj.metadata = Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("targetRef is a reference to a Kubernetes object that represents this endpoint.".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    ),
+                    (
+                        "zone".into(),
+                        k8s_openapi::schemars::schema::Schema::Object(k8s_openapi::schemars::schema::SchemaObject {
+                            metadata: Some(std::boxed::Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("zone is the name of the Zone this endpoint exists in.".into()),
+                                ..Default::default()
+                            })),
+                            instance_type: Some(k8s_openapi::schemars::schema::SingleOrVec::Single(std::boxed::Box::new(k8s_openapi::schemars::schema::InstanceType::String))),
+                            ..Default::default()
+                        }),
+                    ),
+                    (
+                        "metadata".into(),
+                        {
+                            let mut schema_obj = __gen.subschema_for::<k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>().into_object();
+                            schema_obj.metadata = Some(Box::new(k8s_openapi::schemars::schema::Metadata {
+                                description: Some("Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata".into()),
+                                ..Default::default()
+                            }));
+                            k8s_openapi::schemars::schema::Schema::Object(schema_obj)
+                        },
+                    )
+                ].into(),
+                required: [
+                    "addresses".into(),
+                ].into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+fn as_object_meta(
+    id: &ObjectIdentifier,
+) -> k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+    let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        annotations: None,
+        creation_timestamp: None,
+        deletion_grace_period_seconds: None,
+        deletion_timestamp: None,
+        finalizers: None,
+        generate_name: None,
+        generation: None,
+        labels: None,
+        managed_fields: None,
+        name: Some(id.name.to_string()),
+        namespace: id.namespace.clone(),
+        owner_references: None,
+        resource_version: id.resource_version.clone(),
+        self_link: None,
+        uid: Some(id.uid.clone()),
+    };
+    md
+}
+
+pub trait ObjectHasher {
+    fn get_hash(&self) -> u64;
+}
+
+impl ObjectHasher for k8s_openapi::api::discovery::v1::Endpoint {
+    fn get_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        let mut addresses = self.addresses.clone();
+        addresses.sort();
+        addresses
+            .iter()
+            .for_each(|addr| hasher.write(addr.as_bytes()));
+        self.conditions.as_ref().inspect(|c| {
+            c.ready.inspect(|b| hasher.write_i8(*b as i8));
+            c.serving.inspect(|b| hasher.write_i8(*b as i8));
+            c.terminating.inspect(|b| hasher.write_i8(*b as i8));
+        });
+
+        self.hints.as_ref().inspect(|h| {
+            h.for_zones.as_ref().inspect(|zones| {
+                zones.iter().for_each(|zone| {
+                    hasher.write(zone.name.as_bytes());
+                })
+            });
+        });
+        self.hostname
+            .as_ref()
+            .inspect(|h| hasher.write(h.as_bytes()));
+        self.node_name
+            .as_ref()
+            .inspect(|n| hasher.write(n.as_bytes()));
+        self.target_ref.as_ref().inspect(|t| {
+            t.kind.as_ref().inspect(|k| hasher.write(k.as_bytes()));
+            t.name.as_ref().inspect(|n| hasher.write(n.as_bytes()));
+            t.namespace.as_ref().inspect(|n| hasher.write(n.as_bytes()));
+            t.resource_version
+                .as_ref()
+                .inspect(|n| hasher.write(n.as_bytes()));
+            t.uid.as_ref().inspect(|u| hasher.write(u.as_bytes()));
+        });
+        self.zone.as_ref().inspect(|z| hasher.write(z.as_bytes()));
+
+        let hash = hasher.finish();
+        hash
     }
 }

@@ -4,7 +4,7 @@ use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::trace;
+use tracing::{trace, warn};
 
 pub type NodeId = u32;
 
@@ -92,7 +92,14 @@ impl ClusterState {
         }
     }
 
-    pub fn add_edge(&mut self, source: &str, target: &str, edge: Edge) {
+    pub fn add_edge(
+        &mut self,
+        source: &str,
+        source_type: ResourceType,
+        target: &str,
+        target_type: ResourceType,
+        edge: Edge,
+    ) {
         let maybe_source = self.get_node(source);
         let maybe_target = self.get_node(target);
 
@@ -101,7 +108,7 @@ impl ClusterState {
                 self.graph.add_edge(from, to, edge);
             }
             (from_id, to_id) => {
-                trace!("Node(s) do not exist, source: {source}, from_id: {from_id:?}, target: {target}, to_id: {to_id:?}, edge: {edge:?}")
+                warn!("Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}")
             }
         }
     }

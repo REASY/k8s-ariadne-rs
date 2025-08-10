@@ -8,9 +8,10 @@ use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Endpoints, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -24,7 +25,7 @@ use std::fmt::Debug;
 use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 pub struct ClusterStateResolver {
     cluster_name: String,
@@ -47,7 +48,7 @@ struct ClusterSnapshot {
     jobs: Vec<Job>,
     ingresses: Vec<Ingress>,
     services: Vec<Service>,
-    endpoints: Vec<Endpoints>,
+    endpoint_slices: Vec<EndpointSlice>,
     network_policies: Vec<NetworkPolicy>,
     config_maps: Vec<ConfigMap>,
     storage_classes: Vec<StorageClass>,
@@ -83,7 +84,7 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
             jobs: vec![],
             ingresses: vec![],
             services: vec![],
-            endpoints: vec![],
+            endpoint_slices: vec![],
             network_policies: vec![],
             config_maps: vec![],
             storage_classes: vec![],
@@ -129,7 +130,7 @@ impl ClusterStateResolver {
 
         let ingresses: Vec<Ingress> = client.get_ingresses().await?;
         let services: Vec<Service> = client.get_services().await?;
-        let endpoints: Vec<Endpoints> = client.get_endpoints().await?;
+        let endpoint_slices: Vec<EndpointSlice> = client.get_endpoint_slices().await?;
         let network_policies: Vec<NetworkPolicy> = client.get_network_policies().await?;
 
         let config_maps: Vec<ConfigMap> = client.get_config_maps().await?;
@@ -179,7 +180,7 @@ impl ClusterStateResolver {
             jobs,
             ingresses,
             services,
-            endpoints,
+            endpoint_slices,
             network_policies,
             config_maps,
             storage_classes,
@@ -291,7 +292,9 @@ impl ClusterStateResolver {
 
             state.add_edge(
                 item.metadata.uid.as_ref().unwrap(),
+                ResourceType::Namespace,
                 cluster_uid.as_str(),
+                ResourceType::Cluster,
                 Edge::PartOf,
             );
         }
@@ -308,6 +311,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Pod,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -331,11 +335,18 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Container,
                 item.metadata.namespace.as_deref(),
             );
 
             let container_uid = item.metadata.uid.as_ref().unwrap().to_string();
-            state.add_edge(container_uid.as_str(), item.pod_uid.as_str(), Edge::Runs);
+            state.add_edge(
+                container_uid.as_str(),
+                ResourceType::Container,
+                item.pod_uid.as_str(),
+                ResourceType::Pod,
+                Edge::Runs,
+            );
         }
         for logs in &snapshot.container_logs {
             let obj_id = ObjectIdentifier {
@@ -356,10 +367,17 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 obj_id.uid.as_str(),
+                ResourceType::Logs,
                 obj_id.namespace.as_deref(),
             );
 
-            state.add_edge(container_uid.as_str(), obj_id.uid.as_str(), Edge::HasLogs);
+            state.add_edge(
+                container_uid.as_str(),
+                ResourceType::Container,
+                obj_id.uid.as_str(),
+                ResourceType::Logs,
+                Edge::HasLogs,
+            );
         }
 
         for item in &snapshot.deployments {
@@ -371,6 +389,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Deployment,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -383,6 +402,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::StatefulSet,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -395,6 +415,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::ReplicaSet,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -407,6 +428,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::DaemonSet,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -419,6 +441,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Job,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -433,6 +456,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Ingress,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -445,11 +469,13 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Service,
                 item.metadata.namespace.as_deref(),
             );
         }
-        for item in &snapshot.endpoints {
-            let node = create_generic_object!(item.clone(), Endpoints, Endpoints, endpoints);
+        for item in &snapshot.endpoint_slices {
+            let node =
+                create_generic_object!(item.clone(), EndpointSlice, EndpointSlice, endpoint_slice);
             state.add_node(node);
 
             Self::connect_part_of_and_belongs_to(
@@ -457,6 +483,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::EndpointSlice,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -470,6 +497,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::NetworkPolicy,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -484,6 +512,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::ConfigMap,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -512,6 +541,7 @@ impl ClusterStateResolver {
                     &namespace_name_to_uid,
                     cluster_uid.as_str(),
                     obj_id.uid.as_str(),
+                    ResourceType::Provisioner,
                     obj_id.namespace.as_deref(),
                 );
             }
@@ -524,12 +554,15 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::StorageClass,
                 item.metadata.namespace.as_deref(),
             );
 
             state.add_edge(
                 item.metadata.uid.as_ref().unwrap(),
+                ResourceType::StorageClass,
                 provisoner,
+                ResourceType::Provisioner,
                 Edge::UsesProvisioner,
             );
         }
@@ -542,6 +575,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::PersistentVolume,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -559,6 +593,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::PersistentVolumeClaim,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -573,6 +608,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::Node,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -592,6 +628,7 @@ impl ClusterStateResolver {
                 &namespace_name_to_uid,
                 cluster_uid.as_str(),
                 item.metadata.uid.as_deref().unwrap(),
+                ResourceType::ServiceAccount,
                 item.metadata.namespace.as_deref(),
             );
         }
@@ -630,7 +667,13 @@ impl ClusterStateResolver {
                                 let pvc_uid = pvc_name_to_uid
                                     .get(claim_name)
                                     .unwrap_or_else(|| panic!("PVC `{claim_name}` not found"));
-                                state.add_edge(pod_uid, pvc_uid, Edge::ClaimsVolume);
+                                state.add_edge(
+                                    pod_uid,
+                                    ResourceType::Pod,
+                                    pvc_uid,
+                                    ResourceType::PersistentVolumeClaim,
+                                    Edge::ClaimsVolume,
+                                );
                             });
                         });
                     });
@@ -643,7 +686,13 @@ impl ClusterStateResolver {
                                 pod_selector.get(name).map(|v| v == value).unwrap_or(false)
                             });
                             if is_connected {
-                                state.add_edge(uid, pod_uid.as_str(), Edge::Selects);
+                                state.add_edge(
+                                    uid,
+                                    ResourceType::Service,
+                                    pod_uid.as_str(),
+                                    ResourceType::Pod,
+                                    Edge::Selects,
+                                );
                             }
                         }
                     }
@@ -662,7 +711,7 @@ impl ClusterStateResolver {
 
         Self::ingress_to_service(&snapshot.ingresses, &snapshot.services, &mut state);
 
-        Self::endpoint_to_pod(&snapshot.endpoints, &mut state);
+        Self::endpoint_to_pod(&snapshot.endpoint_slices, &mut state);
 
         for item in &snapshot.events {
             item.metadata.uid.as_ref().inspect(|uid| {
@@ -683,7 +732,25 @@ impl ClusterStateResolver {
             let uid = item.metadata.uid.as_ref().unwrap();
             item.regarding.as_ref().inspect(|regarding| {
                 regarding.uid.as_ref().inspect(|regarding_uid| {
-                    state.add_edge(uid, regarding_uid, Edge::Concerns);
+                    if let Some(kind) = &regarding.kind {
+                        match ResourceType::try_new(kind.as_str()) {
+                            Ok(regarding_resource_type) => {
+                                state.add_edge(
+                                    uid,
+                                    ResourceType::Event,
+                                    regarding_uid,
+                                    regarding_resource_type,
+                                    Edge::Concerns,
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Failed to parse resource type from event regarding {:?}: {}",
+                                    regarding, err
+                                );
+                            }
+                        }
+                    }
                 });
             });
         }
@@ -692,14 +759,22 @@ impl ClusterStateResolver {
     }
 
     fn set_manages_edge_all(snapshot: &ClusterSnapshot, state: &mut ClusterState) {
-        Self::set_manages_edge(&snapshot.pods, state);
-        Self::set_manages_edge(&snapshot.replica_sets, state);
-        Self::set_manages_edge(&snapshot.stateful_sets, state);
-        Self::set_manages_edge(&snapshot.daemon_sets, state);
-        Self::set_manages_edge(&snapshot.deployments, state);
-        Self::set_manages_edge(&snapshot.endpoints, state);
-        Self::set_manages_edge(&snapshot.persistent_volume_claims, state);
-        Self::set_manages_edge(&snapshot.ingresses, state);
+        Self::set_manages_edge(&snapshot.pods, ResourceType::Pod, state);
+        Self::set_manages_edge(&snapshot.replica_sets, ResourceType::ReplicaSet, state);
+        Self::set_manages_edge(&snapshot.stateful_sets, ResourceType::StatefulSet, state);
+        Self::set_manages_edge(&snapshot.daemon_sets, ResourceType::DaemonSet, state);
+        Self::set_manages_edge(&snapshot.deployments, ResourceType::Deployment, state);
+        Self::set_manages_edge(
+            &snapshot.endpoint_slices,
+            ResourceType::EndpointSlice,
+            state,
+        );
+        Self::set_manages_edge(
+            &snapshot.persistent_volume_claims,
+            ResourceType::PersistentVolumeClaim,
+            state,
+        );
+        Self::set_manages_edge(&snapshot.ingresses, ResourceType::Ingress, state);
     }
 
     fn set_runs_on_edge(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
@@ -714,7 +789,13 @@ impl ClusterStateResolver {
                         .as_ref()
                         .inspect(|node_uid| {
                             pod.metadata.uid.as_deref().inspect(|pod_uid| {
-                                state.add_edge(pod_uid, node_uid, Edge::RunsOn);
+                                state.add_edge(
+                                    pod_uid,
+                                    ResourceType::Pod,
+                                    node_uid,
+                                    ResourceType::Node,
+                                    Edge::RunsOn,
+                                );
                             });
                         });
                 }
@@ -724,13 +805,26 @@ impl ClusterStateResolver {
 
     fn set_manages_edge<T: Resource + ResourceExt>(
         objs: &Vec<T>,
+        resource_type: ResourceType,
         cluster_state: &mut ClusterState,
     ) {
         for item in objs {
             for owner in item.owner_references() {
-                item.uid().inspect(|uid| {
-                    cluster_state.add_edge(owner.uid.as_ref(), uid, Edge::Manages);
-                });
+                item.uid()
+                    .inspect(|uid| match ResourceType::try_new(owner.kind.as_str()) {
+                        Ok(target_resource_type) => {
+                            cluster_state.add_edge(
+                                owner.uid.as_ref(),
+                                resource_type.clone(),
+                                uid,
+                                target_resource_type,
+                                Edge::Manages,
+                            );
+                        }
+                        Err(_) => {
+                            warn!("")
+                        }
+                    });
             }
         }
     }
@@ -747,13 +841,25 @@ impl ClusterStateResolver {
                         storage_class_name_to_uid
                             .get(sc_name.as_str())
                             .inspect(|sc_id| {
-                                state.add_edge(pv_id, sc_id, Edge::UsesStorageClass);
+                                state.add_edge(
+                                    pv_id,
+                                    ResourceType::PersistentVolume,
+                                    sc_id,
+                                    ResourceType::StorageClass,
+                                    Edge::UsesStorageClass,
+                                );
                             });
                     });
 
                     spec.claim_ref.as_ref().inspect(|claim_ref| {
                         claim_ref.uid.as_ref().inspect(|pvc_id| {
-                            state.add_edge(pvc_id, pv_id, Edge::BoundTo);
+                            state.add_edge(
+                                pvc_id,
+                                ResourceType::PersistentVolumeClaim,
+                                pv_id,
+                                ResourceType::PersistentVolume,
+                                Edge::BoundTo,
+                            );
                         });
                     });
                 });
@@ -783,7 +889,13 @@ impl ClusterStateResolver {
                                         host: Host::new(&obj_id, host),
                                     })),
                                 });
-                                state.add_edge(&host_uid, ingress_id, Edge::IsClaimedBy);
+                                state.add_edge(
+                                    &host_uid,
+                                    ResourceType::Host,
+                                    ingress_id,
+                                    ResourceType::Ingress,
+                                    Edge::IsClaimedBy,
+                                );
                             });
 
                             rule.http.as_ref().inspect(|http| {
@@ -814,14 +926,18 @@ impl ClusterStateResolver {
                                         });
                                         state.add_edge(
                                             ingress_id,
+                                            ResourceType::Ingress,
                                             &ingress_svc_backend_uid,
+                                            ResourceType::IngressServiceBackend,
                                             Edge::DefinesBackend,
                                         );
 
                                         service_name_to_id.get(service_name).inspect(|svc_id| {
                                             state.add_edge(
                                                 &ingress_svc_backend_uid,
+                                                ResourceType::IngressServiceBackend,
                                                 svc_id,
+                                                ResourceType::Service,
                                                 Edge::TargetsService,
                                             );
                                         });
@@ -835,48 +951,110 @@ impl ClusterStateResolver {
         });
     }
 
-    fn endpoint_to_pod(endpoints_slice: &[Endpoints], state: &mut ClusterState) {
-        endpoints_slice.iter().for_each(|endpoints| {
-            endpoints.metadata.uid.as_ref().inspect(|endpoints_id| {
-                endpoints.subsets.as_ref().inspect(|subsets| {
-                    subsets.iter().for_each(|subset| {
-                        subset.addresses.iter().for_each(|addresses| {
-                            addresses.iter().for_each(|address| {
-                                let endpoint_address_uid =
-                                    format!("{}_{}", endpoints_id, address.ip.as_str());
-                                let obj_id = ObjectIdentifier {
-                                    uid: endpoint_address_uid.clone(),
-                                    name: address.ip.clone(),
-                                    namespace: endpoints.metadata.namespace.clone(),
-                                    resource_version: None,
-                                };
-                                state.add_node(GenericObject {
-                                    id: obj_id.clone(),
-                                    resource_type: ResourceType::EndpointAddress,
-                                    attributes: Some(Box::new(
-                                        ResourceAttributes::EndpointAddress {
-                                            endpoint_address: EndpointAddress::new(
-                                                &obj_id, address,
-                                            ),
-                                        },
-                                    )),
-                                });
-                                state.add_edge(&endpoint_address_uid, endpoints_id, Edge::ListedIn);
+    fn endpoint_to_pod(endpoints_slices: &[EndpointSlice], state: &mut ClusterState) {
+        endpoints_slices.iter().for_each(|slice| {
+            if let Some(endpoint_slice_id) = slice.metadata.uid.as_ref() {
+                slice.endpoints.iter().for_each(|endpoint| {
+                    let obj_hash = endpoint.get_hash();
+                    let endpoint_uid = format!(
+                        "Endpoint:{}:{}:{}",
+                        endpoint_slice_id, slice.address_type, obj_hash
+                    );
+                    let endpoint_id = ObjectIdentifier {
+                        uid: endpoint_uid.clone(),
+                        name: "".to_string(),
+                        namespace: slice.metadata.namespace.clone(),
+                        resource_version: None,
+                    };
+                    state.add_node(GenericObject {
+                        id: endpoint_id.clone(),
+                        resource_type: ResourceType::Endpoint,
+                        attributes: Some(Box::new(ResourceAttributes::Endpoint {
+                            endpoint: Endpoint::new(&endpoint_id, endpoint.clone()),
+                        })),
+                    });
+                    // (EndpointSlice) -[:ContainsEndpoint]-> (Endpoint)
+                    state.add_edge(
+                        endpoint_slice_id.as_str(),
+                        ResourceType::EndpointSlice,
+                        endpoint_uid.as_str(),
+                        ResourceType::Endpoint,
+                        Edge::ContainsEndpoint,
+                    );
 
-                                address.target_ref.as_ref().inspect(|target_ref| {
-                                    target_ref.uid.as_ref().inspect(|target_id| {
-                                        state.add_edge(
-                                            &endpoint_address_uid,
-                                            target_id,
-                                            Edge::IsAddressOf,
-                                        );
-                                    });
-                                });
-                            });
+                    endpoint.addresses.iter().for_each(|address| {
+                        let endpoint_address_uid =
+                            format!("EndpointAddress:{}:{}", endpoint_uid, address);
+                        let obj_id = ObjectIdentifier {
+                            uid: endpoint_address_uid.clone(),
+                            name: address.clone(),
+                            namespace: slice.metadata.namespace.clone(),
+                            resource_version: None,
+                        };
+                        state.add_node(GenericObject {
+                            id: obj_id.clone(),
+                            resource_type: ResourceType::EndpointAddress,
+                            attributes: Some(Box::new(ResourceAttributes::EndpointAddress {
+                                endpoint_address: EndpointAddress::new(&obj_id, address.clone()),
+                            })),
+                        });
+
+                        // (Endpoint) -[:HasAddress]-> (EndpointAddress)
+                        state.add_edge(
+                            endpoint_uid.as_str(),
+                            ResourceType::Endpoint,
+                            endpoint_address_uid.as_str(),
+                            ResourceType::EndpointAddress,
+                            Edge::HasAddress,
+                        );
+
+                        // (EndpointAddress) -[:ListedIn]-> (EndpointSlice)
+                        state.add_edge(
+                            endpoint_address_uid.as_str(),
+                            ResourceType::EndpointAddress,
+                            endpoint_slice_id.as_str(),
+                            ResourceType::EndpointSlice,
+                            Edge::ListedIn,
+                        );
+
+                        endpoint.target_ref.as_ref().inspect(|target_ref| {
+                            if let Some(kind) = target_ref.kind.as_ref() {
+                                if let Some(pod_uid) = target_ref.uid.as_ref() {
+                                    match ResourceType::try_new(kind) {
+                                        Ok(resource_type) => {
+                                            match resource_type {
+                                                ResourceType::Pod => {
+                                                    // (EndpointAddress) -[:IsAddressOf]-> (Pod)
+                                                    state.add_edge(
+                                                        endpoint_address_uid.as_str(),
+                                                        ResourceType::EndpointAddress,
+                                                        pod_uid,
+                                                        ResourceType::Pod,
+                                                        Edge::IsAddressOf,
+                                                    );
+                                                }
+                                                resource_type => {
+                                                    warn!("Unknown endpoint target kind {} for EndpointSlice [{}]: {}",
+                                                        resource_type,
+                                                        target_ref.kind.as_deref().unwrap_or(""),
+                                                        endpoint_slice_id
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            warn!(
+                                                "Failed to parse resource type from endpoint target {:?}: {}",
+                                                target_ref, err
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         });
                     });
                 });
-            });
+            };
         });
     }
 
@@ -885,13 +1063,26 @@ impl ClusterStateResolver {
         namespace_name_to_uid: &HashMap<&str, &str>,
         cluster_uid: &str,
         item_uid: &str,
+        item_resource_type: ResourceType,
         namespace: Option<&str>,
     ) {
-        state.add_edge(item_uid, cluster_uid, Edge::PartOf);
+        state.add_edge(
+            item_uid,
+            item_resource_type.clone(),
+            cluster_uid,
+            ResourceType::Cluster,
+            Edge::PartOf,
+        );
 
         namespace.inspect(|ns| {
             namespace_name_to_uid.get(*ns).inspect(|ns_uid| {
-                state.add_edge(item_uid, ns_uid, Edge::BelongsTo);
+                state.add_edge(
+                    item_uid,
+                    item_resource_type,
+                    ns_uid,
+                    ResourceType::Namespace,
+                    Edge::BelongsTo,
+                );
             });
         });
     }
