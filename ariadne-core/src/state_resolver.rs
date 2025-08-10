@@ -157,7 +157,7 @@ impl ClusterStateResolver {
         let retrieved_at = Utc::now();
         let cluster: Cluster = Cluster::new(
             ObjectIdentifier {
-                uid: format!("cluster_{}", self.cluster_name),
+                uid: format!("Cluster:{}", self.cluster_name),
                 name: self.cluster_name.to_string(),
                 namespace: None,
                 resource_version: None,
@@ -802,7 +802,10 @@ impl ClusterStateResolver {
                             );
                         }
                         Err(err) => {
-                            warn!("Unable to parse resource type of {:?} from owner reference: {}", owner, err);
+                            warn!(
+                                "Unable to parse resource type of {:?} from owner reference: {}",
+                                owner, err
+                            );
                         }
                     }
                 }
@@ -856,7 +859,7 @@ impl ClusterStateResolver {
                     spec.rules.as_ref().inspect(|rules| {
                         rules.iter().for_each(|rule| {
                             rule.host.as_ref().inspect(|host| {
-                                let host_uid = format!("{ingress_id}_{host}");
+                                let host_uid = format!("Host:{ingress_id}:{host}");
                                 let obj_id = ObjectIdentifier {
                                     uid: host_uid.clone(),
                                     name: (*host).clone(),
@@ -883,8 +886,9 @@ impl ClusterStateResolver {
                                 http.paths.iter().for_each(|p| {
                                     p.backend.service.as_ref().inspect(|s| {
                                         let service_name = s.name.as_str();
-                                        let ingress_svc_backend_uid =
-                                            format!("{ingress_id}_{service_name}");
+                                        let ingress_svc_backend_uid = format!(
+                                            "IngressServiceBackend:{ingress_id}:{service_name}"
+                                        );
                                         // Prepare for the edges:
                                         // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
                                         // 2. (IngressBackend) [:TargetsService]-> Service
