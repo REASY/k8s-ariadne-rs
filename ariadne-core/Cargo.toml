@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
+futures = {workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
 petgraph  = { workspace = true }
@@ -23,3 +24,4 @@ strum_macros  = { workspace = true }
 thiserror = { workspace = true}
 tokio = { workspace = true }
 tracing = { workspace = true }
+log = "0.4.27"

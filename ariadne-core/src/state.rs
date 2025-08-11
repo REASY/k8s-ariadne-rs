@@ -4,7 +4,7 @@ use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{trace, warn};
+use tracing::warn;
 
 pub type NodeId = u32;
 

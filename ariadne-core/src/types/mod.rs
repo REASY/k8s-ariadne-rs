@@ -12,6 +12,7 @@ use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use serde::{Deserialize, Serialize};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 use strum_macros::{Display, EnumIter};
 
 pub static LOGICAL_RESOURCE_TYPES: &[ResourceType] = &[
@@ -147,64 +148,64 @@ pub enum Edge {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum ResourceAttributes {
     Namespace {
-        namespace: Namespace,
+        namespace: Arc<Namespace>,
     },
     Node {
-        node: Node,
+        node: Arc<Node>,
     },
     Pod {
-        pod: Pod,
+        pod: Arc<Pod>,
     },
     Deployment {
-        deployment: Deployment,
+        deployment: Arc<Deployment>,
     },
     StatefulSet {
-        stateful_set: StatefulSet,
+        stateful_set: Arc<StatefulSet>,
     },
     ReplicaSet {
-        replica_set: ReplicaSet,
+        replica_set: Arc<ReplicaSet>,
     },
     DaemonSet {
-        daemon_set: DaemonSet,
+        daemon_set: Arc<DaemonSet>,
     },
     Job {
-        job: Job,
+        job: Arc<Job>,
     },
     Ingress {
-        ingress: Ingress,
+        ingress: Arc<Ingress>,
     },
     Service {
-        service: Service,
+        service: Arc<Service>,
     },
     Endpoint {
         endpoint: Endpoint,
     },
     NetworkPolicy {
-        network_policy: NetworkPolicy,
+        network_policy: Arc<NetworkPolicy>,
     },
     ConfigMap {
-        config_map: ConfigMap,
+        config_map: Arc<ConfigMap>,
     },
     Provisioner {
         provisioner: Provisioner,
     },
     StorageClass {
-        storage_class: StorageClass,
+        storage_class: Arc<StorageClass>,
     },
     PersistentVolume {
-        pv: PersistentVolume,
+        pv: Arc<PersistentVolume>,
     },
     PersistentVolumeClaim {
-        pvc: PersistentVolumeClaim,
+        pvc: Arc<PersistentVolumeClaim>,
     },
     ServiceAccount {
-        service_account: ServiceAccount,
+        service_account: Arc<ServiceAccount>,
     },
     IngressServiceBackend {
         ingress_service_backend: IngressServiceBackend,
     },
     EndpointSlice {
-        endpoint_slice: EndpointSlice,
+        endpoint_slice: Arc<EndpointSlice>,
     },
     EndpointAddress {
         endpoint_address: EndpointAddress,
@@ -222,7 +223,7 @@ pub enum ResourceAttributes {
         container: Container,
     },
     Event {
-        event: Event,
+        event: Arc<Event>,
     },
 }
 
@@ -1003,7 +1004,7 @@ impl k8s_openapi::schemars::JsonSchema for Endpoint {
 fn as_object_meta(
     id: &ObjectIdentifier,
 ) -> k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-    let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+    k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
         annotations: None,
         creation_timestamp: None,
         deletion_grace_period_seconds: None,
@@ -1019,8 +1020,7 @@ fn as_object_meta(
         resource_version: id.resource_version.clone(),
         self_link: None,
         uid: Some(id.uid.clone()),
-    };
-    md
+    }
 }
 
 pub trait ObjectHasher {
@@ -1066,7 +1066,6 @@ impl ObjectHasher for k8s_openapi::api::discovery::v1::Endpoint {
         });
         self.zone.as_ref().inspect(|z| hasher.write(z.as_bytes()));
 
-        let hash = hasher.finish();
-        hash
+        hasher.finish()
     }
 }

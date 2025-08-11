@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use crate::create_generic_object;
-use crate::kube_client::{KubeClient, KubeClientImpl};
+use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::state::ClusterState;
 use crate::types::*;
 use chrono::Utc;
@@ -37,26 +37,26 @@ pub struct ClusterStateResolver {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ClusterSnapshot {
     cluster: Cluster,
-    namespaces: Vec<Namespace>,
-    pods: Vec<Pod>,
+    namespaces: Vec<Arc<Namespace>>,
+    pods: Vec<Arc<Pod>>,
     containers: Vec<Container>,
     container_logs: Vec<Logs>,
-    deployments: Vec<Deployment>,
-    stateful_sets: Vec<StatefulSet>,
-    replica_sets: Vec<ReplicaSet>,
-    daemon_sets: Vec<DaemonSet>,
-    jobs: Vec<Job>,
-    ingresses: Vec<Ingress>,
-    services: Vec<Service>,
-    endpoint_slices: Vec<EndpointSlice>,
-    network_policies: Vec<NetworkPolicy>,
-    config_maps: Vec<ConfigMap>,
-    storage_classes: Vec<StorageClass>,
-    persistent_volumes: Vec<PersistentVolume>,
-    persistent_volume_claims: Vec<PersistentVolumeClaim>,
-    nodes: Vec<Node>,
-    service_accounts: Vec<ServiceAccount>,
-    events: Vec<Event>,
+    deployments: Vec<Arc<Deployment>>,
+    stateful_sets: Vec<Arc<StatefulSet>>,
+    replica_sets: Vec<Arc<ReplicaSet>>,
+    daemon_sets: Vec<Arc<DaemonSet>>,
+    jobs: Vec<Arc<Job>>,
+    ingresses: Vec<Arc<Ingress>>,
+    services: Vec<Arc<Service>>,
+    endpoint_slices: Vec<Arc<EndpointSlice>>,
+    network_policies: Vec<Arc<NetworkPolicy>>,
+    config_maps: Vec<Arc<ConfigMap>>,
+    storage_classes: Vec<Arc<StorageClass>>,
+    persistent_volumes: Vec<Arc<PersistentVolume>>,
+    persistent_volume_claims: Vec<Arc<PersistentVolumeClaim>>,
+    nodes: Vec<Arc<Node>>,
+    service_accounts: Vec<Arc<ServiceAccount>>,
+    events: Vec<Arc<Event>>,
 }
 
 #[allow(unused)]
@@ -103,7 +103,7 @@ impl ClusterStateResolver {
         options: &KubeConfigOptions,
         maybe_ns: Option<&str>,
     ) -> Result<Self> {
-        let kube_client = KubeClientImpl::new(options, maybe_ns).await?;
+        let kube_client = CachedKubeClient::new(options, maybe_ns).await?;
         Ok(ClusterStateResolver {
             cluster_name,
             kube_client: Arc::new(Box::new(kube_client)),
@@ -113,45 +113,45 @@ impl ClusterStateResolver {
 
     async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
         let client = self.kube_client.clone();
-        let namespaces: Vec<Namespace> = client.get_namespaces().await?;
-        let events: Vec<Event> = Self::get_events(&client, namespaces.as_slice()).await;
-        let nodes: Vec<Node> = client
+        let namespaces = client.get_namespaces().await?;
+        let events = Self::get_events(&client, namespaces.as_slice()).await;
+        let nodes = client
             .get_nodes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let pods: Vec<Pod> = client.get_pods().await?;
-        let containers: Vec<Container> = Self::get_containers(&pods)?;
-        let logs: Vec<Logs> = Self::get_logs(&client, &containers).await;
-        let deployments: Vec<Deployment> = client.get_deployments().await?;
-        let stateful_sets: Vec<StatefulSet> = client.get_stateful_sets().await?;
-        let replica_sets: Vec<ReplicaSet> = client.get_replica_sets().await?;
-        let daemon_sets: Vec<DaemonSet> = client.get_daemon_sets().await?;
-        let jobs: Vec<Job> = client.get_jobs().await?;
+        let pods = client.get_pods().await?;
+        let containers = Self::get_containers(&pods)?;
+        let logs = Self::get_logs(&client, &containers).await;
+        let deployments = client.get_deployments().await?;
+        let stateful_sets = client.get_stateful_sets().await?;
+        let replica_sets = client.get_replica_sets().await?;
+        let daemon_sets = client.get_daemon_sets().await?;
+        let jobs = client.get_jobs().await?;
 
-        let ingresses: Vec<Ingress> = client.get_ingresses().await?;
-        let services: Vec<Service> = client.get_services().await?;
-        let endpoint_slices: Vec<EndpointSlice> = client.get_endpoint_slices().await?;
-        let network_policies: Vec<NetworkPolicy> = client.get_network_policies().await?;
+        let ingresses = client.get_ingresses().await?;
+        let services = client.get_services().await?;
+        let endpoint_slices = client.get_endpoint_slices().await?;
+        let network_policies = client.get_network_policies().await?;
 
-        let config_maps: Vec<ConfigMap> = client.get_config_maps().await?;
+        let config_maps = client.get_config_maps().await?;
 
-        let storage_classes: Vec<StorageClass> = self
+        let storage_classes = self
             .kube_client
             .get_storage_classes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volumes: Vec<PersistentVolume> = self
+        let persistent_volumes = self
             .kube_client
             .get_persistent_volumes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volume_claims: Vec<PersistentVolumeClaim> = self
+        let persistent_volume_claims = self
             .kube_client
             .get_persistent_volume_claims()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
 
-        let service_accounts: Vec<ServiceAccount> = client.get_service_accounts().await?;
+        let service_accounts = client.get_service_accounts().await?;
         let cluster_url = client.get_cluster_url().await?;
         let info = client.apiserver_version().await?;
         let retrieved_at = Utc::now();
@@ -226,8 +226,11 @@ impl ClusterStateResolver {
         all_logs
     }
 
-    async fn get_events(client: &Arc<Box<dyn KubeClient>>, namespaces: &[Namespace]) -> Vec<Event> {
-        let mut events: Vec<Event> = Vec::with_capacity(namespaces.len());
+    async fn get_events(
+        client: &Arc<Box<dyn KubeClient>>,
+        namespaces: &[Arc<Namespace>],
+    ) -> Vec<Arc<Event>> {
+        let mut events: Vec<Arc<Event>> = Vec::with_capacity(namespaces.len());
         let mut handles = Vec::new();
 
         for p in namespaces {
@@ -257,7 +260,7 @@ impl ClusterStateResolver {
         if self.should_export_snapshot {
             let v = serde_json::to_value(&snapshot)?;
             let json = serde_json::to_string_pretty(&v)?;
-            let path = format!("/tmp/snapshot.json");
+            let path = "/tmp/snapshot.json".to_string();
             fs::write(path, json)?;
         }
 
@@ -757,7 +760,7 @@ impl ClusterStateResolver {
         Self::set_manages_edge(&snapshot.ingresses, ResourceType::Ingress, state);
     }
 
-    fn set_runs_on_edge(nodes: &[Node], pods: &[Pod], state: &mut ClusterState) {
+    fn set_runs_on_edge(nodes: &[Arc<Node>], pods: &[Arc<Pod>], state: &mut ClusterState) {
         let node_name_to_node = Self::name_to_uid(nodes.iter().map(|n| &n.metadata));
         for pod in pods {
             let node_uid = pod.spec.as_ref().and_then(|s| s.node_name.as_deref());
@@ -784,7 +787,7 @@ impl ClusterStateResolver {
     }
 
     fn set_manages_edge<T: Resource + ResourceExt>(
-        objs: &Vec<T>,
+        objs: &Vec<Arc<T>>,
         resource_type: ResourceType,
         cluster_state: &mut ClusterState,
     ) {
@@ -814,7 +817,7 @@ impl ClusterStateResolver {
     }
 
     fn pvc_to_pv(
-        pvs: &[PersistentVolume],
+        pvs: &[Arc<PersistentVolume>],
         storage_class_name_to_uid: &HashMap<&str, &str>,
         state: &mut ClusterState,
     ) {
@@ -851,7 +854,11 @@ impl ClusterStateResolver {
         }
     }
 
-    fn ingress_to_service(ingresses: &[Ingress], services: &[Service], state: &mut ClusterState) {
+    fn ingress_to_service(
+        ingresses: &[Arc<Ingress>],
+        services: &[Arc<Service>],
+        state: &mut ClusterState,
+    ) {
         let service_name_to_id = Self::name_to_uid(services.iter().map(|s| &s.metadata));
         ingresses.iter().for_each(|ingress| {
             ingress.metadata.uid.as_ref().inspect(|ingress_id| {
@@ -936,7 +943,7 @@ impl ClusterStateResolver {
         });
     }
 
-    fn endpoint_to_pod(endpoints_slices: &[EndpointSlice], state: &mut ClusterState) {
+    fn endpoint_to_pod(endpoints_slices: &[Arc<EndpointSlice>], state: &mut ClusterState) {
         endpoints_slices.iter().for_each(|slice| {
             if let Some(endpoint_slice_id) = slice.metadata.uid.as_ref() {
                 slice.endpoints.iter().for_each(|endpoint| {
@@ -969,7 +976,7 @@ impl ClusterStateResolver {
 
                     endpoint.addresses.iter().for_each(|address| {
                         let endpoint_address_uid =
-                            format!("EndpointAddress:{}:{}", endpoint_uid, address);
+                            format!("EndpointAddress:{endpoint_uid}:{address}");
                         let obj_id = ObjectIdentifier {
                             uid: endpoint_address_uid.clone(),
                             name: address.clone(),
@@ -1072,7 +1079,7 @@ impl ClusterStateResolver {
         });
     }
 
-    fn get_containers(pods: &[Pod]) -> Result<Vec<Container>> {
+    fn get_containers(pods: &[Arc<Pod>]) -> Result<Vec<Container>> {
         let mut containers: Vec<Container> = Vec::new();
         for pod in pods {
             if let Some(name) = pod.metadata.name.as_ref() {

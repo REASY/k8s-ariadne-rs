@@ -137,11 +137,6 @@ impl Memgraph {
                 target_type
             );
         }
-        println!("There are {} edges in this graph", unique_edges.len());
-        for (source_type, target_type, edge_type) in unique_edges {
-            println!("(:{source_type:?})-[:{edge_type:?}]->(:{target_type:?})");
-        }
-
         Result::Ok(())
     }
 
@@ -330,73 +325,73 @@ impl Memgraph {
         };
         let v = match attributes.as_ref() {
             ResourceAttributes::Node { node: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Namespace { namespace: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Pod { pod: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Deployment { deployment: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::StatefulSet {
                 stateful_set: value,
             } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::ReplicaSet { replica_set: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::DaemonSet { daemon_set: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Job { job: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Ingress { ingress: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Service { service: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::EndpointSlice {
                 endpoint_slice: value,
             } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::NetworkPolicy {
                 network_policy: value,
             } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::ConfigMap { config_map } => {
-                let mut fixed = config_map.clone();
+                let mut fixed = config_map.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 fixed.data = None;
                 fixed.binary_data = None;
@@ -406,29 +401,29 @@ impl Memgraph {
             ResourceAttributes::StorageClass {
                 storage_class: value,
             } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::PersistentVolume { pv: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::PersistentVolumeClaim { pvc: value } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::ServiceAccount {
                 service_account: value,
             } => {
-                let mut fixed = value.clone();
+                let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
             ResourceAttributes::Logs { logs: context } => serde_json::to_value(context)?,
-            ResourceAttributes::Event { event: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Event { event: context } => serde_json::to_value(context.as_ref())?,
             ResourceAttributes::IngressServiceBackend {
                 ingress_service_backend,
             } => serde_json::to_value(ingress_service_backend)?,
@@ -449,7 +444,9 @@ impl Memgraph {
         T: Metadata<Ty = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>,
     {
         let md = fixed.metadata_mut();
-        md.managed_fields = None;
+        if md.managed_fields.is_some() {
+            md.managed_fields = None;
+        }
         if let Some(map) = md.annotations.as_mut() {
             // The following annotations are quite complicated to escape properly, we just remove them for now ;)
             map.remove("kubectl.kubernetes.io/last-applied-configuration");
