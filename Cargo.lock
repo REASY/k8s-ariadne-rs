@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ariadne-core",
  "axum",
@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-tools"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ariadne-core",
  "clap",
@@ -1797,9 +1797,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
+checksum = "beef09f85ae72cea1ef96ba6870c51e6382ebfa4f0e85b643459331f3daa5be0"
 dependencies = [
  "unicode-ident",
 ]
@@ -1970,9 +1970,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "0.3.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f0d0d5493be0d181a62db489eab7838669b81885972ca00ceca893cf6ac2883"
+checksum = "2faf35b7d3c4b7f8c21c45bb014011b32a0ce6444bf6094da04daab01a8c3c34"
 dependencies = [
  "base64",
  "bytes",
@@ -2000,9 +2000,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "0.3.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aebc912b8fa7d54999adc4e45601d1d95fe458f97eb0a1277eddcd6382cf4b1"
+checksum = "ad9720d9d2a943779f1dc3d47fa9072c7eeffaff4e1a82f67eb9f7ea52696091"
 dependencies = [
  "darling",
  "proc-macro2",
