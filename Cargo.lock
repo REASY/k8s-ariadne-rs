@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-app"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ariadne-core",
  "axum",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-tools"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ariadne-core",
  "clap",
@@ -306,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "axum-prometheus"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42e1a6651f119707ec6c416f38fdb5be223707627fe6d47f912850634c106215"
+checksum = "fb15221c30bbb32e99873d348d89d7bc2138d6199520aa473a1bdb0d8e5721e8"
 dependencies = [
  "axum",
  "bytes",
@@ -318,7 +318,7 @@ dependencies = [
  "matchit",
  "metrics",
  "metrics-exporter-prometheus",
- "pin-project",
+ "pin-project-lite",
  "tokio",
  "tower",
  "tower-http",
@@ -1643,23 +1643,23 @@ dependencies = [
 
 [[package]]
 name = "metrics-exporter-prometheus"
-version = "0.16.2"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd7399781913e5393588a8d8c6a2867bf85fb38eaf2502fdce465aad2dc6f034"
+checksum = "2b166dea96003ee2531cf14833efedced545751d800f03535801d833313f8c15"
 dependencies = [
  "base64",
  "indexmap",
  "metrics",
  "metrics-util",
  "quanta",
- "thiserror 1.0.69",
+ "thiserror 2.0.14",
 ]
 
 [[package]]
 name = "metrics-util"
-version = "0.19.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8496cc523d1f94c1385dd8f0f0c2c480b2b8aeccb5b7e4485ad6365523ae376"
+checksum = "fe8db7a05415d0f919ffb905afa37784f71901c9a773188876984b4f769ab986"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
@@ -2647,9 +2647,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"
-version = "2.0.104"
+version = "2.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17b6f705963418cdb9927482fa304bc562ece2fdd4f616084c50b7023b435a40"
+checksum = "7bc3fcb250e53458e712715cf74285c1f889686520d79294a9ef3bd7aa1fc619"
 dependencies = [
  "proc-macro2",
  "quote",
