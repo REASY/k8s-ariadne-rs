@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-app"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "ariadne-core",
  "axum",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-tools"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "ariadne-core",
  "clap",
@@ -2210,7 +2210,7 @@ dependencies = [
 [[package]]
 name = "rsmgclient"
 version = "2.0.2"
-source = "git+https://github.com/REASY/rsmgclient?rev=0c9db758e379b743fb53e7d2a02c167a8457607f#0c9db758e379b743fb53e7d2a02c167a8457607f"
+source = "git+https://github.com/memgraph/rsmgclient.git?rev=30efdf1e472cbf66481b106f75588cbc83f2a397#30efdf1e472cbf66481b106f75588cbc83f2a397"
 dependencies = [
  "bindgen",
  "chrono",
