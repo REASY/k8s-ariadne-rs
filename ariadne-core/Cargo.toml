@@ -24,4 +24,3 @@ strum_macros  = { workspace = true }
 thiserror = { workspace = true}
 tokio = { workspace = true }
 tracing = { workspace = true }
-log = "0.4.27"

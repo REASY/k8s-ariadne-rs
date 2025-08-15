@@ -18,12 +18,11 @@ use kube::config::KubeConfigOptions;
 use kube::runtime::reflector::Store;
 use kube::runtime::{reflector, watcher, WatchStreamExt};
 use kube::{Api, Client, Config, Resource, ResourceExt};
-use log::warn;
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, warn};
 
 #[async_trait]
 pub trait KubeClient: Sync + Send {

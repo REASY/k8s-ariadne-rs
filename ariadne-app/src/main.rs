@@ -126,7 +126,10 @@ async fn main() -> errors::Result<()> {
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
     let route = Router::new()
         .merge(main_router)
-        .route("/render/metrics", get(|| async move { metric_handle.render() }))
+        .route(
+            "/render/metrics",
+            get(|| async move { metric_handle.render() }),
+        )
         .layer(prometheus_layer)
         .layer(map_response(set_version_header))
         // High level logging of requests and responses

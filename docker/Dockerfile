@@ -1,40 +1,26 @@
-FROM rust:1.87 AS builder
+FROM rust:1.89 AS builder
 
-WORKDIR /code
+WORKDIR /app
 
 # System deps to compile Rust crates that may need native deps
 RUN apt-get update -y && \
-    apt-get install cmake libclang-dev -y && \
+    apt-get install -y --no-install-recommends cmake libclang-dev && \
     rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
 
-# 1) Cache dependency build
-# Copy only manifests first to maximize cache hits for dependencies
-COPY Cargo.toml Cargo.lock ./
-COPY ariadne-app/Cargo.toml ariadne-app/Cargo.toml
-COPY ariadne-core/Cargo.toml ariadne-core/Cargo.toml
-COPY ariadne-tools/Cargo.toml ariadne-tools/Cargo.toml
 
-# Create minimal src trees so cargo can resolve the workspace and build deps
-RUN mkdir -p ariadne-app/src ariadne-core/src ariadne-tools/src && \
-    printf "fn main() {}\n" > ariadne-app/src/main.rs && \
-    printf "\n" > ariadne-core/src/lib.rs && \
-    printf "\n" > ariadne-tools/src/lib.rs
-
-# Use BuildKit cache mounts to speed up cargo downloads between builds
-# This compiles the dependency graph and primes the cargo cache,
-# but produces a trivial binary since sources are stubs.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --locked --release -p ariadne-app
-
-# 2) Now copy the actual sources
-RUN rm -rf ariadne-app/src ariadne-core/src ariadne-tools/src
+FROM builder AS chef_planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# Build the real binary
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo install --locked --path ariadne-app --profile release
+
+FROM builder AS chef_builder
+COPY --from=chef_planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY . .
+RUN cargo build --locked --release -p ariadne-app
 
 
 FROM ubuntu:25.04
@@ -52,8 +38,10 @@ ARG COMMIT_SHA
 ARG BUILD_DATE
 ARG VERSION
 
-COPY --from=builder /usr/local/cargo/bin/ariadne-app /usr/local/bin/ariadne-app
-CMD ["ariadne-app"]
+# Copy the built binary from the builder's target dir
+COPY --from=chef_builder /app/ariadne-app /app/ariadne-app
+
+ENTRYPOINT ["/app/ariadne-app"]
 
 LABEL \
     org.opencontainers.image.name="k8s-ariadne-rs" \
