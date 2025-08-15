@@ -39,7 +39,7 @@ ARG BUILD_DATE
 ARG VERSION
 
 # Copy the built binary from the builder's target dir
-COPY --from=chef_builder /app/ariadne-app /app/ariadne-app
+COPY --from=chef_builder /app/target/release/ariadne-app /app/ariadne-app
 
 ENTRYPOINT ["/app/ariadne-app"]
 
