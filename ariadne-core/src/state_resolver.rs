@@ -1,10 +1,10 @@
 use crate::prelude::*;
 
 use crate::create_generic_object;
+use crate::diff::ClusterSnapshotDiff;
 use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::state::ClusterState;
 use crate::types::*;
-use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
@@ -23,55 +23,55 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fs;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::task::JoinHandle;
+use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, trace, warn};
 
 pub struct ClusterStateResolver {
-    cluster_name: String,
+    cluster: Cluster,
     kube_client: Arc<Box<dyn KubeClient>>,
+    last_snapshot: Arc<Mutex<ClusterSnapshot>>,
+    last_state: Arc<Mutex<ClusterState>>,
     #[allow(unused)]
     should_export_snapshot: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ClusterSnapshot {
-    cluster: Cluster,
-    namespaces: Vec<Arc<Namespace>>,
-    pods: Vec<Arc<Pod>>,
-    containers: Vec<Container>,
-    container_logs: Vec<Logs>,
-    deployments: Vec<Arc<Deployment>>,
-    stateful_sets: Vec<Arc<StatefulSet>>,
-    replica_sets: Vec<Arc<ReplicaSet>>,
-    daemon_sets: Vec<Arc<DaemonSet>>,
-    jobs: Vec<Arc<Job>>,
-    ingresses: Vec<Arc<Ingress>>,
-    services: Vec<Arc<Service>>,
-    endpoint_slices: Vec<Arc<EndpointSlice>>,
-    network_policies: Vec<Arc<NetworkPolicy>>,
-    config_maps: Vec<Arc<ConfigMap>>,
-    storage_classes: Vec<Arc<StorageClass>>,
-    persistent_volumes: Vec<Arc<PersistentVolume>>,
-    persistent_volume_claims: Vec<Arc<PersistentVolumeClaim>>,
-    nodes: Vec<Arc<Node>>,
-    service_accounts: Vec<Arc<ServiceAccount>>,
-    events: Vec<Arc<Event>>,
+pub struct ClusterSnapshot {
+    pub cluster: Cluster,
+    pub namespaces: Vec<Arc<Namespace>>,
+    pub pods: Vec<Arc<Pod>>,
+    pub containers: Vec<Container>,
+    pub container_logs: Vec<Logs>,
+    pub deployments: Vec<Arc<Deployment>>,
+    pub stateful_sets: Vec<Arc<StatefulSet>>,
+    pub replica_sets: Vec<Arc<ReplicaSet>>,
+    pub daemon_sets: Vec<Arc<DaemonSet>>,
+    pub jobs: Vec<Arc<Job>>,
+    pub ingresses: Vec<Arc<Ingress>>,
+    pub services: Vec<Arc<Service>>,
+    pub endpoint_slices: Vec<Arc<EndpointSlice>>,
+    pub network_policies: Vec<Arc<NetworkPolicy>>,
+    pub config_maps: Vec<Arc<ConfigMap>>,
+    pub storage_classes: Vec<Arc<StorageClass>>,
+    pub persistent_volumes: Vec<Arc<PersistentVolume>>,
+    pub persistent_volume_claims: Vec<Arc<PersistentVolumeClaim>>,
+    pub nodes: Vec<Arc<Node>>,
+    pub service_accounts: Vec<Arc<ServiceAccount>>,
+    pub events: Vec<Arc<Event>>,
 }
 
-#[allow(unused)]
-static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
-    if false {
-        let bytes = fs::read("/tmp/snapshot.json").unwrap();
-        serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
-    } else {
+impl ClusterSnapshot {
+    fn empty() -> Self {
         ClusterSnapshot {
             cluster: Cluster {
                 metadata: Default::default(),
                 name: "".to_string(),
                 cluster_url: "".to_string(),
                 info: Default::default(),
-                retrieved_at: Default::default(),
             },
             namespaces: vec![],
             containers: vec![],
@@ -95,6 +95,16 @@ static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock
             events: vec![],
         }
     }
+}
+
+#[allow(unused)]
+static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
+    if false {
+        let bytes = fs::read("/tmp/snapshot.json").unwrap();
+        serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
+    } else {
+        ClusterSnapshot::empty()
+    }
 });
 
 impl ClusterStateResolver {
@@ -104,15 +114,35 @@ impl ClusterStateResolver {
         maybe_ns: Option<&str>,
     ) -> Result<Self> {
         let kube_client = CachedKubeClient::new(options, maybe_ns).await?;
+        let cluster_url = kube_client.get_cluster_url().await?;
+        let info = kube_client.apiserver_version().await?;
+        let cluster: Cluster = Cluster::new(
+            ObjectIdentifier {
+                uid: format!("Cluster:{}", cluster_name),
+                name: cluster_name.to_string(),
+                namespace: None,
+                resource_version: None,
+            },
+            cluster_url.as_ref(),
+            info,
+        );
+        let kube_client: Arc<Box<dyn KubeClient>> = Arc::new(Box::new(kube_client));
+        let last_snapshot = Self::get_snapshot(cluster.clone(), kube_client.clone()).await?;
+        let last_state = Arc::new(Mutex::new(Self::create_state(&last_snapshot)));
         Ok(ClusterStateResolver {
-            cluster_name,
-            kube_client: Arc::new(Box::new(kube_client)),
+            cluster,
+            kube_client,
+            last_snapshot: Arc::new(Mutex::new(last_snapshot)),
+            last_state,
             should_export_snapshot: false,
         })
     }
 
-    async fn get_snapshot(&self) -> Result<ClusterSnapshot> {
-        let client = self.kube_client.clone();
+    async fn get_snapshot(
+        cluster: Cluster,
+        kube_client: Arc<Box<dyn KubeClient>>,
+    ) -> Result<ClusterSnapshot> {
+        let client = kube_client.clone();
         let namespaces = client.get_namespaces().await?;
         let events = Self::get_events(&client, namespaces.as_slice()).await;
         let nodes = client
@@ -135,37 +165,20 @@ impl ClusterStateResolver {
 
         let config_maps = client.get_config_maps().await?;
 
-        let storage_classes = self
-            .kube_client
+        let storage_classes = kube_client
             .get_storage_classes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volumes = self
-            .kube_client
+        let persistent_volumes = kube_client
             .get_persistent_volumes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volume_claims = self
-            .kube_client
+        let persistent_volume_claims = kube_client
             .get_persistent_volume_claims()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
 
         let service_accounts = client.get_service_accounts().await?;
-        let cluster_url = client.get_cluster_url().await?;
-        let info = client.apiserver_version().await?;
-        let retrieved_at = Utc::now();
-        let cluster: Cluster = Cluster::new(
-            ObjectIdentifier {
-                uid: format!("Cluster:{}", self.cluster_name),
-                name: self.cluster_name.to_string(),
-                namespace: None,
-                resource_version: None,
-            },
-            cluster_url.as_ref(),
-            info,
-            retrieved_at,
-        );
 
         let snapshot = ClusterSnapshot {
             cluster,
@@ -191,6 +204,55 @@ impl ClusterStateResolver {
             events,
         };
         Ok(snapshot)
+    }
+
+    pub fn start_diff_loop(&self, token: CancellationToken) -> JoinHandle<()> {
+        let cluster = self.cluster.clone();
+        let kube_client = self.kube_client.clone();
+        let last_snapshot: Arc<Mutex<ClusterSnapshot>> = self.last_snapshot.clone();
+        let last_state: Arc<Mutex<ClusterState>> = self.last_state.clone();
+        let task = tokio::spawn(async move {
+            Self::diff_loop(cluster, kube_client, last_snapshot, last_state, token).await;
+        });
+
+        task
+    }
+
+    async fn diff_loop(
+        cluster: Cluster,
+        kube_client: Arc<Box<dyn KubeClient>>,
+        last_snapshot: Arc<Mutex<ClusterSnapshot>>,
+        last_state: Arc<Mutex<ClusterState>>,
+        token: CancellationToken,
+    ) -> Result<()> {
+        let poll_interval: Duration = Duration::from_secs(5);
+        let mut id: usize = 0;
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    break;
+                },
+                _ = sleep(poll_interval) => {
+
+                    let current_snapshot = Self::get_snapshot(cluster.clone(), kube_client.clone()).await?;
+
+                   {
+                        let mut last_state = last_snapshot.lock().expect("Failed to lock last_snapshot");
+                        let diff = ClusterSnapshotDiff::new(&current_snapshot, &last_state);
+                        println!("###### Diff Loop {} start ######", id);
+                        println!("{}", diff);
+                        println!("###### Diff Loop {} end   ######", id);
+
+                       *last_state = current_snapshot;
+                    };
+
+
+                    id += 1;
+                },
+            }
+        }
+        info!("Stopped diff_loop, number of loops {id}");
+        Ok(())
     }
 
     async fn get_logs(client: &Arc<Box<dyn KubeClient>>, containers: &[Container]) -> Vec<Logs> {
@@ -253,19 +315,8 @@ impl ClusterStateResolver {
         events
     }
 
-    pub async fn resolve(&self) -> Result<ClusterState> {
-        let s = Instant::now();
-        let snapshot = self.get_snapshot().await?;
-        info!("Retrieved snapshot in {}ms", s.elapsed().as_millis());
-        if self.should_export_snapshot {
-            let v = serde_json::to_value(&snapshot)?;
-            let json = serde_json::to_string_pretty(&v)?;
-            let path = "/tmp/snapshot.json".to_string();
-            fs::write(path, json)?;
-        }
-
-        let state = Self::create_state(&snapshot);
-        Ok(state)
+    pub async fn resolve(&self) -> Result<Arc<Mutex<ClusterState>>> {
+        Ok(self.last_state.clone())
     }
 
     fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {

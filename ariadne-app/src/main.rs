@@ -57,11 +57,7 @@ async fn fetch_state(
 
     let fetch_and_save_fn = || async {
         let new_state = resolver.resolve().await?;
-        {
-            let mut old_locked_state = cluster_state.lock().unwrap();
-            *old_locked_state = new_state;
-        }
-        memgraph.create(cluster_state.clone()).await?;
+        memgraph.create(new_state.clone()).await?;
 
         errors::Result::Ok(())
     };
@@ -109,14 +105,15 @@ async fn main() -> errors::Result<()> {
 
     let memgraph: MemgraphAsync = MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?;
 
-    let resolver =
+    let mut resolver =
         ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
             .await?;
-    let init_state = resolver.resolve().await?;
-    let cluster_state: SharedClusterState = SharedClusterState::new(Mutex::new(init_state));
+    let cluster_state = resolver.resolve().await?;
     memgraph.create(cluster_state.clone()).await?;
 
-    let token = CancellationToken::new();
+    let token: CancellationToken = CancellationToken::new();
+
+    resolver.start_diff_loop(token.clone());
 
     let c0 = cluster_state.clone();
     let t0 = token.clone();

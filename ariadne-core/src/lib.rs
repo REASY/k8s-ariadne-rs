@@ -5,6 +5,7 @@ pub mod prelude {
     pub type Result<T> = std::result::Result<T, errors::AriadneError>;
 }
 
+mod diff;
 pub mod id_gen;
 pub mod kube_client;
 pub mod memgraph;
