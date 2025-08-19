@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use crate::create_generic_object;
-use crate::diff::ClusterSnapshotDiff;
+use crate::diff::ObservedClusterSnapshotDiff;
 use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::state::ClusterState;
 use crate::types::*;
@@ -33,19 +33,17 @@ use tracing::{info, trace, warn};
 pub struct ClusterStateResolver {
     cluster: Cluster,
     kube_client: Arc<Box<dyn KubeClient>>,
-    last_snapshot: Arc<Mutex<ClusterSnapshot>>,
+    last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
     last_state: Arc<Mutex<ClusterState>>,
     #[allow(unused)]
     should_export_snapshot: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ClusterSnapshot {
+pub struct ObservedClusterSnapshot {
     pub cluster: Cluster,
     pub namespaces: Vec<Arc<Namespace>>,
     pub pods: Vec<Arc<Pod>>,
-    pub containers: Vec<Container>,
-    pub container_logs: Vec<Logs>,
     pub deployments: Vec<Arc<Deployment>>,
     pub stateful_sets: Vec<Arc<StatefulSet>>,
     pub replica_sets: Vec<Arc<ReplicaSet>>,
@@ -64,9 +62,9 @@ pub struct ClusterSnapshot {
     pub events: Vec<Arc<Event>>,
 }
 
-impl ClusterSnapshot {
+impl ObservedClusterSnapshot {
     fn empty() -> Self {
-        ClusterSnapshot {
+        ObservedClusterSnapshot {
             cluster: Cluster {
                 metadata: Default::default(),
                 name: "".to_string(),
@@ -74,9 +72,7 @@ impl ClusterSnapshot {
                 info: Default::default(),
             },
             namespaces: vec![],
-            containers: vec![],
             pods: vec![],
-            container_logs: vec![],
             deployments: vec![],
             stateful_sets: vec![],
             replica_sets: vec![],
@@ -97,15 +93,30 @@ impl ClusterSnapshot {
     }
 }
 
+pub struct DerivedClusterSnapshot {
+    pub containers: Vec<Arc<Container>>,
+    pub hosts: Vec<Arc<Host>>,
+    pub ingress_service_backends: Vec<Arc<IngressServiceBackend>>,
+    pub endpoints: Vec<Arc<Endpoint>>,
+    pub endpoint_addresses: Vec<Arc<EndpointAddress>>,
+}
+
+pub struct AugmentedClusterSnapshot {
+    pub observed: ObservedClusterSnapshot,
+    pub derived: DerivedClusterSnapshot,
+    pub container_logs: Vec<Logs>,
+}
+
 #[allow(unused)]
-static CLUSTER_STATE: std::sync::LazyLock<ClusterSnapshot> = std::sync::LazyLock::new(|| {
-    if false {
-        let bytes = fs::read("/tmp/snapshot.json").unwrap();
-        serde_json::from_slice::<ClusterSnapshot>(&bytes).unwrap()
-    } else {
-        ClusterSnapshot::empty()
-    }
-});
+static CLUSTER_STATE: std::sync::LazyLock<ObservedClusterSnapshot> =
+    std::sync::LazyLock::new(|| {
+        if false {
+            let bytes = fs::read("/tmp/snapshot.json").unwrap();
+            serde_json::from_slice::<ObservedClusterSnapshot>(&bytes).unwrap()
+        } else {
+            ObservedClusterSnapshot::empty()
+        }
+    });
 
 impl ClusterStateResolver {
     pub async fn new(
@@ -127,22 +138,38 @@ impl ClusterStateResolver {
             info,
         );
         let kube_client: Arc<Box<dyn KubeClient>> = Arc::new(Box::new(kube_client));
-        let last_snapshot = Self::get_snapshot(cluster.clone(), kube_client.clone()).await?;
-        let last_state = Arc::new(Mutex::new(Self::create_state(&last_snapshot)));
+        let augmented = Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
+
+        let last_state = Arc::new(Mutex::new(Self::create_state(&augmented)));
         Ok(ClusterStateResolver {
             cluster,
             kube_client,
-            last_snapshot: Arc::new(Mutex::new(last_snapshot)),
+            last_snapshot: Arc::new(Mutex::new(augmented)),
             last_state,
             should_export_snapshot: false,
         })
     }
 
-    async fn get_snapshot(
-        cluster: Cluster,
+    async fn get_augmented_snapshot(
+        cluster: &Cluster,
         kube_client: Arc<Box<dyn KubeClient>>,
-    ) -> Result<ClusterSnapshot> {
-        let client = kube_client.clone();
+    ) -> Result<AugmentedClusterSnapshot> {
+        let last_snapshot =
+            Self::get_observed_snapshot(cluster.clone(), kube_client.clone()).await?;
+        let derived_snapshot = Self::get_derived_snapshot(&last_snapshot)?;
+        let container_logs = Self::get_logs(&kube_client, &derived_snapshot.containers).await;
+        let augmented = AugmentedClusterSnapshot {
+            observed: last_snapshot,
+            derived: derived_snapshot,
+            container_logs: container_logs,
+        };
+        Ok(augmented)
+    }
+
+    async fn get_observed_snapshot(
+        cluster: Cluster,
+        client: Arc<Box<dyn KubeClient>>,
+    ) -> Result<ObservedClusterSnapshot> {
         let namespaces = client.get_namespaces().await?;
         let events = Self::get_events(&client, namespaces.as_slice()).await;
         let nodes = client
@@ -150,8 +177,6 @@ impl ClusterStateResolver {
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
         let pods = client.get_pods().await?;
-        let containers = Self::get_containers(&pods)?;
-        let logs = Self::get_logs(&client, &containers).await;
         let deployments = client.get_deployments().await?;
         let stateful_sets = client.get_stateful_sets().await?;
         let replica_sets = client.get_replica_sets().await?;
@@ -165,27 +190,25 @@ impl ClusterStateResolver {
 
         let config_maps = client.get_config_maps().await?;
 
-        let storage_classes = kube_client
+        let storage_classes = client
             .get_storage_classes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volumes = kube_client
+        let persistent_volumes = client
             .get_persistent_volumes()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volume_claims = kube_client
+        let persistent_volume_claims = client
             .get_persistent_volume_claims()
             .await
             .or_else(|_err| Result::Ok(vec![]))?;
 
         let service_accounts = client.get_service_accounts().await?;
 
-        let snapshot = ClusterSnapshot {
+        let snapshot = ObservedClusterSnapshot {
             cluster,
             namespaces,
             pods,
-            containers,
-            container_logs: logs,
             deployments,
             stateful_sets,
             replica_sets,
@@ -206,10 +229,27 @@ impl ClusterStateResolver {
         Ok(snapshot)
     }
 
+    fn get_derived_snapshot(snapshot: &ObservedClusterSnapshot) -> Result<DerivedClusterSnapshot> {
+        let containers: Vec<Arc<Container>> = Self::get_containers(&snapshot.pods)?;
+        let (hosts, ingress_service_backends) =
+            Self::get_derived_from_ingress(&snapshot.ingresses.as_slice())?;
+
+        let (endpoints, endpoint_addresses) =
+            Self::get_derived_from_endpoints_slices(&snapshot.endpoint_slices)?;
+
+        Ok(DerivedClusterSnapshot {
+            containers: containers,
+            hosts: hosts,
+            ingress_service_backends: ingress_service_backends,
+            endpoints: endpoints,
+            endpoint_addresses: endpoint_addresses,
+        })
+    }
+
     pub fn start_diff_loop(&self, token: CancellationToken) -> JoinHandle<()> {
         let cluster = self.cluster.clone();
         let kube_client = self.kube_client.clone();
-        let last_snapshot: Arc<Mutex<ClusterSnapshot>> = self.last_snapshot.clone();
+        let last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>> = self.last_snapshot.clone();
         let last_state: Arc<Mutex<ClusterState>> = self.last_state.clone();
         let task = tokio::spawn(async move {
             Self::diff_loop(cluster, kube_client, last_snapshot, last_state, token).await;
@@ -221,7 +261,7 @@ impl ClusterStateResolver {
     async fn diff_loop(
         cluster: Cluster,
         kube_client: Arc<Box<dyn KubeClient>>,
-        last_snapshot: Arc<Mutex<ClusterSnapshot>>,
+        last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
         last_state: Arc<Mutex<ClusterState>>,
         token: CancellationToken,
     ) -> Result<()> {
@@ -234,11 +274,11 @@ impl ClusterStateResolver {
                 },
                 _ = sleep(poll_interval) => {
 
-                    let current_snapshot = Self::get_snapshot(cluster.clone(), kube_client.clone()).await?;
+                    let current_snapshot = Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
 
                    {
                         let mut last_state = last_snapshot.lock().expect("Failed to lock last_snapshot");
-                        let diff = ClusterSnapshotDiff::new(&current_snapshot, &last_state);
+                        let diff = ObservedClusterSnapshotDiff::new(&current_snapshot.observed, &last_state.observed);
                         println!("###### Diff Loop {} start ######", id);
                         println!("{}", diff);
                         println!("###### Diff Loop {} end   ######", id);
@@ -255,7 +295,10 @@ impl ClusterStateResolver {
         Ok(())
     }
 
-    async fn get_logs(client: &Arc<Box<dyn KubeClient>>, containers: &[Container]) -> Vec<Logs> {
+    async fn get_logs(
+        client: &Arc<Box<dyn KubeClient>>,
+        containers: &[Arc<Container>],
+    ) -> Vec<Logs> {
         let mut all_logs: Vec<Logs> = Vec::with_capacity(containers.len());
         let mut handles = Vec::new();
 
@@ -319,7 +362,8 @@ impl ClusterStateResolver {
         Ok(self.last_state.clone())
     }
 
-    fn create_state(snapshot: &ClusterSnapshot) -> ClusterState {
+    fn create_state(augmented: &AugmentedClusterSnapshot) -> ClusterState {
+        let snapshot = &augmented.observed;
         let mut state = ClusterState::new(snapshot.cluster.clone());
         let cluster_uid: String = {
             let obj_id = ObjectIdentifier {
@@ -369,7 +413,7 @@ impl ClusterStateResolver {
                 item.metadata.namespace.as_deref(),
             );
         }
-        for item in &snapshot.containers {
+        for item in &augmented.derived.containers {
             let obj_id = ObjectIdentifier {
                 uid: item.metadata.uid.as_ref().unwrap().clone(),
                 name: item.metadata.name.as_ref().unwrap().clone(),
@@ -402,7 +446,7 @@ impl ClusterStateResolver {
                 Edge::Runs,
             );
         }
-        for logs in &snapshot.container_logs {
+        for logs in &augmented.container_logs {
             let obj_id = ObjectIdentifier {
                 uid: logs.metadata.uid.as_ref().unwrap().clone(),
                 name: logs.metadata.name.as_ref().unwrap().clone(),
@@ -689,17 +733,6 @@ impl ClusterStateResolver {
 
         Self::set_manages_edge_all(snapshot, &mut state);
 
-        let mut service_selectors: Vec<(&str, &std::collections::BTreeMap<String, String>)> =
-            Vec::new();
-        for item in &snapshot.services {
-            item.metadata.uid.as_ref().inspect(|uid| {
-                let maybe_selector = item.spec.as_ref().and_then(|s| s.selector.as_ref());
-                maybe_selector.inspect(|tree| {
-                    service_selectors.push((uid.as_str(), tree));
-                });
-            });
-        }
-
         let pvc_name_to_uid: HashMap<&str, &str> = Self::name_to_uid(
             snapshot
                 .persistent_volume_claims
@@ -743,9 +776,19 @@ impl ClusterStateResolver {
             &mut state,
         );
 
-        Self::ingress_to_service(&snapshot.ingresses, &snapshot.services, &mut state);
+        Self::ingress_to_service(
+            &snapshot.services,
+            &augmented.derived.ingress_service_backends,
+            &mut state,
+        );
+        Self::connect_hosts(&augmented.derived.hosts, &mut state);
 
-        Self::endpoint_to_pod(&snapshot.endpoint_slices, &mut state);
+        Self::endpoint_to_pod(
+            &snapshot.endpoint_slices,
+            &augmented.derived.endpoints,
+            &augmented.derived.endpoint_addresses,
+            &mut state,
+        );
 
         for item in &snapshot.events {
             item.metadata.uid.as_ref().inspect(|uid| {
@@ -792,7 +835,7 @@ impl ClusterStateResolver {
         state
     }
 
-    fn set_manages_edge_all(snapshot: &ClusterSnapshot, state: &mut ClusterState) {
+    fn set_manages_edge_all(snapshot: &ObservedClusterSnapshot, state: &mut ClusterState) {
         Self::set_manages_edge(&snapshot.pods, ResourceType::Pod, state);
         Self::set_manages_edge(&snapshot.replica_sets, ResourceType::ReplicaSet, state);
         Self::set_manages_edge(&snapshot.stateful_sets, ResourceType::StatefulSet, state);
@@ -906,199 +949,156 @@ impl ClusterStateResolver {
     }
 
     fn ingress_to_service(
-        ingresses: &[Arc<Ingress>],
         services: &[Arc<Service>],
+        ingress_service_backends: &[Arc<IngressServiceBackend>],
         state: &mut ClusterState,
     ) {
         let service_name_to_id = Self::name_to_uid(services.iter().map(|s| &s.metadata));
-        ingresses.iter().for_each(|ingress| {
-            ingress.metadata.uid.as_ref().inspect(|ingress_id| {
-                ingress.spec.as_ref().inspect(|spec| {
-                    spec.rules.as_ref().inspect(|rules| {
-                        rules.iter().for_each(|rule| {
-                            rule.host.as_ref().inspect(|host| {
-                                let host_uid = format!("Host:{ingress_id}:{host}");
-                                let obj_id = ObjectIdentifier {
-                                    uid: host_uid.clone(),
-                                    name: (*host).clone(),
-                                    namespace: ingress.metadata.namespace.clone(),
-                                    resource_version: None,
-                                };
-                                state.add_node(GenericObject {
-                                    id: obj_id.clone(),
-                                    resource_type: ResourceType::Host,
-                                    attributes: Some(Box::new(ResourceAttributes::Host {
-                                        host: Host::new(&obj_id, host),
-                                    })),
-                                });
-                                state.add_edge(
-                                    &host_uid,
-                                    ResourceType::Host,
-                                    ingress_id,
-                                    ResourceType::Ingress,
-                                    Edge::IsClaimedBy,
-                                );
-                            });
+        for ingress_service_backend in ingress_service_backends {
+            // Prepare for the edges:
+            // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
+            // 2. (IngressBackend) [:TargetsService]-> Service
+            let obj_id = ObjectIdentifier {
+                uid: ingress_service_backend
+                    .metadata
+                    .uid
+                    .as_ref()
+                    .unwrap()
+                    .clone(),
+                name: ingress_service_backend.name.to_string(),
+                namespace: ingress_service_backend.metadata.namespace.clone(),
+                resource_version: ingress_service_backend.metadata.resource_version.clone(),
+            };
 
-                            rule.http.as_ref().inspect(|http| {
-                                http.paths.iter().for_each(|p| {
-                                    p.backend.service.as_ref().inspect(|s| {
-                                        let service_name = s.name.as_str();
-                                        let ingress_svc_backend_uid = format!(
-                                            "IngressServiceBackend:{ingress_id}:{service_name}"
-                                        );
-                                        // Prepare for the edges:
-                                        // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
-                                        // 2. (IngressBackend) [:TargetsService]-> Service
-                                        let obj_id = ObjectIdentifier {
-                                            uid: ingress_svc_backend_uid.clone(),
-                                            name: service_name.to_string(),
-                                            namespace: ingress.metadata.namespace.clone(),
-                                            resource_version: None,
-                                        };
-
-                                        state.add_node(GenericObject {
-                                            id: obj_id.clone(),
-                                            resource_type: ResourceType::IngressServiceBackend,
-                                            attributes: Some(Box::new(
-                                                ResourceAttributes::IngressServiceBackend {
-                                                    ingress_service_backend:
-                                                        IngressServiceBackend::new(&obj_id, s),
-                                                },
-                                            )),
-                                        });
-                                        state.add_edge(
-                                            ingress_id,
-                                            ResourceType::Ingress,
-                                            &ingress_svc_backend_uid,
-                                            ResourceType::IngressServiceBackend,
-                                            Edge::DefinesBackend,
-                                        );
-
-                                        service_name_to_id.get(service_name).inspect(|svc_id| {
-                                            state.add_edge(
-                                                &ingress_svc_backend_uid,
-                                                ResourceType::IngressServiceBackend,
-                                                svc_id,
-                                                ResourceType::Service,
-                                                Edge::TargetsService,
-                                            );
-                                        });
-                                    });
-                                });
-                            });
-                        })
-                    });
-                });
+            state.add_node(GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::IngressServiceBackend,
+                attributes: Some(Box::new(ResourceAttributes::IngressServiceBackend {
+                    ingress_service_backend: ingress_service_backend.clone(),
+                })),
             });
-        });
+            state.add_edge(
+                ingress_service_backend.ingress_uid.as_ref(),
+                ResourceType::Ingress,
+                &obj_id.uid,
+                ResourceType::IngressServiceBackend,
+                Edge::DefinesBackend,
+            );
+
+            service_name_to_id
+                .get(ingress_service_backend.name.as_str())
+                .inspect(|svc_id| {
+                    state.add_edge(
+                        &&obj_id.uid,
+                        ResourceType::IngressServiceBackend,
+                        svc_id,
+                        ResourceType::Service,
+                        Edge::TargetsService,
+                    );
+                });
+        }
     }
 
-    fn endpoint_to_pod(endpoints_slices: &[Arc<EndpointSlice>], state: &mut ClusterState) {
-        endpoints_slices.iter().for_each(|slice| {
-            if let Some(endpoint_slice_id) = slice.metadata.uid.as_ref() {
-                slice.endpoints.iter().for_each(|endpoint| {
-                    let obj_hash = endpoint.get_hash();
-                    let endpoint_uid = format!(
-                        "Endpoint:{}:{}:{}",
-                        endpoint_slice_id, slice.address_type, obj_hash
-                    );
-                    let endpoint_id = ObjectIdentifier {
-                        uid: endpoint_uid.clone(),
-                        name: "".to_string(),
-                        namespace: slice.metadata.namespace.clone(),
-                        resource_version: None,
-                    };
-                    state.add_node(GenericObject {
-                        id: endpoint_id.clone(),
-                        resource_type: ResourceType::Endpoint,
-                        attributes: Some(Box::new(ResourceAttributes::Endpoint {
-                            endpoint: Endpoint::new(&endpoint_id, endpoint.clone()),
-                        })),
-                    });
-                    // (EndpointSlice) -[:ContainsEndpoint]-> (Endpoint)
-                    state.add_edge(
-                        endpoint_slice_id.as_str(),
-                        ResourceType::EndpointSlice,
-                        endpoint_uid.as_str(),
-                        ResourceType::Endpoint,
-                        Edge::ContainsEndpoint,
-                    );
-
-                    endpoint.addresses.iter().for_each(|address| {
-                        let endpoint_address_uid =
-                            format!("EndpointAddress:{endpoint_uid}:{address}");
-                        let obj_id = ObjectIdentifier {
-                            uid: endpoint_address_uid.clone(),
-                            name: address.clone(),
-                            namespace: slice.metadata.namespace.clone(),
-                            resource_version: None,
-                        };
-                        state.add_node(GenericObject {
-                            id: obj_id.clone(),
-                            resource_type: ResourceType::EndpointAddress,
-                            attributes: Some(Box::new(ResourceAttributes::EndpointAddress {
-                                endpoint_address: EndpointAddress::new(&obj_id, address.clone()),
-                            })),
-                        });
-
-                        // (Endpoint) -[:HasAddress]-> (EndpointAddress)
-                        state.add_edge(
-                            endpoint_uid.as_str(),
-                            ResourceType::Endpoint,
-                            endpoint_address_uid.as_str(),
-                            ResourceType::EndpointAddress,
-                            Edge::HasAddress,
-                        );
-
-                        // (EndpointAddress) -[:ListedIn]-> (EndpointSlice)
-                        state.add_edge(
-                            endpoint_address_uid.as_str(),
-                            ResourceType::EndpointAddress,
-                            endpoint_slice_id.as_str(),
-                            ResourceType::EndpointSlice,
-                            Edge::ListedIn,
-                        );
-
-                        endpoint.target_ref.as_ref().inspect(|target_ref| {
-                            if let Some(kind) = target_ref.kind.as_ref() {
-                                if let Some(pod_uid) = target_ref.uid.as_ref() {
-                                    match ResourceType::try_new(kind) {
-                                        Ok(resource_type) => {
-                                            match resource_type {
-                                                ResourceType::Pod => {
-                                                    // (EndpointAddress) -[:IsAddressOf]-> (Pod)
-                                                    state.add_edge(
-                                                        endpoint_address_uid.as_str(),
-                                                        ResourceType::EndpointAddress,
-                                                        pod_uid,
-                                                        ResourceType::Pod,
-                                                        Edge::IsAddressOf,
-                                                    );
-                                                }
-                                                resource_type => {
-                                                    warn!("Unknown endpoint target kind {} for EndpointSlice [{}]: {}",
-                                                        resource_type,
-                                                        target_ref.kind.as_deref().unwrap_or(""),
-                                                        endpoint_slice_id
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        Err(err) => {
-                                            warn!(
-                                                "Failed to parse resource type from endpoint target {:?}: {}",
-                                                target_ref, err
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    });
-                });
+    fn connect_hosts(hosts: &Vec<Arc<Host>>, state: &mut ClusterState) {
+        for host in hosts {
+            let obj_id = ObjectIdentifier {
+                uid: host.metadata.uid.as_ref().unwrap().clone(),
+                name: host.name.to_string(),
+                namespace: host.metadata.namespace.clone(),
+                resource_version: None,
             };
-        });
+            state.add_node(GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::Host,
+                attributes: Some(Box::new(ResourceAttributes::Host { host: host.clone() })),
+            });
+            state.add_edge(
+                &obj_id.uid,
+                ResourceType::Host,
+                host.ingress_uid.as_ref(),
+                ResourceType::Ingress,
+                Edge::IsClaimedBy,
+            );
+        }
+    }
+
+    fn endpoint_to_pod(
+        endpoints_slices: &[Arc<EndpointSlice>],
+        endpoints: &[Arc<Endpoint>],
+        endpoint_addresses: &[Arc<EndpointAddress>],
+        state: &mut ClusterState,
+    ) {
+        for endpoint in endpoints {
+            let endpoint_uid = endpoint.metadata.uid.as_ref().unwrap().to_string();
+            let obj_id = ObjectIdentifier {
+                uid: endpoint_uid.clone(),
+                name: endpoint.metadata.name.as_ref().unwrap().to_string(),
+                namespace: endpoint.metadata.namespace.clone(),
+                resource_version: endpoint.metadata.resource_version.clone(),
+            };
+            state.add_node(GenericObject {
+                id: obj_id,
+                resource_type: ResourceType::Endpoint,
+                attributes: Some(Box::new(ResourceAttributes::Endpoint {
+                    endpoint: endpoint.clone(),
+                })),
+            });
+            // (EndpointSlice) -[:ContainsEndpoint]-> (Endpoint)
+            state.add_edge(
+                endpoint.endpoint_slice_id.as_str(),
+                ResourceType::EndpointSlice,
+                endpoint_uid.as_str(),
+                ResourceType::Endpoint,
+                Edge::ContainsEndpoint,
+            );
+        }
+
+        for endpoint_address in endpoint_addresses {
+            let obj_id = ObjectIdentifier {
+                uid: endpoint_address.metadata.uid.as_ref().unwrap().to_string(),
+                name: endpoint_address.metadata.name.as_ref().unwrap().to_string(),
+                namespace: endpoint_address.metadata.namespace.clone(),
+                resource_version: endpoint_address.metadata.resource_version.clone(),
+            };
+            state.add_node(GenericObject {
+                id: obj_id.clone(),
+                resource_type: ResourceType::EndpointAddress,
+                attributes: Some(Box::new(ResourceAttributes::EndpointAddress {
+                    endpoint_address: endpoint_address.clone(),
+                })),
+            });
+
+            let endpoint_address_uid = endpoint_address.metadata.uid.as_ref().unwrap().as_str();
+
+            // (Endpoint) -[:HasAddress]-> (EndpointAddress)
+            state.add_edge(
+                endpoint_address.endpoint_uid.as_str(),
+                ResourceType::Endpoint,
+                endpoint_address_uid,
+                ResourceType::EndpointAddress,
+                Edge::HasAddress,
+            );
+
+            // (EndpointAddress) -[:ListedIn]-> (EndpointSlice)
+            state.add_edge(
+                endpoint_address_uid,
+                ResourceType::EndpointAddress,
+                endpoint_address.endpoint_slice_uid.as_str(),
+                ResourceType::EndpointSlice,
+                Edge::ListedIn,
+            );
+
+            if let Some(pod_uid) = endpoint_address.pod_uid.as_ref() {
+                // (EndpointAddress) -[:IsAddressOf]-> (Pod)
+                state.add_edge(
+                    endpoint_address_uid,
+                    ResourceType::EndpointAddress,
+                    pod_uid.as_str(),
+                    ResourceType::Pod,
+                    Edge::IsAddressOf,
+                );
+            };
+        }
     }
 
     fn connect_part_of_and_belongs_to(
@@ -1130,8 +1130,8 @@ impl ClusterStateResolver {
         });
     }
 
-    fn get_containers(pods: &[Arc<Pod>]) -> Result<Vec<Container>> {
-        let mut containers: Vec<Container> = Vec::new();
+    fn get_containers(pods: &[Arc<Pod>]) -> Result<Vec<Arc<Container>>> {
+        let mut containers: Vec<Arc<Container>> = Vec::new();
         for pod in pods {
             if let Some(name) = pod.metadata.name.as_ref() {
                 if let Some(ns) = pod.metadata.namespace.as_ref() {
@@ -1146,7 +1146,7 @@ impl ClusterStateResolver {
                                         c.clone(),
                                         ContainerType::Init,
                                     );
-                                    containers.push(container);
+                                    containers.push(Arc::new(container));
                                 }
                             }
                             for c in &spec.containers {
@@ -1157,7 +1157,7 @@ impl ClusterStateResolver {
                                     c.clone(),
                                     ContainerType::Standard,
                                 );
-                                containers.push(container);
+                                containers.push(Arc::new(container));
                             }
                         }
                     }
@@ -1192,5 +1192,145 @@ impl ClusterStateResolver {
                 Some((uid, name))
             })
             .collect()
+    }
+
+    fn get_derived_from_ingress(
+        ingresses: &[Arc<Ingress>],
+    ) -> Result<(Vec<Arc<Host>>, Vec<Arc<IngressServiceBackend>>)> {
+        let mut hosts: Vec<Arc<Host>> = Vec::new();
+        let mut ingress_service_backends: Vec<Arc<IngressServiceBackend>> = Vec::new();
+
+        for ingress in ingresses {
+            ingress.metadata.uid.as_ref().inspect(|ingress_id| {
+                ingress.spec.as_ref().inspect(|spec| {
+                    spec.rules.as_ref().inspect(|rules| {
+                        rules.iter().for_each(|rule| {
+                            rule.host.as_ref().inspect(|host| {
+                                let host_uid = format!("Host:{ingress_id}:{host}");
+                                let obj_id = ObjectIdentifier {
+                                    uid: host_uid.clone(),
+                                    name: (*host).clone(),
+                                    namespace: ingress.metadata.namespace.clone(),
+                                    resource_version: None,
+                                };
+                                hosts.push(Arc::new(Host::new(&obj_id, host, ingress_id.as_ref())));
+                            });
+
+                            rule.http.as_ref().inspect(|http| {
+                                http.paths.iter().for_each(|p| {
+                                    p.backend.service.as_ref().inspect(|s| {
+                                        let service_name = s.name.as_str();
+                                        let ingress_svc_backend_uid = format!(
+                                            "IngressServiceBackend:{ingress_id}:{service_name}"
+                                        );
+                                        // Prepare for the edges:
+                                        // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
+                                        // 2. (IngressBackend) [:TargetsService]-> Service
+                                        let obj_id = ObjectIdentifier {
+                                            uid: ingress_svc_backend_uid.clone(),
+                                            name: service_name.to_string(),
+                                            namespace: ingress.metadata.namespace.clone(),
+                                            resource_version: None,
+                                        };
+
+                                        ingress_service_backends.push(Arc::new(
+                                            IngressServiceBackend::new(
+                                                &obj_id,
+                                                s,
+                                                ingress_id.as_str(),
+                                            ),
+                                        ));
+                                    });
+                                });
+                            });
+                        })
+                    });
+                });
+            });
+        }
+
+        Ok((hosts, ingress_service_backends))
+    }
+
+    fn get_derived_from_endpoints_slices(
+        endpoints_slices: &[Arc<EndpointSlice>],
+    ) -> Result<(Vec<Arc<Endpoint>>, Vec<Arc<EndpointAddress>>)> {
+        let mut endpoints: Vec<Arc<Endpoint>> = Vec::new();
+        let mut endpoint_addresss: Vec<Arc<EndpointAddress>> = Vec::new();
+
+        for slice in endpoints_slices {
+            if let Some(endpoint_slice_id) = slice.metadata.uid.as_ref() {
+                slice.endpoints.iter().for_each(|endpoint| {
+                    let obj_hash = endpoint.get_hash();
+                    let endpoint_uid = format!(
+                        "Endpoint:{}:{}:{}",
+                        endpoint_slice_id, slice.address_type, obj_hash
+                    );
+                    let endpoint_id = ObjectIdentifier {
+                        uid: endpoint_uid.clone(),
+                        name: "".to_string(),
+                        namespace: slice.metadata.namespace.clone(),
+                        resource_version: None,
+                    };
+                    endpoints.push(Arc::new(Endpoint::new(
+                        &endpoint_id,
+                        endpoint.clone(),
+                        endpoint_slice_id.as_str(),
+                    )));
+
+                    let pod_uid = endpoint.target_ref.as_ref().map(|target_ref| {
+                        if let (Some(kind), Some(uid)) = (target_ref.kind.as_ref(), target_ref.uid.as_ref()) {
+                            match ResourceType::try_new(kind) {
+                                Ok(resource_type) => {
+                                    match resource_type {
+                                        ResourceType::Pod => {
+                                            Some(uid.clone())
+                                        }
+                                        resource_type => {
+                                            warn!("Unknown endpoint target kind {} for EndpointSlice [{}]: {}",
+                                                        resource_type,
+                                                        target_ref.kind.as_deref().unwrap_or(""),
+                                                        endpoint_slice_id
+                                                    );
+                                            None
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!(
+                                                "Failed to parse resource type from endpoint target {:?}: {}",
+                                                target_ref, err
+                                            );
+                                    None
+                                }
+                            }
+                        }
+                        else {
+                            None
+                        }
+                    }).flatten();
+
+                    endpoint.addresses.iter().for_each(|address| {
+                        let endpoint_address_uid =
+                            format!("EndpointAddress:{endpoint_uid}:{address}");
+                        let endpoint_address_id = ObjectIdentifier {
+                            uid: endpoint_address_uid.clone(),
+                            name: address.clone(),
+                            namespace: slice.metadata.namespace.clone(),
+                            resource_version: None,
+                        };
+                        endpoint_addresss.push(Arc::new(EndpointAddress::new(
+                            &endpoint_address_id,
+                            address.clone(),
+                            endpoint_uid.as_str(),
+                            endpoint_slice_id.as_str(),
+                            pod_uid.clone()
+                        )));
+                    });
+                });
+            };
+        }
+
+        Ok((endpoints, endpoint_addresss))
     }
 }

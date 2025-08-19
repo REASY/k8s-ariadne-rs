@@ -178,7 +178,7 @@ pub enum ResourceAttributes {
         service: Arc<Service>,
     },
     Endpoint {
-        endpoint: Endpoint,
+        endpoint: Arc<Endpoint>,
     },
     NetworkPolicy {
         network_policy: Arc<NetworkPolicy>,
@@ -202,16 +202,16 @@ pub enum ResourceAttributes {
         service_account: Arc<ServiceAccount>,
     },
     IngressServiceBackend {
-        ingress_service_backend: IngressServiceBackend,
+        ingress_service_backend: Arc<IngressServiceBackend>,
     },
     EndpointSlice {
         endpoint_slice: Arc<EndpointSlice>,
     },
     EndpointAddress {
-        endpoint_address: EndpointAddress,
+        endpoint_address: Arc<EndpointAddress>,
     },
     Host {
-        host: Host,
+        host: Arc<Host>,
     },
     Cluster {
         cluster: Cluster,
@@ -220,7 +220,7 @@ pub enum ResourceAttributes {
         logs: Logs,
     },
     Container {
-        container: Container,
+        container: Arc<Container>,
     },
     Event {
         event: Arc<Event>,
@@ -429,12 +429,16 @@ pub struct IngressServiceBackend {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
     pub port: Option<k8s_openapi::api::networking::v1::ServiceBackendPort>,
+
+    #[serde(skip)]
+    pub ingress_uid: String,
 }
 
 impl IngressServiceBackend {
     pub fn new(
         id: &ObjectIdentifier,
         backend: &k8s_openapi::api::networking::v1::IngressServiceBackend,
+        ingress_uid: &str,
     ) -> Self {
         let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
             annotations: None,
@@ -457,6 +461,7 @@ impl IngressServiceBackend {
             metadata: md,
             name: backend.name.clone(),
             port: backend.port.clone(),
+            ingress_uid: ingress_uid.to_string(),
         }
     }
 }
@@ -522,13 +527,31 @@ impl k8s_openapi::schemars::JsonSchema for IngressServiceBackend {
 pub struct EndpointAddress {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub address: String,
+
+    #[serde(skip)]
+    pub endpoint_uid: String,
+
+    #[serde(skip)]
+    pub endpoint_slice_uid: String,
+
+    #[serde(skip)]
+    pub pod_uid: Option<String>,
 }
 
 impl EndpointAddress {
-    pub fn new(id: &ObjectIdentifier, address: String) -> Self {
+    pub fn new(
+        id: &ObjectIdentifier,
+        address: String,
+        endpoint_uid: &str,
+        endpoint_slice_uid: &str,
+        pod_uid: Option<String>,
+    ) -> Self {
         Self {
             metadata: as_object_meta(id),
             address,
+            endpoint_uid: endpoint_uid.to_string(),
+            endpoint_slice_uid: endpoint_slice_uid.to_string(),
+            pod_uid: pod_uid,
         }
     }
 }
@@ -576,12 +599,16 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
 pub struct Host {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
+
+    #[serde(skip)]
+    pub ingress_uid: String,
 }
 impl Host {
-    pub fn new(id: &ObjectIdentifier, host: &str) -> Self {
+    pub fn new(id: &ObjectIdentifier, host: &str, ingress_uid: &str) -> Self {
         Self {
             metadata: as_object_meta(id),
             name: host.to_string(),
+            ingress_uid: ingress_uid.to_string(),
         }
     }
 }
@@ -651,7 +678,7 @@ impl Container {
         spec: k8s_openapi::api::core::v1::Container,
         container_type: ContainerType,
     ) -> Self {
-        let uid = format!("{}_{}_{}", pod_uid, container_type, &spec.name);
+        let uid = format!("Container:{}:{}:{}", pod_uid, container_type, &spec.name);
         Self {
             pod_name: pod_name.to_string(),
             pod_uid: pod_uid.to_string(),
@@ -735,7 +762,7 @@ pub struct Logs {
 
 impl Logs {
     pub fn new(namespace: &str, name: &str, container_uid: &str, content: String) -> Self {
-        let uid = format!("logs_{container_uid}");
+        let uid = format!("Logs:{container_uid}");
         let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
             annotations: None,
             creation_timestamp: None,
@@ -830,10 +857,17 @@ pub struct Endpoint {
     pub node_name: Option<String>,
     pub target_ref: Option<k8s_openapi::api::core::v1::ObjectReference>,
     pub zone: Option<String>,
+
+    #[serde(skip)]
+    pub endpoint_slice_id: String,
 }
 
 impl Endpoint {
-    pub fn new(id: &ObjectIdentifier, endpoint: k8s_openapi::api::discovery::v1::Endpoint) -> Self {
+    pub fn new(
+        id: &ObjectIdentifier,
+        endpoint: k8s_openapi::api::discovery::v1::Endpoint,
+        endpoint_slice_id: &str,
+    ) -> Self {
         Self {
             metadata: as_object_meta(id),
             addresses: endpoint.addresses,
@@ -843,6 +877,7 @@ impl Endpoint {
             node_name: endpoint.node_name,
             target_ref: endpoint.target_ref,
             zone: endpoint.zone,
+            endpoint_slice_id: endpoint_slice_id.to_string(),
         }
     }
 }

@@ -1,4 +1,5 @@
-use crate::state_resolver::ClusterSnapshot;
+use crate::state::ClusterState;
+use crate::state_resolver::ObservedClusterSnapshot;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
@@ -23,7 +24,7 @@ pub struct Diff<'a, T> {
 }
 
 #[derive(Debug)]
-pub struct ClusterSnapshotDiff<'a> {
+pub struct ObservedClusterSnapshotDiff<'a> {
     pub namespaces: Diff<'a, Namespace>,
     pub pods: Diff<'a, Pod>,
     pub deployments: Diff<'a, Deployment>,
@@ -44,7 +45,7 @@ pub struct ClusterSnapshotDiff<'a> {
     pub events: Diff<'a, Event>,
 }
 
-impl<'a> fmt::Display for ClusterSnapshotDiff<'a> {
+impl<'a> fmt::Display for ObservedClusterSnapshotDiff<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut first = true;
         write_diff_section(f, &mut first, "Namespaces", &self.namespaces)?;
@@ -75,7 +76,7 @@ impl<'a> fmt::Display for ClusterSnapshotDiff<'a> {
     }
 }
 
-fn write_diff_section<T: std::fmt::Debug>(
+fn write_diff_section<T: fmt::Debug>(
     f: &mut Formatter<'_>,
     first: &mut bool,
     name: &str,
@@ -100,9 +101,9 @@ fn write_diff_section<T: std::fmt::Debug>(
     Ok(())
 }
 
-impl<'a> ClusterSnapshotDiff<'a> {
-    pub fn new(current: &'a ClusterSnapshot, prev: &'a ClusterSnapshot) -> Self {
-        ClusterSnapshotDiff {
+impl<'a> ObservedClusterSnapshotDiff<'a> {
+    pub fn new(current: &'a ObservedClusterSnapshot, prev: &'a ObservedClusterSnapshot) -> Self {
+        ObservedClusterSnapshotDiff {
             namespaces: diff_slices(&current.namespaces, &prev.namespaces),
             pods: diff_slices(&current.pods, &prev.pods),
             deployments: diff_slices(&current.deployments, &prev.deployments),
