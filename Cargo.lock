@@ -2144,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "rsmgclient"
 version = "2.0.2"
-source = "git+https://github.com/memgraph/rsmgclient.git?rev=30efdf1e472cbf66481b106f75588cbc83f2a397#30efdf1e472cbf66481b106f75588cbc83f2a397"
+source = "git+https://github.com/memgraph/rsmgclient.git?rev=9141722e2bbf0ab35dab7d3912249b90c27b15ea#9141722e2bbf0ab35dab7d3912249b90c27b15ea"
 dependencies = [
  "bindgen",
  "chrono",

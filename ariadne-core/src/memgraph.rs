@@ -710,6 +710,9 @@ fn record_to_json0(value: &rsmgclient::Value) -> Result<Value> {
             serde_json::to_value(UnboundRelationship::try_new(rel)?)?
         }
         rsmgclient::Value::Path(path) => serde_json::to_value(Path::try_new(path)?)?,
+        rsmgclient::Value::DateTime(_) => unimplemented!("Value::DateTime"),
+        rsmgclient::Value::Point2D(_) => unimplemented!("Value::Point2D"),
+        rsmgclient::Value::Point3D(_) => unimplemented!("Value::Point3D"),
     };
     Ok(r)
 }
