@@ -1,11 +1,10 @@
 k8s-graph-rs
 -----
 
-Simple web application that discovers objects in Kubernetes cluster (K8S). It exposes an endpoint `/v1/graph` that
-returns the
-directed graph of K8S.
+Simple web application that discovers objects in the Kubernetes cluster (K8S). It exposes an endpoint `/v1/graph` that
+returns the state of K8s as directed graph.
 
-# High level details
+# High-level details
 ![high_level_diagram.svg](doc/high_level_diagram.svg)
 
 # Development
@@ -14,9 +13,8 @@ The project requires the following tools configured on your developer machine:
 
 - Cargo and Rust compiler installed, use [rustup](https://www.rust-lang.org/tools/install)
 
-This project uses [kube](https://docs.rs/kube/0.91.0/kube/) Rust library to interact with K8S. Make sure you have
-kubectl config, cluster's certificate-authority, user's certificate and key to be able to interact with cluster. By
-default [kube](https://docs.rs/kube/0.91.0/kube/config/index.html) resolves in the following way:
+This project uses [the kube](https://docs.rs/kube/0.91.0/kube/) Rust library to interact with K8S. Make sure you have kubectl config, cluster's certificate-authority, user's certificate and key to be able to interact with the cluster. 
+By default, [kube](https://docs.rs/kube/0.91.0/kube/config/index.html) resolves in the following way:
 > Kubernetes configuration objects from ~/.kube/config, $KUBECONFIG, or the cluster environment.
 
 ## Build the project
@@ -40,7 +38,7 @@ KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
 2025-07-04T07:00:10.105757Z  INFO                 main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:127: Server listening for HTTP on http://127.0.0.1:18080
 ```
 
-## Open browser at http://127.0.0.1:18080/index.html
+## Open the browser at http://127.0.0.1:18080/index.html
 
 ![img.png](doc/img.png)
 

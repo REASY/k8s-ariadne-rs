@@ -12,7 +12,7 @@ authors = ["Artavazd Balaian <reasyu@gmail.com>"]
 edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.89.0"
+rust-version = "1.91.1"
 version = "0.4.8"
 
 [workspace.dependencies]
