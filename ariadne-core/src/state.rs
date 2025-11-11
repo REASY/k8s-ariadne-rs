@@ -1,14 +1,17 @@
+use crate::diff::{Diff, ObservedClusterSnapshotDiff};
 use crate::id_gen::{GetNextIdResult, IdGen};
+use crate::state_resolver::ObservedClusterSnapshot;
 use crate::types::{Cluster, Edge, GenericObject, ResourceType};
+use kube::ResourceExt;
 use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tracing::warn;
 
 pub type NodeId = u32;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GraphVertex {
     id: String,
     name: String,
@@ -29,7 +32,7 @@ impl GraphVertex {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GraphEdge {
     pub source: String,
     pub source_type: ResourceType,
@@ -42,6 +45,25 @@ pub struct GraphEdge {
 pub struct DirectedGraph {
     vertices: Vec<GraphVertex>,
     edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ClusterStateDiff {
+    pub added_nodes: Vec<GenericObject>,
+    pub removed_nodes: Vec<GenericObject>,
+    pub modified_nodes: Vec<GenericObject>,
+    pub added_edges: Vec<GraphEdge>,
+    pub removed_edges: Vec<GraphEdge>,
+}
+
+impl ClusterStateDiff {
+    pub fn is_empty(&self) -> bool {
+        self.added_nodes.is_empty()
+            && self.removed_nodes.is_empty()
+            && self.modified_nodes.is_empty()
+            && self.added_edges.is_empty()
+            && self.removed_edges.is_empty()
+    }
 }
 
 #[macro_export]
@@ -159,6 +181,245 @@ impl ClusterState {
 
     pub fn get_edge_count(&self) -> usize {
         self.graph.edge_count()
+    }
+
+    pub fn node_by_uid(&self, uid: &str) -> Option<&GenericObject> {
+        self.id_gen
+            .get_id(uid)
+            .and_then(|node_id| self.id_to_node.get(&node_id))
+    }
+
+    fn node_map(&self) -> HashMap<String, &GenericObject> {
+        let mut map = HashMap::with_capacity(self.id_to_node.len());
+        for (node_id, node) in &self.id_to_node {
+            if let Some(uid) = self.id_gen.get_by_id(*node_id) {
+                map.insert(uid, node);
+            }
+        }
+        map
+    }
+
+    pub fn diff(
+        &self,
+        new_state: &ClusterState,
+        prev_snapshot: &ObservedClusterSnapshot,
+        new_snapshot: &ObservedClusterSnapshot,
+    ) -> ClusterStateDiff {
+        let mut diff = ClusterStateDiff::default();
+        let mut processed_uids: HashSet<String> = HashSet::new();
+
+        let snapshot_diff = ObservedClusterSnapshotDiff::new(new_snapshot, prev_snapshot);
+
+        fn apply_resource_diff<'a, T: ResourceExt>(
+            resource_diff: &Diff<'a, T>,
+            prev_state: &ClusterState,
+            new_state: &ClusterState,
+            out: &mut ClusterStateDiff,
+            processed: &mut HashSet<String>,
+        ) {
+            for item in &resource_diff.added {
+                if let Some(uid) = item.meta().uid.as_deref() {
+                    if processed.insert(uid.to_string()) {
+                        match new_state.node_by_uid(uid) {
+                            Some(node) => out.added_nodes.push(node.clone()),
+                            None => warn!("Added resource {uid} missing from new state"),
+                        }
+                    }
+                }
+            }
+
+            for item in &resource_diff.removed {
+                if let Some(uid) = item.meta().uid.as_deref() {
+                    if processed.insert(uid.to_string()) {
+                        match prev_state.node_by_uid(uid) {
+                            Some(node) => out.removed_nodes.push(node.clone()),
+                            None => warn!("Removed resource {uid} missing from previous state"),
+                        }
+                    }
+                }
+            }
+
+            for item in &resource_diff.modified {
+                if let Some(uid) = item.meta().uid.as_deref() {
+                    if processed.insert(uid.to_string()) {
+                        match new_state.node_by_uid(uid) {
+                            Some(node) => out.modified_nodes.push(node.clone()),
+                            None => warn!("Modified resource {uid} missing from new state"),
+                        }
+                    }
+                }
+            }
+        }
+
+        apply_resource_diff(
+            &snapshot_diff.namespaces,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.pods,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.deployments,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.stateful_sets,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.replica_sets,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.daemon_sets,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.jobs,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.ingresses,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.services,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.endpoint_slices,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.network_policies,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.config_maps,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.storage_classes,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.persistent_volumes,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.persistent_volume_claims,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.nodes,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.service_accounts,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+        apply_resource_diff(
+            &snapshot_diff.events,
+            self,
+            new_state,
+            &mut diff,
+            &mut processed_uids,
+        );
+
+        let old_nodes = self.node_map();
+        let new_nodes = new_state.node_map();
+
+        for (uid, node) in &new_nodes {
+            if processed_uids.contains(uid) {
+                continue;
+            }
+            match old_nodes.get(uid) {
+                None => {
+                    diff.added_nodes.push((*node).clone());
+                    processed_uids.insert(uid.clone());
+                }
+                Some(previous) => {
+                    if *previous != *node {
+                        diff.modified_nodes.push((*node).clone());
+                        processed_uids.insert(uid.clone());
+                    }
+                }
+            }
+        }
+
+        for (uid, node) in &old_nodes {
+            if processed_uids.contains(uid) {
+                continue;
+            }
+            if !new_nodes.contains_key(uid) {
+                diff.removed_nodes.push((*node).clone());
+                processed_uids.insert(uid.clone());
+            }
+        }
+
+        let old_edges: HashSet<GraphEdge> = self.get_edges().collect();
+        let new_edges: HashSet<GraphEdge> = new_state.get_edges().collect();
+
+        for edge in new_edges.difference(&old_edges) {
+            diff.added_edges.push(edge.clone());
+        }
+        for edge in old_edges.difference(&new_edges) {
+            diff.removed_edges.push(edge.clone());
+        }
+
+        diff
     }
 }
 

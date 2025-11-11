@@ -1,5 +1,4 @@
 use ariadne_core::memgraph_async::MemgraphAsync;
-use ariadne_core::state::SharedClusterState;
 use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
 use axum::middleware::map_response;
@@ -10,7 +9,6 @@ use axum_prometheus::PrometheusMetricLayer;
 use kube::config::KubeConfigOptions;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::sleep;
@@ -48,7 +46,6 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
 async fn fetch_state(
     resolver: ClusterStateResolver,
     memgraph: MemgraphAsync,
-    cluster_state: SharedClusterState,
     token: CancellationToken,
     poll_interval: Duration,
 ) -> errors::Result<()> {
@@ -105,7 +102,7 @@ async fn main() -> errors::Result<()> {
 
     let memgraph: MemgraphAsync = MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?;
 
-    let mut resolver =
+    let resolver =
         ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
             .await?;
     let cluster_state = resolver.resolve().await?;
@@ -113,10 +110,7 @@ async fn main() -> errors::Result<()> {
 
     let token: CancellationToken = CancellationToken::new();
 
-    resolver.start_diff_loop(token.clone());
-
-    let c0 = cluster_state.clone();
-    let t0 = token.clone();
+    resolver.start_diff_loop(memgraph.clone(), token.clone());
 
     let main_router =
         routes::create_route(cluster_name, cluster_state.clone(), memgraph.clone()).await?;
@@ -156,9 +150,11 @@ async fn main() -> errors::Result<()> {
     let http_addr: SocketAddr = format!("{}:{}", http_host, http_port).parse().unwrap();
     let svc = route.into_make_service_with_connect_info::<SocketAddr>();
     let http_listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+    let shutdown_token = token.clone();
+    let svc_clone = svc.clone();
     let f = tokio::spawn(async move {
-        axum::serve(http_listener, svc.clone())
-            .with_graceful_shutdown(shutdown_signal(token.clone()))
+        axum::serve(http_listener, svc_clone)
+            .with_graceful_shutdown(shutdown_signal(shutdown_token))
             .await
             .expect("Failed to start server")
     });
@@ -175,19 +171,47 @@ async fn main() -> errors::Result<()> {
             .next()
             .unwrap_or(30),
     );
-    let fetch_state_handle = tokio::spawn(async move {
-        fetch_state(resolver, memgraph, c0, t0, poll_interval)
+
+    let enable_full_rebuild_loop = std::env::var("ENABLE_FULL_REBUILD_LOOP")
+        .map(|value| matches_ignore_ascii_case(&value, &["1", "true", "yes"]))
+        .unwrap_or(false);
+
+    let fetch_state_handle = if enable_full_rebuild_loop {
+        info!("Full rebuild fallback loop enabled");
+        let resolver_for_fallback = resolver;
+        let memgraph_for_fallback = memgraph.clone();
+        let t0 = token.clone();
+        Some(tokio::spawn(async move {
+            fetch_state(
+                resolver_for_fallback,
+                memgraph_for_fallback,
+                t0,
+                poll_interval,
+            )
             .await
             .unwrap()
-    });
-    info!("Created fetch_state_handle");
+        }))
+    } else {
+        info!("Full rebuild fallback loop disabled");
+        None
+    };
 
-    let (f0, f1) = tokio::join!(f, fetch_state_handle);
-    f0.unwrap();
-    f1.unwrap();
+    if let Some(fetch_state_handle) = fetch_state_handle {
+        let (server_result, fallback_result) = tokio::join!(f, fetch_state_handle);
+        server_result.unwrap();
+        fallback_result.unwrap();
+    } else {
+        f.await.unwrap();
+    }
     info!("Server shutdown");
 
     Ok(())
+}
+
+fn matches_ignore_ascii_case(value: &str, truthy: &[&str]) -> bool {
+    truthy
+        .iter()
+        .any(|candidate| value.eq_ignore_ascii_case(candidate))
 }
 
 async fn shutdown_signal(token: CancellationToken) {

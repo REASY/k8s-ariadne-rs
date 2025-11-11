@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::state::ClusterState;
+use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
 use k8s_openapi::Metadata;
 use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record};
@@ -138,6 +138,105 @@ impl Memgraph {
             );
         }
         Result::Ok(())
+    }
+
+    pub fn update_from_diff(&mut self, diff: &ClusterStateDiff) -> Result<()> {
+        if diff.is_empty() {
+            return Ok(());
+        }
+        let s = Instant::now();
+
+        let mut changed = false;
+
+        for edge in &diff.removed_edges {
+            let query = Self::get_delete_edge_query(edge);
+            self.connection
+                .execute_without_results(&query)
+                .map_err(|e| {
+                    MemgraphError::QueryError(format!(
+                        "Failed to delete {:?}: {}",
+                        edge,
+                        e.to_string()
+                    ))
+                })?;
+            changed = true;
+        }
+
+        for node in &diff.removed_nodes {
+            let query = Self::get_delete_node_query(node);
+            self.connection
+                .execute_without_results(&query)
+                .map_err(|e| {
+                    MemgraphError::QueryError(format!(
+                        "Failed to delete the node with id {:?} and type {}: {}",
+                        node.id,
+                        node.resource_type,
+                        e.to_string()
+                    ))
+                })?;
+            changed = true;
+        }
+
+        for node in &diff.added_nodes {
+            let create_query = Self::get_create_query(node)?;
+            self.connection
+                .execute_without_results(&create_query)
+                .map_err(|e| {
+                    MemgraphError::QueryError(format!(
+                        "Failed to create the node with id {:?} and type {}: {}",
+                        node.id,
+                        node.resource_type,
+                        e.to_string()
+                    ))
+                })?;
+            changed = true;
+        }
+
+        for node in &diff.modified_nodes {
+            let update_query = Self::get_update_query(node)?;
+            self.connection
+                .execute_without_results(&update_query)
+                .map_err(|e| {
+                    MemgraphError::QueryError(format!(
+                        "Failed to update the node with id {:?} and type {}: {}",
+                        node.id,
+                        node.resource_type,
+                        e.to_string()
+                    ))
+                })?;
+            changed = true;
+        }
+
+        for edge in &diff.added_edges {
+            let query = Self::get_merge_edge_query(edge);
+            self.connection
+                .execute_without_results(&query)
+                .map_err(|e| {
+                    MemgraphError::QueryError(format!(
+                        "Failed to merge {:?}: {}",
+                        edge,
+                        e.to_string()
+                    ))
+                })?;
+            changed = true;
+        }
+
+        if changed {
+            self.connection
+                .commit()
+                .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
+        }
+
+        info!(
+            "Applied diff in {} ms: +{} nodes, -{} nodes, ~{} nodes, +{} edges, -{} edges",
+            s.elapsed().as_millis(),
+            diff.added_nodes.len(),
+            diff.removed_nodes.len(),
+            diff.modified_nodes.len(),
+            diff.added_edges.len(),
+            diff.removed_edges.len(),
+        );
+        Ok(())
     }
 
     pub fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
@@ -319,6 +418,16 @@ impl Memgraph {
         Ok(r)
     }
 
+    fn get_update_query(obj: &GenericObject) -> Result<String> {
+        let properties = Self::json_to_cypher(&Self::get_as_json(obj)?);
+        Ok(format!(
+            "MATCH (n:{label:?}) WHERE n.metadata.uid = '{uid}' SET n = {properties} ",
+            label = obj.resource_type,
+            uid = Self::escape_identifier(&obj.id.uid),
+            properties = properties
+        ))
+    }
+
     fn get_as_json(obj: &GenericObject) -> Result<Value> {
         let Some(attributes) = &obj.attributes else {
             return Ok(Value::Null);
@@ -462,6 +571,40 @@ impl Memgraph {
         ]
     }
 
+    fn get_delete_node_query(obj: &GenericObject) -> String {
+        format!(
+            "MATCH (n:{label:?}) WHERE n.metadata.uid = '{uid}' DETACH DELETE n ",
+            label = obj.resource_type,
+            uid = Self::escape_identifier(&obj.id.uid)
+        )
+    }
+
+    fn get_delete_edge_query(edge: &GraphEdge) -> String {
+        format!(
+            "MATCH (u:{source_type:?})-[r:{edge_type:?}]->(v:{target_type:?}) WHERE u.metadata.uid = '{source}' AND v.metadata.uid = '{target}' DELETE r",
+            source_type = edge.source_type,
+            source = Self::escape_identifier(&edge.source),
+            edge_type = edge.edge_type,
+            target_type = edge.target_type,
+            target = Self::escape_identifier(&edge.target),
+        )
+    }
+
+    fn get_merge_edge_query(edge: &GraphEdge) -> String {
+        format!(
+            "MATCH (u:{source_type:?} ), (v:{target_type:?}) WHERE u.metadata.uid = '{source}' AND v.metadata.uid = '{target}' MERGE (u)-[:{edge_type:?}]->(v)",
+            source_type = edge.source_type,
+            source = Self::escape_identifier(&edge.source),
+            target_type = edge.target_type,
+            target = Self::escape_identifier(&edge.target),
+            edge_type = edge.edge_type,
+        )
+    }
+
+    fn escape_identifier(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('\'', "\\'")
+    }
+
     fn json_to_cypher(value: &Value) -> String {
         let mut cypher_data = String::new();
         fn to_cypher_data0(value: &Value, cypher_data: &mut String) {
@@ -481,7 +624,10 @@ impl Memgraph {
                 }
                 Value::String(s) => {
                     cypher_data.push('"');
-                    let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
+                    let escaped = s
+                        .replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                        .replace("\n", "\\n");
                     cypher_data.push_str(escaped.as_str());
                     cypher_data.push('"');
                 }

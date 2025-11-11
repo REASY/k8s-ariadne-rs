@@ -1,8 +1,8 @@
 use crate::prelude::*;
 
 use crate::create_generic_object;
-use crate::diff::ObservedClusterSnapshotDiff;
 use crate::kube_client::{CachedKubeClient, KubeClient};
+use crate::memgraph_async::MemgraphAsync;
 use crate::state::ClusterState;
 use crate::types::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -246,13 +246,26 @@ impl ClusterStateResolver {
         })
     }
 
-    pub fn start_diff_loop(&self, token: CancellationToken) -> JoinHandle<()> {
+    pub fn start_diff_loop(
+        &self,
+        memgraph: MemgraphAsync,
+        token: CancellationToken,
+    ) -> JoinHandle<()> {
         let cluster = self.cluster.clone();
         let kube_client = self.kube_client.clone();
         let last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>> = self.last_snapshot.clone();
         let last_state: Arc<Mutex<ClusterState>> = self.last_state.clone();
         let task = tokio::spawn(async move {
-            Self::diff_loop(cluster, kube_client, last_snapshot, last_state, token).await;
+            Self::diff_loop(
+                cluster,
+                kube_client,
+                last_snapshot,
+                last_state,
+                memgraph,
+                token,
+            )
+            .await
+            .expect("Diff loop failed");
         });
 
         task
@@ -263,6 +276,7 @@ impl ClusterStateResolver {
         kube_client: Arc<Box<dyn KubeClient>>,
         last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
         last_state: Arc<Mutex<ClusterState>>,
+        memgraph: MemgraphAsync,
         token: CancellationToken,
     ) -> Result<()> {
         let poll_interval: Duration = Duration::from_secs(5);
@@ -274,18 +288,56 @@ impl ClusterStateResolver {
                 },
                 _ = sleep(poll_interval) => {
 
-                    let current_snapshot = Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
+                    let current_snapshot =
+                        Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
 
-                   {
-                        let mut last_state = last_snapshot.lock().expect("Failed to lock last_snapshot");
-                        let diff = ObservedClusterSnapshotDiff::new(&current_snapshot.observed, &last_state.observed);
-                        println!("###### Diff Loop {} start ######", id);
-                        println!("{}", diff);
-                        println!("###### Diff Loop {} end   ######", id);
+                    let new_cluster_state = Self::create_state(&current_snapshot);
 
-                       *last_state = current_snapshot;
+                    let previous_snapshot = {
+                        let last_snapshot_guard = last_snapshot
+                            .lock()
+                            .expect("Failed to lock last_snapshot for diff computation");
+                        last_snapshot_guard.observed.clone()
                     };
 
+                    let state_diff = {
+                        let last_state_guard = last_state
+                            .lock()
+                            .expect("Failed to lock last_state for diff computation");
+                        last_state_guard.diff(
+                            &new_cluster_state,
+                            &previous_snapshot,
+                            &current_snapshot.observed,
+                        )
+                    };
+
+                    if !state_diff.is_empty() {
+                        info!(
+                            "Applying diff loop iteration {id}: +{} nodes, -{} nodes, ~{} nodes, +{} edges, -{} edges",
+                            state_diff.added_nodes.len(),
+                            state_diff.removed_nodes.len(),
+                            state_diff.modified_nodes.len(),
+                            state_diff.added_edges.len(),
+                            state_diff.removed_edges.len(),
+                        );
+                        memgraph.update(state_diff).await?;
+                    } else {
+                        trace!("Diff loop iteration {id}: no changes detected");
+                    }
+
+                    {
+                        let mut last_state_guard = last_state
+                            .lock()
+                            .expect("Failed to lock last_state for update");
+                        *last_state_guard = new_cluster_state;
+                    }
+
+                    {
+                        let mut last_snapshot_guard = last_snapshot
+                            .lock()
+                            .expect("Failed to lock last_snapshot for update");
+                        *last_snapshot_guard = current_snapshot;
+                    }
 
                     id += 1;
                 },

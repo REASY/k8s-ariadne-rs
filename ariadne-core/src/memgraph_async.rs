@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 use crate::memgraph;
 use crate::memgraph::Memgraph;
 use crate::prelude::*;
-use crate::state::ClusterState;
+use crate::state::{ClusterState, ClusterStateDiff};
 use rsmgclient::ConnectParams;
 use serde_json::Value;
 use tracing::error;
@@ -17,6 +17,10 @@ use tracing::error;
 enum Command {
     Create {
         lock: Arc<Mutex<ClusterState>>,
+        resp: oneshot::Sender<Result<()>>,
+    },
+    Update {
+        diff: ClusterStateDiff,
         resp: oneshot::Sender<Result<()>>,
     },
     ExecuteQuery {
@@ -112,6 +116,10 @@ impl MemgraphAsync {
                             let res = mg.create(&state);
                             let _ = resp.send(res);
                         }
+                        Command::Update { diff, resp } => {
+                            let res = mg.update_from_diff(&diff);
+                            let _ = resp.send(res);
+                        }
                         Command::ExecuteQuery { query, resp } => {
                             let res = mg.execute_query(&query);
                             let _ = resp.send(res);
@@ -140,6 +148,26 @@ impl MemgraphAsync {
         self.tx
             .send(Command::Create {
                 lock: cluster_state.clone(),
+                resp: resp_tx,
+            })
+            .map_err(|e| {
+                memgraph::MemgraphError::ConnectionError(format!(
+                    "Memgraph actor is not available: {e}"
+                ))
+            })?;
+        resp_rx.await.map_err(|e| {
+            memgraph::MemgraphError::ConnectionError(format!(
+                "Memgraph actor response dropped: {e}"
+            ))
+        })?
+    }
+
+    /// Incrementally update the graph using a diff.
+    pub async fn update(&self, diff: ClusterStateDiff) -> Result<()> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.tx
+            .send(Command::Update {
+                diff,
                 resp: resp_tx,
             })
             .map_err(|e| {

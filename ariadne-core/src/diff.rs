@@ -1,4 +1,3 @@
-use crate::state::ClusterState;
 use crate::state_resolver::ObservedClusterSnapshot;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;

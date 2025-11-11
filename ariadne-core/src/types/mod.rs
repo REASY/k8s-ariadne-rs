@@ -145,7 +145,7 @@ pub enum Edge {
     HasAddress,       // Endpoint -> EndpointAddress
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum ResourceAttributes {
     Namespace {
         namespace: Arc<Namespace>,
@@ -235,7 +235,7 @@ pub struct ObjectIdentifier {
     pub resource_version: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GenericObject {
     pub id: ObjectIdentifier,
     pub resource_type: ResourceType,
@@ -350,7 +350,7 @@ impl k8s_openapi::schemars::JsonSchema for Cluster {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Provisioner {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
@@ -424,7 +424,7 @@ impl k8s_openapi::schemars::JsonSchema for Provisioner {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct IngressServiceBackend {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
@@ -523,7 +523,7 @@ impl k8s_openapi::schemars::JsonSchema for IngressServiceBackend {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EndpointAddress {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub address: String,
@@ -595,7 +595,7 @@ impl k8s_openapi::schemars::JsonSchema for EndpointAddress {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Host {
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
     pub name: String,
