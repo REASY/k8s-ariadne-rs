@@ -9,7 +9,7 @@ use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
-use k8s_openapi::schemars::schema::RootSchema;
+use schemars::Schema;
 use shadow_rs::shadow;
 use tracing::info;
 pub mod logger;
@@ -35,18 +35,25 @@ pub const APP_VERSION: &str = shadow_rs::formatcp!(
 
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version = APP_VERSION, about, long_about = None)]
-struct AppArgs {
-    /// Connection string to GraphDB
-    #[clap(long)]
-    graph_url: String,
-}
+struct AppArgs {}
 
 fn main() {
     setup("ariadne_tools", "debug");
     let args = AppArgs::parse();
     info!("Received args: {:?}", args);
 
-    let logical_types: Vec<RootSchema> = vec![
+    let prompt = get_schema_as_prompt();
+    println!("{prompt}");
+}
+
+fn get_schema_as_prompt() -> String {
+    let derived_schema = generate_schema();
+    let prompt = write_schema_prompt(derived_schema);
+    prompt
+}
+
+fn generate_schema() -> Vec<SchemaInfo> {
+    let logical_types: Vec<Schema> = vec![
         schema_for!(Cluster),
         schema_for!(Container),
         schema_for!(Endpoint),
@@ -56,7 +63,7 @@ fn main() {
         schema_for!(Logs),
         schema_for!(Provisioner),
     ];
-    let k8s_types: Vec<RootSchema> = vec![
+    let k8s_types: Vec<Schema> = vec![
         schema_for!(ConfigMap),
         schema_for!(DaemonSet),
         schema_for!(Deployment),
@@ -82,7 +89,271 @@ fn main() {
         derived_schema.push(get_schema(&schema));
     }
     derived_schema.sort_by_key(|x| x.root_type.name.clone());
+    derived_schema
+}
 
-    let prompt = write_schema_prompt(derived_schema);
-    println!("{prompt}");
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_schema() {
+        let schema = get_schema_as_prompt();
+        let expected = r#"Node properties:
+  Cluster: 5 properties (cluster_url: STRING, info: #/$defs/io.k8s.apimachinery.pkg.version.Info, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, retrieved_at: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time)
+  ConfigMap: 6 properties (apiVersion: STRING, binaryData: MAP, data: MAP, immutable: BOOLEAN, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
+  Container: 5 properties (container_type: #/$defs/ContainerType, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, pod_name: STRING, pod_uid: STRING, spec: #/$defs/io.k8s.api.core.v1.Container)
+  DaemonSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.apps.v1.DaemonSetSpec, status: #/$defs/io.k8s.api.apps.v1.DaemonSetStatus)
+  Deployment: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.apps.v1.DeploymentSpec, status: #/$defs/io.k8s.api.apps.v1.DeploymentStatus)
+  Endpoint: 9 properties (addresses: [STRING], conditions: #/$defs/io.k8s.api.discovery.v1.EndpointConditions, hints: #/$defs/io.k8s.api.discovery.v1.EndpointHints, hostname: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, nodeName: STRING, targetRef: #/$defs/io.k8s.api.core.v1.ObjectReference, zone: STRING, deprecatedTopology: MAP)
+  EndpointAddress: 2 properties (address: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
+  EndpointSlice: 6 properties (addressType: STRING, apiVersion: STRING, endpoints: [#/$defs/io.k8s.api.discovery.v1.Endpoint], kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, ports: [#/$defs/io.k8s.api.discovery.v1.EndpointPort])
+  Event: 17 properties (action: STRING, apiVersion: STRING, deprecatedCount: INTEGER, deprecatedFirstTimestamp: DATETIME_UTC, deprecatedLastTimestamp: DATETIME_UTC, deprecatedSource: #/$defs/io.k8s.api.core.v1.EventSource, eventTime: DATETIME_UTC, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, note: STRING, reason: STRING, regarding: #/$defs/io.k8s.api.core.v1.ObjectReference, related: #/$defs/io.k8s.api.core.v1.ObjectReference, reportingController: STRING, reportingInstance: STRING, series: #/$defs/io.k8s.api.events.v1.EventSeries, type: STRING)
+  Host: 2 properties (metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
+  Ingress: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.networking.v1.IngressSpec, status: #/$defs/io.k8s.api.networking.v1.IngressStatus)
+  IngressServiceBackend: 3 properties (metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, port: #/$defs/io.k8s.api.networking.v1.ServiceBackendPort)
+  Job: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.batch.v1.JobSpec, status: #/$defs/io.k8s.api.batch.v1.JobStatus)
+  Logs: 3 properties (container_uid: STRING, content: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)
+  Namespace: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.NamespaceSpec, status: #/$defs/io.k8s.api.core.v1.NamespaceStatus)
+  NetworkPolicy: 4 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.networking.v1.NetworkPolicySpec)
+  Node: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.NodeSpec, status: #/$defs/io.k8s.api.core.v1.NodeStatus)
+  PersistentVolume: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.PersistentVolumeSpec, status: #/$defs/io.k8s.api.core.v1.PersistentVolumeStatus)
+  Pod: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.PodSpec, status: #/$defs/io.k8s.api.core.v1.PodStatus)
+  Provisioner: 2 properties (metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING)
+  ReplicaSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.apps.v1.ReplicaSetSpec, status: #/$defs/io.k8s.api.apps.v1.ReplicaSetStatus)
+  Service: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.ServiceSpec, status: #/$defs/io.k8s.api.core.v1.ServiceStatus)
+  ServiceAccount: 6 properties (apiVersion: STRING, automountServiceAccountToken: BOOLEAN, imagePullSecrets: [#/$defs/io.k8s.api.core.v1.LocalObjectReference], kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, secrets: [#/$defs/io.k8s.api.core.v1.ObjectReference])
+  StatefulSet: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.apps.v1.StatefulSetSpec, status: #/$defs/io.k8s.api.apps.v1.StatefulSetStatus)
+  StorageClass: 10 properties (allowVolumeExpansion: BOOLEAN, allowedTopologies: [#/$defs/io.k8s.api.core.v1.TopologySelectorTerm], apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, mountOptions: [STRING], parameters: MAP, provisioner: STRING, reclaimPolicy: STRING, volumeBindingMode: STRING)
+Referenced types (used via `#/$defs/`):
+  io.k8s.api.apps.v1.DaemonSetCondition: 5 properties (lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.apps.v1.DaemonSetSpec: 5 properties (minReadySeconds: INTEGER, revisionHistoryLimit: INTEGER, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, template: #/$defs/io.k8s.api.core.v1.PodTemplateSpec, updateStrategy: #/$defs/io.k8s.api.apps.v1.DaemonSetUpdateStrategy)
+  io.k8s.api.apps.v1.DaemonSetStatus: 10 properties (collisionCount: INTEGER, conditions: [#/$defs/io.k8s.api.apps.v1.DaemonSetCondition], currentNumberScheduled: INTEGER, desiredNumberScheduled: INTEGER, numberAvailable: INTEGER, numberMisscheduled: INTEGER, numberReady: INTEGER, numberUnavailable: INTEGER, observedGeneration: INTEGER, updatedNumberScheduled: INTEGER)
+  io.k8s.api.apps.v1.DaemonSetUpdateStrategy: 2 properties (rollingUpdate: #/$defs/io.k8s.api.apps.v1.RollingUpdateDaemonSet, type: STRING)
+  io.k8s.api.apps.v1.DeploymentCondition: 6 properties (lastTransitionTime: DATETIME_UTC, lastUpdateTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.apps.v1.DeploymentSpec: 8 properties (minReadySeconds: INTEGER, paused: BOOLEAN, progressDeadlineSeconds: INTEGER, replicas: INTEGER, revisionHistoryLimit: INTEGER, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, strategy: #/$defs/io.k8s.api.apps.v1.DeploymentStrategy, template: #/$defs/io.k8s.api.core.v1.PodTemplateSpec)
+  io.k8s.api.apps.v1.DeploymentStatus: 8 properties (availableReplicas: INTEGER, collisionCount: INTEGER, conditions: [#/$defs/io.k8s.api.apps.v1.DeploymentCondition], observedGeneration: INTEGER, readyReplicas: INTEGER, replicas: INTEGER, unavailableReplicas: INTEGER, updatedReplicas: INTEGER)
+  io.k8s.api.apps.v1.DeploymentStrategy: 2 properties (rollingUpdate: #/$defs/io.k8s.api.apps.v1.RollingUpdateDeployment, type: STRING)
+  io.k8s.api.apps.v1.ReplicaSetCondition: 5 properties (lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.apps.v1.ReplicaSetSpec: 4 properties (minReadySeconds: INTEGER, replicas: INTEGER, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, template: #/$defs/io.k8s.api.core.v1.PodTemplateSpec)
+  io.k8s.api.apps.v1.ReplicaSetStatus: 6 properties (availableReplicas: INTEGER, conditions: [#/$defs/io.k8s.api.apps.v1.ReplicaSetCondition], fullyLabeledReplicas: INTEGER, observedGeneration: INTEGER, readyReplicas: INTEGER, replicas: INTEGER)
+  io.k8s.api.apps.v1.RollingUpdateDaemonSet: 2 properties (maxSurge: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString, maxUnavailable: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString)
+  io.k8s.api.apps.v1.RollingUpdateDeployment: 2 properties (maxSurge: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString, maxUnavailable: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString)
+  io.k8s.api.apps.v1.RollingUpdateStatefulSetStrategy: 2 properties (maxUnavailable: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString, partition: INTEGER)
+  io.k8s.api.apps.v1.StatefulSetCondition: 5 properties (lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.apps.v1.StatefulSetOrdinals: 1 property (start: INTEGER)
+  io.k8s.api.apps.v1.StatefulSetPersistentVolumeClaimRetentionPolicy: 2 properties (whenDeleted: STRING, whenScaled: STRING)
+  io.k8s.api.apps.v1.StatefulSetSpec: 11 properties (minReadySeconds: INTEGER, ordinals: #/$defs/io.k8s.api.apps.v1.StatefulSetOrdinals, persistentVolumeClaimRetentionPolicy: #/$defs/io.k8s.api.apps.v1.StatefulSetPersistentVolumeClaimRetentionPolicy, podManagementPolicy: STRING, replicas: INTEGER, revisionHistoryLimit: INTEGER, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, serviceName: STRING, template: #/$defs/io.k8s.api.core.v1.PodTemplateSpec, updateStrategy: #/$defs/io.k8s.api.apps.v1.StatefulSetUpdateStrategy, volumeClaimTemplates: [#/$defs/io.k8s.api.core.v1.PersistentVolumeClaim])
+  io.k8s.api.apps.v1.StatefulSetStatus: 10 properties (availableReplicas: INTEGER, collisionCount: INTEGER, conditions: [#/$defs/io.k8s.api.apps.v1.StatefulSetCondition], currentReplicas: INTEGER, currentRevision: STRING, observedGeneration: INTEGER, readyReplicas: INTEGER, replicas: INTEGER, updateRevision: STRING, updatedReplicas: INTEGER)
+  io.k8s.api.apps.v1.StatefulSetUpdateStrategy: 2 properties (rollingUpdate: #/$defs/io.k8s.api.apps.v1.RollingUpdateStatefulSetStrategy, type: STRING)
+  io.k8s.api.batch.v1.JobCondition: 6 properties (lastProbeTime: DATETIME_UTC, lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.batch.v1.JobSpec: 16 properties (activeDeadlineSeconds: INTEGER, backoffLimit: INTEGER, backoffLimitPerIndex: INTEGER, completionMode: STRING, completions: INTEGER, managedBy: STRING, manualSelector: BOOLEAN, maxFailedIndexes: INTEGER, parallelism: INTEGER, podFailurePolicy: #/$defs/io.k8s.api.batch.v1.PodFailurePolicy, podReplacementPolicy: STRING, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, successPolicy: #/$defs/io.k8s.api.batch.v1.SuccessPolicy, suspend: BOOLEAN, template: #/$defs/io.k8s.api.core.v1.PodTemplateSpec, ttlSecondsAfterFinished: INTEGER)
+  io.k8s.api.batch.v1.JobStatus: 11 properties (active: INTEGER, completedIndexes: STRING, completionTime: DATETIME_UTC, conditions: [#/$defs/io.k8s.api.batch.v1.JobCondition], failed: INTEGER, failedIndexes: STRING, ready: INTEGER, startTime: DATETIME_UTC, succeeded: INTEGER, terminating: INTEGER, uncountedTerminatedPods: #/$defs/io.k8s.api.batch.v1.UncountedTerminatedPods)
+  io.k8s.api.batch.v1.PodFailurePolicy: 1 property (rules: [#/$defs/io.k8s.api.batch.v1.PodFailurePolicyRule])
+  io.k8s.api.batch.v1.PodFailurePolicyOnExitCodesRequirement: 3 properties (containerName: STRING, operator: STRING, values: [INTEGER])
+  io.k8s.api.batch.v1.PodFailurePolicyOnPodConditionsPattern: 2 properties (status: STRING, type: STRING)
+  io.k8s.api.batch.v1.PodFailurePolicyRule: 3 properties (action: STRING, onExitCodes: #/$defs/io.k8s.api.batch.v1.PodFailurePolicyOnExitCodesRequirement, onPodConditions: [#/$defs/io.k8s.api.batch.v1.PodFailurePolicyOnPodConditionsPattern])
+  io.k8s.api.batch.v1.SuccessPolicy: 1 property (rules: [#/$defs/io.k8s.api.batch.v1.SuccessPolicyRule])
+  io.k8s.api.batch.v1.SuccessPolicyRule: 2 properties (succeededCount: INTEGER, succeededIndexes: STRING)
+  io.k8s.api.batch.v1.UncountedTerminatedPods: 2 properties (failed: [STRING], succeeded: [STRING])
+  io.k8s.api.core.v1.AWSElasticBlockStoreVolumeSource: 4 properties (fsType: STRING, partition: INTEGER, readOnly: BOOLEAN, volumeID: STRING)
+  io.k8s.api.core.v1.Affinity: 3 properties (nodeAffinity: #/$defs/io.k8s.api.core.v1.NodeAffinity, podAffinity: #/$defs/io.k8s.api.core.v1.PodAffinity, podAntiAffinity: #/$defs/io.k8s.api.core.v1.PodAntiAffinity)
+  io.k8s.api.core.v1.AppArmorProfile: 2 properties (localhostProfile: STRING, type: STRING)
+  io.k8s.api.core.v1.AttachedVolume: 2 properties (devicePath: STRING, name: STRING)
+  io.k8s.api.core.v1.AzureDiskVolumeSource: 6 properties (cachingMode: STRING, diskName: STRING, diskURI: STRING, fsType: STRING, kind: STRING, readOnly: BOOLEAN)
+  io.k8s.api.core.v1.AzureFilePersistentVolumeSource: 4 properties (readOnly: BOOLEAN, secretName: STRING, secretNamespace: STRING, shareName: STRING)
+  io.k8s.api.core.v1.AzureFileVolumeSource: 3 properties (readOnly: BOOLEAN, secretName: STRING, shareName: STRING)
+  io.k8s.api.core.v1.CSIPersistentVolumeSource: 10 properties (controllerExpandSecretRef: #/$defs/io.k8s.api.core.v1.SecretReference, controllerPublishSecretRef: #/$defs/io.k8s.api.core.v1.SecretReference, driver: STRING, fsType: STRING, nodeExpandSecretRef: #/$defs/io.k8s.api.core.v1.SecretReference, nodePublishSecretRef: #/$defs/io.k8s.api.core.v1.SecretReference, nodeStageSecretRef: #/$defs/io.k8s.api.core.v1.SecretReference, readOnly: BOOLEAN, volumeAttributes: MAP, volumeHandle: STRING)
+  io.k8s.api.core.v1.CSIVolumeSource: 5 properties (driver: STRING, fsType: STRING, nodePublishSecretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, readOnly: BOOLEAN, volumeAttributes: MAP)
+  io.k8s.api.core.v1.Capabilities: 2 properties (add: [STRING], drop: [STRING])
+  io.k8s.api.core.v1.CephFSPersistentVolumeSource: 6 properties (monitors: [STRING], path: STRING, readOnly: BOOLEAN, secretFile: STRING, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference, user: STRING)
+  io.k8s.api.core.v1.CephFSVolumeSource: 6 properties (monitors: [STRING], path: STRING, readOnly: BOOLEAN, secretFile: STRING, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, user: STRING)
+  io.k8s.api.core.v1.CinderPersistentVolumeSource: 4 properties (fsType: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference, volumeID: STRING)
+  io.k8s.api.core.v1.CinderVolumeSource: 4 properties (fsType: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, volumeID: STRING)
+  io.k8s.api.core.v1.ClientIPConfig: 1 property (timeoutSeconds: INTEGER)
+  io.k8s.api.core.v1.ClusterTrustBundleProjection: 5 properties (labelSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, name: STRING, optional: BOOLEAN, path: STRING, signerName: STRING)
+  io.k8s.api.core.v1.ConfigMapEnvSource: 2 properties (name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.ConfigMapKeySelector: 3 properties (key: STRING, name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.ConfigMapNodeConfigSource: 5 properties (kubeletConfigKey: STRING, name: STRING, namespace: STRING, resourceVersion: STRING, uid: STRING)
+  io.k8s.api.core.v1.ConfigMapProjection: 3 properties (items: [#/$defs/io.k8s.api.core.v1.KeyToPath], name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.ConfigMapVolumeSource: 4 properties (defaultMode: INTEGER, items: [#/$defs/io.k8s.api.core.v1.KeyToPath], name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.Container: 24 properties (args: [STRING], command: [STRING], env: [#/$defs/io.k8s.api.core.v1.EnvVar], envFrom: [#/$defs/io.k8s.api.core.v1.EnvFromSource], image: STRING, imagePullPolicy: STRING, lifecycle: #/$defs/io.k8s.api.core.v1.Lifecycle, livenessProbe: #/$defs/io.k8s.api.core.v1.Probe, name: STRING, ports: [#/$defs/io.k8s.api.core.v1.ContainerPort], readinessProbe: #/$defs/io.k8s.api.core.v1.Probe, resizePolicy: [#/$defs/io.k8s.api.core.v1.ContainerResizePolicy], resources: #/$defs/io.k8s.api.core.v1.ResourceRequirements, restartPolicy: STRING, securityContext: #/$defs/io.k8s.api.core.v1.SecurityContext, startupProbe: #/$defs/io.k8s.api.core.v1.Probe, stdin: BOOLEAN, stdinOnce: BOOLEAN, terminationMessagePath: STRING, terminationMessagePolicy: STRING, tty: BOOLEAN, volumeDevices: [#/$defs/io.k8s.api.core.v1.VolumeDevice], volumeMounts: [#/$defs/io.k8s.api.core.v1.VolumeMount], workingDir: STRING)
+  io.k8s.api.core.v1.ContainerImage: 2 properties (names: [STRING], sizeBytes: INTEGER)
+  io.k8s.api.core.v1.ContainerPort: 5 properties (containerPort: INTEGER, hostIP: STRING, hostPort: INTEGER, name: STRING, protocol: STRING)
+  io.k8s.api.core.v1.ContainerResizePolicy: 2 properties (resourceName: STRING, restartPolicy: STRING)
+  io.k8s.api.core.v1.ContainerState: 3 properties (running: #/$defs/io.k8s.api.core.v1.ContainerStateRunning, terminated: #/$defs/io.k8s.api.core.v1.ContainerStateTerminated, waiting: #/$defs/io.k8s.api.core.v1.ContainerStateWaiting)
+  io.k8s.api.core.v1.ContainerStateRunning: 1 property (startedAt: DATETIME_UTC)
+  io.k8s.api.core.v1.ContainerStateTerminated: 7 properties (containerID: STRING, exitCode: INTEGER, finishedAt: DATETIME_UTC, message: STRING, reason: STRING, signal: INTEGER, startedAt: DATETIME_UTC)
+  io.k8s.api.core.v1.ContainerStateWaiting: 2 properties (message: STRING, reason: STRING)
+  io.k8s.api.core.v1.ContainerStatus: 14 properties (allocatedResources: MAP, allocatedResourcesStatus: [#/$defs/io.k8s.api.core.v1.ResourceStatus], containerID: STRING, image: STRING, imageID: STRING, lastState: #/$defs/io.k8s.api.core.v1.ContainerState, name: STRING, ready: BOOLEAN, resources: #/$defs/io.k8s.api.core.v1.ResourceRequirements, restartCount: INTEGER, started: BOOLEAN, state: #/$defs/io.k8s.api.core.v1.ContainerState, user: #/$defs/io.k8s.api.core.v1.ContainerUser, volumeMounts: [#/$defs/io.k8s.api.core.v1.VolumeMountStatus])
+  io.k8s.api.core.v1.ContainerUser: 1 property (linux: #/$defs/io.k8s.api.core.v1.LinuxContainerUser)
+  io.k8s.api.core.v1.DaemonEndpoint: 1 property (Port: INTEGER)
+  io.k8s.api.core.v1.DownwardAPIProjection: 1 property (items: [#/$defs/io.k8s.api.core.v1.DownwardAPIVolumeFile])
+  io.k8s.api.core.v1.DownwardAPIVolumeFile: 4 properties (fieldRef: #/$defs/io.k8s.api.core.v1.ObjectFieldSelector, mode: INTEGER, path: STRING, resourceFieldRef: #/$defs/io.k8s.api.core.v1.ResourceFieldSelector)
+  io.k8s.api.core.v1.DownwardAPIVolumeSource: 2 properties (defaultMode: INTEGER, items: [#/$defs/io.k8s.api.core.v1.DownwardAPIVolumeFile])
+  io.k8s.api.core.v1.EmptyDirVolumeSource: 2 properties (medium: STRING, sizeLimit: #/$defs/io.k8s.apimachinery.pkg.api.resource.Quantity)
+  io.k8s.api.core.v1.EnvFromSource: 3 properties (configMapRef: #/$defs/io.k8s.api.core.v1.ConfigMapEnvSource, prefix: STRING, secretRef: #/$defs/io.k8s.api.core.v1.SecretEnvSource)
+  io.k8s.api.core.v1.EnvVar: 3 properties (name: STRING, value: STRING, valueFrom: #/$defs/io.k8s.api.core.v1.EnvVarSource)
+  io.k8s.api.core.v1.EnvVarSource: 4 properties (configMapKeyRef: #/$defs/io.k8s.api.core.v1.ConfigMapKeySelector, fieldRef: #/$defs/io.k8s.api.core.v1.ObjectFieldSelector, resourceFieldRef: #/$defs/io.k8s.api.core.v1.ResourceFieldSelector, secretKeyRef: #/$defs/io.k8s.api.core.v1.SecretKeySelector)
+  io.k8s.api.core.v1.EphemeralContainer: 25 properties (args: [STRING], command: [STRING], env: [#/$defs/io.k8s.api.core.v1.EnvVar], envFrom: [#/$defs/io.k8s.api.core.v1.EnvFromSource], image: STRING, imagePullPolicy: STRING, lifecycle: #/$defs/io.k8s.api.core.v1.Lifecycle, livenessProbe: #/$defs/io.k8s.api.core.v1.Probe, name: STRING, ports: [#/$defs/io.k8s.api.core.v1.ContainerPort], readinessProbe: #/$defs/io.k8s.api.core.v1.Probe, resizePolicy: [#/$defs/io.k8s.api.core.v1.ContainerResizePolicy], resources: #/$defs/io.k8s.api.core.v1.ResourceRequirements, restartPolicy: STRING, securityContext: #/$defs/io.k8s.api.core.v1.SecurityContext, startupProbe: #/$defs/io.k8s.api.core.v1.Probe, stdin: BOOLEAN, stdinOnce: BOOLEAN, targetContainerName: STRING, terminationMessagePath: STRING, terminationMessagePolicy: STRING, tty: BOOLEAN, volumeDevices: [#/$defs/io.k8s.api.core.v1.VolumeDevice], volumeMounts: [#/$defs/io.k8s.api.core.v1.VolumeMount], workingDir: STRING)
+  io.k8s.api.core.v1.EphemeralVolumeSource: 1 property (volumeClaimTemplate: #/$defs/io.k8s.api.core.v1.PersistentVolumeClaimTemplate)
+  io.k8s.api.core.v1.EventSource: 2 properties (component: STRING, host: STRING)
+  io.k8s.api.core.v1.ExecAction: 1 property (command: [STRING])
+  io.k8s.api.core.v1.FCVolumeSource: 5 properties (fsType: STRING, lun: INTEGER, readOnly: BOOLEAN, targetWWNs: [STRING], wwids: [STRING])
+  io.k8s.api.core.v1.FlexPersistentVolumeSource: 5 properties (driver: STRING, fsType: STRING, options: MAP, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference)
+  io.k8s.api.core.v1.FlexVolumeSource: 5 properties (driver: STRING, fsType: STRING, options: MAP, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference)
+  io.k8s.api.core.v1.FlockerVolumeSource: 2 properties (datasetName: STRING, datasetUUID: STRING)
+  io.k8s.api.core.v1.GCEPersistentDiskVolumeSource: 4 properties (fsType: STRING, partition: INTEGER, pdName: STRING, readOnly: BOOLEAN)
+  io.k8s.api.core.v1.GRPCAction: 2 properties (port: INTEGER, service: STRING)
+  io.k8s.api.core.v1.GitRepoVolumeSource: 3 properties (directory: STRING, repository: STRING, revision: STRING)
+  io.k8s.api.core.v1.GlusterfsPersistentVolumeSource: 4 properties (endpoints: STRING, endpointsNamespace: STRING, path: STRING, readOnly: BOOLEAN)
+  io.k8s.api.core.v1.GlusterfsVolumeSource: 3 properties (endpoints: STRING, path: STRING, readOnly: BOOLEAN)
+  io.k8s.api.core.v1.HTTPGetAction: 5 properties (host: STRING, httpHeaders: [#/$defs/io.k8s.api.core.v1.HTTPHeader], path: STRING, port: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString, scheme: STRING)
+  io.k8s.api.core.v1.HTTPHeader: 2 properties (name: STRING, value: STRING)
+  io.k8s.api.core.v1.HostAlias: 2 properties (hostnames: [STRING], ip: STRING)
+  io.k8s.api.core.v1.HostIP: 1 property (ip: STRING)
+  io.k8s.api.core.v1.HostPathVolumeSource: 2 properties (path: STRING, type: STRING)
+  io.k8s.api.core.v1.ISCSIPersistentVolumeSource: 11 properties (chapAuthDiscovery: BOOLEAN, chapAuthSession: BOOLEAN, fsType: STRING, initiatorName: STRING, iqn: STRING, iscsiInterface: STRING, lun: INTEGER, portals: [STRING], readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference, targetPortal: STRING)
+  io.k8s.api.core.v1.ISCSIVolumeSource: 11 properties (chapAuthDiscovery: BOOLEAN, chapAuthSession: BOOLEAN, fsType: STRING, initiatorName: STRING, iqn: STRING, iscsiInterface: STRING, lun: INTEGER, portals: [STRING], readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, targetPortal: STRING)
+  io.k8s.api.core.v1.ImageVolumeSource: 2 properties (pullPolicy: STRING, reference: STRING)
+  io.k8s.api.core.v1.KeyToPath: 3 properties (key: STRING, mode: INTEGER, path: STRING)
+  io.k8s.api.core.v1.Lifecycle: 2 properties (postStart: #/$defs/io.k8s.api.core.v1.LifecycleHandler, preStop: #/$defs/io.k8s.api.core.v1.LifecycleHandler)
+  io.k8s.api.core.v1.LifecycleHandler: 4 properties (exec: #/$defs/io.k8s.api.core.v1.ExecAction, httpGet: #/$defs/io.k8s.api.core.v1.HTTPGetAction, sleep: #/$defs/io.k8s.api.core.v1.SleepAction, tcpSocket: #/$defs/io.k8s.api.core.v1.TCPSocketAction)
+  io.k8s.api.core.v1.LinuxContainerUser: 3 properties (gid: INTEGER, supplementalGroups: [INTEGER], uid: INTEGER)
+  io.k8s.api.core.v1.LoadBalancerIngress: 4 properties (hostname: STRING, ip: STRING, ipMode: STRING, ports: [#/$defs/io.k8s.api.core.v1.PortStatus])
+  io.k8s.api.core.v1.LoadBalancerStatus: 1 property (ingress: [#/$defs/io.k8s.api.core.v1.LoadBalancerIngress])
+  io.k8s.api.core.v1.LocalObjectReference: 1 property (name: STRING)
+  io.k8s.api.core.v1.LocalVolumeSource: 2 properties (fsType: STRING, path: STRING)
+  io.k8s.api.core.v1.ModifyVolumeStatus: 2 properties (status: STRING, targetVolumeAttributesClassName: STRING)
+  io.k8s.api.core.v1.NFSVolumeSource: 3 properties (path: STRING, readOnly: BOOLEAN, server: STRING)
+  io.k8s.api.core.v1.NamespaceCondition: 5 properties (lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.core.v1.NamespaceSpec: 1 property (finalizers: [STRING])
+  io.k8s.api.core.v1.NamespaceStatus: 2 properties (conditions: [#/$defs/io.k8s.api.core.v1.NamespaceCondition], phase: STRING)
+  io.k8s.api.core.v1.NodeAddress: 2 properties (address: STRING, type: STRING)
+  io.k8s.api.core.v1.NodeAffinity: 2 properties (preferredDuringSchedulingIgnoredDuringExecution: [#/$defs/io.k8s.api.core.v1.PreferredSchedulingTerm], requiredDuringSchedulingIgnoredDuringExecution: #/$defs/io.k8s.api.core.v1.NodeSelector)
+  io.k8s.api.core.v1.NodeCondition: 6 properties (lastHeartbeatTime: DATETIME_UTC, lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.core.v1.NodeConfigSource: 1 property (configMap: #/$defs/io.k8s.api.core.v1.ConfigMapNodeConfigSource)
+  io.k8s.api.core.v1.NodeConfigStatus: 4 properties (active: #/$defs/io.k8s.api.core.v1.NodeConfigSource, assigned: #/$defs/io.k8s.api.core.v1.NodeConfigSource, error: STRING, lastKnownGood: #/$defs/io.k8s.api.core.v1.NodeConfigSource)
+  io.k8s.api.core.v1.NodeDaemonEndpoints: 1 property (kubeletEndpoint: #/$defs/io.k8s.api.core.v1.DaemonEndpoint)
+  io.k8s.api.core.v1.NodeFeatures: 1 property (supplementalGroupsPolicy: BOOLEAN)
+  io.k8s.api.core.v1.NodeRuntimeHandler: 2 properties (features: #/$defs/io.k8s.api.core.v1.NodeRuntimeHandlerFeatures, name: STRING)
+  io.k8s.api.core.v1.NodeRuntimeHandlerFeatures: 2 properties (recursiveReadOnlyMounts: BOOLEAN, userNamespaces: BOOLEAN)
+  io.k8s.api.core.v1.NodeSelector: 1 property (nodeSelectorTerms: [#/$defs/io.k8s.api.core.v1.NodeSelectorTerm])
+  io.k8s.api.core.v1.NodeSelectorRequirement: 3 properties (key: STRING, operator: STRING, values: [STRING])
+  io.k8s.api.core.v1.NodeSelectorTerm: 2 properties (matchExpressions: [#/$defs/io.k8s.api.core.v1.NodeSelectorRequirement], matchFields: [#/$defs/io.k8s.api.core.v1.NodeSelectorRequirement])
+  io.k8s.api.core.v1.NodeSpec: 7 properties (configSource: #/$defs/io.k8s.api.core.v1.NodeConfigSource, externalID: STRING, podCIDR: STRING, podCIDRs: [STRING], providerID: STRING, taints: [#/$defs/io.k8s.api.core.v1.Taint], unschedulable: BOOLEAN)
+  io.k8s.api.core.v1.NodeStatus: 13 properties (addresses: [#/$defs/io.k8s.api.core.v1.NodeAddress], allocatable: MAP, capacity: MAP, conditions: [#/$defs/io.k8s.api.core.v1.NodeCondition], config: #/$defs/io.k8s.api.core.v1.NodeConfigStatus, daemonEndpoints: #/$defs/io.k8s.api.core.v1.NodeDaemonEndpoints, features: #/$defs/io.k8s.api.core.v1.NodeFeatures, images: [#/$defs/io.k8s.api.core.v1.ContainerImage], nodeInfo: #/$defs/io.k8s.api.core.v1.NodeSystemInfo, phase: STRING, runtimeHandlers: [#/$defs/io.k8s.api.core.v1.NodeRuntimeHandler], volumesAttached: [#/$defs/io.k8s.api.core.v1.AttachedVolume], volumesInUse: [STRING])
+  io.k8s.api.core.v1.NodeSystemInfo: 10 properties (architecture: STRING, bootID: STRING, containerRuntimeVersion: STRING, kernelVersion: STRING, kubeProxyVersion: STRING, kubeletVersion: STRING, machineID: STRING, operatingSystem: STRING, osImage: STRING, systemUUID: STRING)
+  io.k8s.api.core.v1.ObjectFieldSelector: 2 properties (apiVersion: STRING, fieldPath: STRING)
+  io.k8s.api.core.v1.ObjectReference: 7 properties (apiVersion: STRING, fieldPath: STRING, kind: STRING, name: STRING, namespace: STRING, resourceVersion: STRING, uid: STRING)
+  io.k8s.api.core.v1.PersistentVolumeClaim: 5 properties (apiVersion: STRING, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.PersistentVolumeClaimSpec, status: #/$defs/io.k8s.api.core.v1.PersistentVolumeClaimStatus)
+  io.k8s.api.core.v1.PersistentVolumeClaimCondition: 6 properties (lastProbeTime: DATETIME_UTC, lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.core.v1.PersistentVolumeClaimSpec: 9 properties (accessModes: [STRING], dataSource: #/$defs/io.k8s.api.core.v1.TypedLocalObjectReference, dataSourceRef: #/$defs/io.k8s.api.core.v1.TypedObjectReference, resources: #/$defs/io.k8s.api.core.v1.VolumeResourceRequirements, selector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, storageClassName: STRING, volumeAttributesClassName: STRING, volumeMode: STRING, volumeName: STRING)
+  io.k8s.api.core.v1.PersistentVolumeClaimStatus: 8 properties (accessModes: [STRING], allocatedResourceStatuses: MAP, allocatedResources: MAP, capacity: MAP, conditions: [#/$defs/io.k8s.api.core.v1.PersistentVolumeClaimCondition], currentVolumeAttributesClassName: STRING, modifyVolumeStatus: #/$defs/io.k8s.api.core.v1.ModifyVolumeStatus, phase: STRING)
+  io.k8s.api.core.v1.PersistentVolumeClaimTemplate: 2 properties (metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.PersistentVolumeClaimSpec)
+  io.k8s.api.core.v1.PersistentVolumeClaimVolumeSource: 2 properties (claimName: STRING, readOnly: BOOLEAN)
+  io.k8s.api.core.v1.PersistentVolumeSpec: 31 properties (accessModes: [STRING], awsElasticBlockStore: #/$defs/io.k8s.api.core.v1.AWSElasticBlockStoreVolumeSource, azureDisk: #/$defs/io.k8s.api.core.v1.AzureDiskVolumeSource, azureFile: #/$defs/io.k8s.api.core.v1.AzureFilePersistentVolumeSource, capacity: MAP, cephfs: #/$defs/io.k8s.api.core.v1.CephFSPersistentVolumeSource, cinder: #/$defs/io.k8s.api.core.v1.CinderPersistentVolumeSource, claimRef: #/$defs/io.k8s.api.core.v1.ObjectReference, csi: #/$defs/io.k8s.api.core.v1.CSIPersistentVolumeSource, fc: #/$defs/io.k8s.api.core.v1.FCVolumeSource, flexVolume: #/$defs/io.k8s.api.core.v1.FlexPersistentVolumeSource, flocker: #/$defs/io.k8s.api.core.v1.FlockerVolumeSource, gcePersistentDisk: #/$defs/io.k8s.api.core.v1.GCEPersistentDiskVolumeSource, glusterfs: #/$defs/io.k8s.api.core.v1.GlusterfsPersistentVolumeSource, hostPath: #/$defs/io.k8s.api.core.v1.HostPathVolumeSource, iscsi: #/$defs/io.k8s.api.core.v1.ISCSIPersistentVolumeSource, local: #/$defs/io.k8s.api.core.v1.LocalVolumeSource, mountOptions: [STRING], nfs: #/$defs/io.k8s.api.core.v1.NFSVolumeSource, nodeAffinity: #/$defs/io.k8s.api.core.v1.VolumeNodeAffinity, persistentVolumeReclaimPolicy: STRING, photonPersistentDisk: #/$defs/io.k8s.api.core.v1.PhotonPersistentDiskVolumeSource, portworxVolume: #/$defs/io.k8s.api.core.v1.PortworxVolumeSource, quobyte: #/$defs/io.k8s.api.core.v1.QuobyteVolumeSource, rbd: #/$defs/io.k8s.api.core.v1.RBDPersistentVolumeSource, scaleIO: #/$defs/io.k8s.api.core.v1.ScaleIOPersistentVolumeSource, storageClassName: STRING, storageos: #/$defs/io.k8s.api.core.v1.StorageOSPersistentVolumeSource, volumeAttributesClassName: STRING, volumeMode: STRING, vsphereVolume: #/$defs/io.k8s.api.core.v1.VsphereVirtualDiskVolumeSource)
+  io.k8s.api.core.v1.PersistentVolumeStatus: 4 properties (lastPhaseTransitionTime: DATETIME_UTC, message: STRING, phase: STRING, reason: STRING)
+  io.k8s.api.core.v1.PhotonPersistentDiskVolumeSource: 2 properties (fsType: STRING, pdID: STRING)
+  io.k8s.api.core.v1.PodAffinity: 2 properties (preferredDuringSchedulingIgnoredDuringExecution: [#/$defs/io.k8s.api.core.v1.WeightedPodAffinityTerm], requiredDuringSchedulingIgnoredDuringExecution: [#/$defs/io.k8s.api.core.v1.PodAffinityTerm])
+  io.k8s.api.core.v1.PodAffinityTerm: 6 properties (labelSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, matchLabelKeys: [STRING], mismatchLabelKeys: [STRING], namespaceSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, namespaces: [STRING], topologyKey: STRING)
+  io.k8s.api.core.v1.PodAntiAffinity: 2 properties (preferredDuringSchedulingIgnoredDuringExecution: [#/$defs/io.k8s.api.core.v1.WeightedPodAffinityTerm], requiredDuringSchedulingIgnoredDuringExecution: [#/$defs/io.k8s.api.core.v1.PodAffinityTerm])
+  io.k8s.api.core.v1.PodCondition: 6 properties (lastProbeTime: DATETIME_UTC, lastTransitionTime: DATETIME_UTC, message: STRING, reason: STRING, status: STRING, type: STRING)
+  io.k8s.api.core.v1.PodDNSConfig: 3 properties (nameservers: [STRING], options: [#/$defs/io.k8s.api.core.v1.PodDNSConfigOption], searches: [STRING])
+  io.k8s.api.core.v1.PodDNSConfigOption: 2 properties (name: STRING, value: STRING)
+  io.k8s.api.core.v1.PodIP: 1 property (ip: STRING)
+  io.k8s.api.core.v1.PodOS: 1 property (name: STRING)
+  io.k8s.api.core.v1.PodReadinessGate: 1 property (conditionType: STRING)
+  io.k8s.api.core.v1.PodResourceClaim: 3 properties (name: STRING, resourceClaimName: STRING, resourceClaimTemplateName: STRING)
+  io.k8s.api.core.v1.PodResourceClaimStatus: 2 properties (name: STRING, resourceClaimName: STRING)
+  io.k8s.api.core.v1.PodSchedulingGate: 1 property (name: STRING)
+  io.k8s.api.core.v1.PodSecurityContext: 13 properties (appArmorProfile: #/$defs/io.k8s.api.core.v1.AppArmorProfile, fsGroup: INTEGER, fsGroupChangePolicy: STRING, runAsGroup: INTEGER, runAsNonRoot: BOOLEAN, runAsUser: INTEGER, seLinuxChangePolicy: STRING, seLinuxOptions: #/$defs/io.k8s.api.core.v1.SELinuxOptions, seccompProfile: #/$defs/io.k8s.api.core.v1.SeccompProfile, supplementalGroups: [INTEGER], supplementalGroupsPolicy: STRING, sysctls: [#/$defs/io.k8s.api.core.v1.Sysctl], windowsOptions: #/$defs/io.k8s.api.core.v1.WindowsSecurityContextOptions)
+  io.k8s.api.core.v1.PodSpec: 40 properties (activeDeadlineSeconds: INTEGER, affinity: #/$defs/io.k8s.api.core.v1.Affinity, automountServiceAccountToken: BOOLEAN, containers: [#/$defs/io.k8s.api.core.v1.Container], dnsConfig: #/$defs/io.k8s.api.core.v1.PodDNSConfig, dnsPolicy: STRING, enableServiceLinks: BOOLEAN, ephemeralContainers: [#/$defs/io.k8s.api.core.v1.EphemeralContainer], hostAliases: [#/$defs/io.k8s.api.core.v1.HostAlias], hostIPC: BOOLEAN, hostNetwork: BOOLEAN, hostPID: BOOLEAN, hostUsers: BOOLEAN, hostname: STRING, imagePullSecrets: [#/$defs/io.k8s.api.core.v1.LocalObjectReference], initContainers: [#/$defs/io.k8s.api.core.v1.Container], nodeName: STRING, nodeSelector: MAP, os: #/$defs/io.k8s.api.core.v1.PodOS, overhead: MAP, preemptionPolicy: STRING, priority: INTEGER, priorityClassName: STRING, readinessGates: [#/$defs/io.k8s.api.core.v1.PodReadinessGate], resourceClaims: [#/$defs/io.k8s.api.core.v1.PodResourceClaim], resources: #/$defs/io.k8s.api.core.v1.ResourceRequirements, restartPolicy: STRING, runtimeClassName: STRING, schedulerName: STRING, schedulingGates: [#/$defs/io.k8s.api.core.v1.PodSchedulingGate], securityContext: #/$defs/io.k8s.api.core.v1.PodSecurityContext, serviceAccount: STRING, serviceAccountName: STRING, setHostnameAsFQDN: BOOLEAN, shareProcessNamespace: BOOLEAN, subdomain: STRING, terminationGracePeriodSeconds: INTEGER, tolerations: [#/$defs/io.k8s.api.core.v1.Toleration], topologySpreadConstraints: [#/$defs/io.k8s.api.core.v1.TopologySpreadConstraint], volumes: [#/$defs/io.k8s.api.core.v1.Volume])
+  io.k8s.api.core.v1.PodStatus: 16 properties (conditions: [#/$defs/io.k8s.api.core.v1.PodCondition], containerStatuses: [#/$defs/io.k8s.api.core.v1.ContainerStatus], ephemeralContainerStatuses: [#/$defs/io.k8s.api.core.v1.ContainerStatus], hostIP: STRING, hostIPs: [#/$defs/io.k8s.api.core.v1.HostIP], initContainerStatuses: [#/$defs/io.k8s.api.core.v1.ContainerStatus], message: STRING, nominatedNodeName: STRING, phase: STRING, podIP: STRING, podIPs: [#/$defs/io.k8s.api.core.v1.PodIP], qosClass: STRING, reason: STRING, resize: STRING, resourceClaimStatuses: [#/$defs/io.k8s.api.core.v1.PodResourceClaimStatus], startTime: DATETIME_UTC)
+  io.k8s.api.core.v1.PodTemplateSpec: 2 properties (metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, spec: #/$defs/io.k8s.api.core.v1.PodSpec)
+  io.k8s.api.core.v1.PortStatus: 3 properties (error: STRING, port: INTEGER, protocol: STRING)
+  io.k8s.api.core.v1.PortworxVolumeSource: 3 properties (fsType: STRING, readOnly: BOOLEAN, volumeID: STRING)
+  io.k8s.api.core.v1.PreferredSchedulingTerm: 2 properties (preference: #/$defs/io.k8s.api.core.v1.NodeSelectorTerm, weight: INTEGER)
+  io.k8s.api.core.v1.Probe: 10 properties (exec: #/$defs/io.k8s.api.core.v1.ExecAction, failureThreshold: INTEGER, grpc: #/$defs/io.k8s.api.core.v1.GRPCAction, httpGet: #/$defs/io.k8s.api.core.v1.HTTPGetAction, initialDelaySeconds: INTEGER, periodSeconds: INTEGER, successThreshold: INTEGER, tcpSocket: #/$defs/io.k8s.api.core.v1.TCPSocketAction, terminationGracePeriodSeconds: INTEGER, timeoutSeconds: INTEGER)
+  io.k8s.api.core.v1.ProjectedVolumeSource: 2 properties (defaultMode: INTEGER, sources: [#/$defs/io.k8s.api.core.v1.VolumeProjection])
+  io.k8s.api.core.v1.QuobyteVolumeSource: 6 properties (group: STRING, readOnly: BOOLEAN, registry: STRING, tenant: STRING, user: STRING, volume: STRING)
+  io.k8s.api.core.v1.RBDPersistentVolumeSource: 8 properties (fsType: STRING, image: STRING, keyring: STRING, monitors: [STRING], pool: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference, user: STRING)
+  io.k8s.api.core.v1.RBDVolumeSource: 8 properties (fsType: STRING, image: STRING, keyring: STRING, monitors: [STRING], pool: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, user: STRING)
+  io.k8s.api.core.v1.ResourceClaim: 2 properties (name: STRING, request: STRING)
+  io.k8s.api.core.v1.ResourceFieldSelector: 3 properties (containerName: STRING, divisor: #/$defs/io.k8s.apimachinery.pkg.api.resource.Quantity, resource: STRING)
+  io.k8s.api.core.v1.ResourceHealth: 2 properties (health: STRING, resourceID: STRING)
+  io.k8s.api.core.v1.ResourceRequirements: 3 properties (claims: [#/$defs/io.k8s.api.core.v1.ResourceClaim], limits: MAP, requests: MAP)
+  io.k8s.api.core.v1.ResourceStatus: 2 properties (name: STRING, resources: [#/$defs/io.k8s.api.core.v1.ResourceHealth])
+  io.k8s.api.core.v1.SELinuxOptions: 4 properties (level: STRING, role: STRING, type: STRING, user: STRING)
+  io.k8s.api.core.v1.ScaleIOPersistentVolumeSource: 10 properties (fsType: STRING, gateway: STRING, protectionDomain: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.SecretReference, sslEnabled: BOOLEAN, storageMode: STRING, storagePool: STRING, system: STRING, volumeName: STRING)
+  io.k8s.api.core.v1.ScaleIOVolumeSource: 10 properties (fsType: STRING, gateway: STRING, protectionDomain: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, sslEnabled: BOOLEAN, storageMode: STRING, storagePool: STRING, system: STRING, volumeName: STRING)
+  io.k8s.api.core.v1.SeccompProfile: 2 properties (localhostProfile: STRING, type: STRING)
+  io.k8s.api.core.v1.SecretEnvSource: 2 properties (name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.SecretKeySelector: 3 properties (key: STRING, name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.SecretProjection: 3 properties (items: [#/$defs/io.k8s.api.core.v1.KeyToPath], name: STRING, optional: BOOLEAN)
+  io.k8s.api.core.v1.SecretReference: 2 properties (name: STRING, namespace: STRING)
+  io.k8s.api.core.v1.SecretVolumeSource: 4 properties (defaultMode: INTEGER, items: [#/$defs/io.k8s.api.core.v1.KeyToPath], optional: BOOLEAN, secretName: STRING)
+  io.k8s.api.core.v1.SecurityContext: 12 properties (allowPrivilegeEscalation: BOOLEAN, appArmorProfile: #/$defs/io.k8s.api.core.v1.AppArmorProfile, capabilities: #/$defs/io.k8s.api.core.v1.Capabilities, privileged: BOOLEAN, procMount: STRING, readOnlyRootFilesystem: BOOLEAN, runAsGroup: INTEGER, runAsNonRoot: BOOLEAN, runAsUser: INTEGER, seLinuxOptions: #/$defs/io.k8s.api.core.v1.SELinuxOptions, seccompProfile: #/$defs/io.k8s.api.core.v1.SeccompProfile, windowsOptions: #/$defs/io.k8s.api.core.v1.WindowsSecurityContextOptions)
+  io.k8s.api.core.v1.ServiceAccountTokenProjection: 3 properties (audience: STRING, expirationSeconds: INTEGER, path: STRING)
+  io.k8s.api.core.v1.ServicePort: 6 properties (appProtocol: STRING, name: STRING, nodePort: INTEGER, port: INTEGER, protocol: STRING, targetPort: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString)
+  io.k8s.api.core.v1.ServiceSpec: 20 properties (allocateLoadBalancerNodePorts: BOOLEAN, clusterIP: STRING, clusterIPs: [STRING], externalIPs: [STRING], externalName: STRING, externalTrafficPolicy: STRING, healthCheckNodePort: INTEGER, internalTrafficPolicy: STRING, ipFamilies: [STRING], ipFamilyPolicy: STRING, loadBalancerClass: STRING, loadBalancerIP: STRING, loadBalancerSourceRanges: [STRING], ports: [#/$defs/io.k8s.api.core.v1.ServicePort], publishNotReadyAddresses: BOOLEAN, selector: MAP, sessionAffinity: STRING, sessionAffinityConfig: #/$defs/io.k8s.api.core.v1.SessionAffinityConfig, trafficDistribution: STRING, type: STRING)
+  io.k8s.api.core.v1.ServiceStatus: 2 properties (conditions: [#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.Condition], loadBalancer: #/$defs/io.k8s.api.core.v1.LoadBalancerStatus)
+  io.k8s.api.core.v1.SessionAffinityConfig: 1 property (clientIP: #/$defs/io.k8s.api.core.v1.ClientIPConfig)
+  io.k8s.api.core.v1.SleepAction: 1 property (seconds: INTEGER)
+  io.k8s.api.core.v1.StorageOSPersistentVolumeSource: 5 properties (fsType: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.ObjectReference, volumeName: STRING, volumeNamespace: STRING)
+  io.k8s.api.core.v1.StorageOSVolumeSource: 5 properties (fsType: STRING, readOnly: BOOLEAN, secretRef: #/$defs/io.k8s.api.core.v1.LocalObjectReference, volumeName: STRING, volumeNamespace: STRING)
+  io.k8s.api.core.v1.Sysctl: 2 properties (name: STRING, value: STRING)
+  io.k8s.api.core.v1.TCPSocketAction: 2 properties (host: STRING, port: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString)
+  io.k8s.api.core.v1.Taint: 4 properties (effect: STRING, key: STRING, timeAdded: DATETIME_UTC, value: STRING)
+  io.k8s.api.core.v1.Toleration: 5 properties (effect: STRING, key: STRING, operator: STRING, tolerationSeconds: INTEGER, value: STRING)
+  io.k8s.api.core.v1.TopologySelectorLabelRequirement: 2 properties (key: STRING, values: [STRING])
+  io.k8s.api.core.v1.TopologySelectorTerm: 1 property (matchLabelExpressions: [#/$defs/io.k8s.api.core.v1.TopologySelectorLabelRequirement])
+  io.k8s.api.core.v1.TopologySpreadConstraint: 8 properties (labelSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, matchLabelKeys: [STRING], maxSkew: INTEGER, minDomains: INTEGER, nodeAffinityPolicy: STRING, nodeTaintsPolicy: STRING, topologyKey: STRING, whenUnsatisfiable: STRING)
+  io.k8s.api.core.v1.TypedLocalObjectReference: 3 properties (apiGroup: STRING, kind: STRING, name: STRING)
+  io.k8s.api.core.v1.TypedObjectReference: 4 properties (apiGroup: STRING, kind: STRING, name: STRING, namespace: STRING)
+  io.k8s.api.core.v1.Volume: 31 properties (awsElasticBlockStore: #/$defs/io.k8s.api.core.v1.AWSElasticBlockStoreVolumeSource, azureDisk: #/$defs/io.k8s.api.core.v1.AzureDiskVolumeSource, azureFile: #/$defs/io.k8s.api.core.v1.AzureFileVolumeSource, cephfs: #/$defs/io.k8s.api.core.v1.CephFSVolumeSource, cinder: #/$defs/io.k8s.api.core.v1.CinderVolumeSource, configMap: #/$defs/io.k8s.api.core.v1.ConfigMapVolumeSource, csi: #/$defs/io.k8s.api.core.v1.CSIVolumeSource, downwardAPI: #/$defs/io.k8s.api.core.v1.DownwardAPIVolumeSource, emptyDir: #/$defs/io.k8s.api.core.v1.EmptyDirVolumeSource, ephemeral: #/$defs/io.k8s.api.core.v1.EphemeralVolumeSource, fc: #/$defs/io.k8s.api.core.v1.FCVolumeSource, flexVolume: #/$defs/io.k8s.api.core.v1.FlexVolumeSource, flocker: #/$defs/io.k8s.api.core.v1.FlockerVolumeSource, gcePersistentDisk: #/$defs/io.k8s.api.core.v1.GCEPersistentDiskVolumeSource, gitRepo: #/$defs/io.k8s.api.core.v1.GitRepoVolumeSource, glusterfs: #/$defs/io.k8s.api.core.v1.GlusterfsVolumeSource, hostPath: #/$defs/io.k8s.api.core.v1.HostPathVolumeSource, image: #/$defs/io.k8s.api.core.v1.ImageVolumeSource, iscsi: #/$defs/io.k8s.api.core.v1.ISCSIVolumeSource, name: STRING, nfs: #/$defs/io.k8s.api.core.v1.NFSVolumeSource, persistentVolumeClaim: #/$defs/io.k8s.api.core.v1.PersistentVolumeClaimVolumeSource, photonPersistentDisk: #/$defs/io.k8s.api.core.v1.PhotonPersistentDiskVolumeSource, portworxVolume: #/$defs/io.k8s.api.core.v1.PortworxVolumeSource, projected: #/$defs/io.k8s.api.core.v1.ProjectedVolumeSource, quobyte: #/$defs/io.k8s.api.core.v1.QuobyteVolumeSource, rbd: #/$defs/io.k8s.api.core.v1.RBDVolumeSource, scaleIO: #/$defs/io.k8s.api.core.v1.ScaleIOVolumeSource, secret: #/$defs/io.k8s.api.core.v1.SecretVolumeSource, storageos: #/$defs/io.k8s.api.core.v1.StorageOSVolumeSource, vsphereVolume: #/$defs/io.k8s.api.core.v1.VsphereVirtualDiskVolumeSource)
+  io.k8s.api.core.v1.VolumeDevice: 2 properties (devicePath: STRING, name: STRING)
+  io.k8s.api.core.v1.VolumeMount: 7 properties (mountPath: STRING, mountPropagation: STRING, name: STRING, readOnly: BOOLEAN, recursiveReadOnly: STRING, subPath: STRING, subPathExpr: STRING)
+  io.k8s.api.core.v1.VolumeMountStatus: 4 properties (mountPath: STRING, name: STRING, readOnly: BOOLEAN, recursiveReadOnly: STRING)
+  io.k8s.api.core.v1.VolumeNodeAffinity: 1 property (required: #/$defs/io.k8s.api.core.v1.NodeSelector)
+  io.k8s.api.core.v1.VolumeProjection: 5 properties (clusterTrustBundle: #/$defs/io.k8s.api.core.v1.ClusterTrustBundleProjection, configMap: #/$defs/io.k8s.api.core.v1.ConfigMapProjection, downwardAPI: #/$defs/io.k8s.api.core.v1.DownwardAPIProjection, secret: #/$defs/io.k8s.api.core.v1.SecretProjection, serviceAccountToken: #/$defs/io.k8s.api.core.v1.ServiceAccountTokenProjection)
+  io.k8s.api.core.v1.VolumeResourceRequirements: 2 properties (limits: MAP, requests: MAP)
+  io.k8s.api.core.v1.VsphereVirtualDiskVolumeSource: 4 properties (fsType: STRING, storagePolicyID: STRING, storagePolicyName: STRING, volumePath: STRING)
+  io.k8s.api.core.v1.WeightedPodAffinityTerm: 2 properties (podAffinityTerm: #/$defs/io.k8s.api.core.v1.PodAffinityTerm, weight: INTEGER)
+  io.k8s.api.core.v1.WindowsSecurityContextOptions: 4 properties (gmsaCredentialSpec: STRING, gmsaCredentialSpecName: STRING, hostProcess: BOOLEAN, runAsUserName: STRING)
+  io.k8s.api.discovery.v1.Endpoint: 8 properties (addresses: [STRING], conditions: #/$defs/io.k8s.api.discovery.v1.EndpointConditions, deprecatedTopology: MAP, hints: #/$defs/io.k8s.api.discovery.v1.EndpointHints, hostname: STRING, nodeName: STRING, targetRef: #/$defs/io.k8s.api.core.v1.ObjectReference, zone: STRING)
+  io.k8s.api.discovery.v1.EndpointConditions: 3 properties (ready: BOOLEAN, serving: BOOLEAN, terminating: BOOLEAN)
+  io.k8s.api.discovery.v1.EndpointHints: 1 property (forZones: [#/$defs/io.k8s.api.discovery.v1.ForZone])
+  io.k8s.api.discovery.v1.EndpointPort: 4 properties (appProtocol: STRING, name: STRING, port: INTEGER, protocol: STRING)
+  io.k8s.api.discovery.v1.ForZone: 1 property (name: STRING)
+  io.k8s.api.events.v1.EventSeries: 2 properties (count: INTEGER, lastObservedTime: DATETIME_UTC)
+  io.k8s.api.networking.v1.HTTPIngressPath: 3 properties (backend: #/$defs/io.k8s.api.networking.v1.IngressBackend, path: STRING, pathType: STRING)
+  io.k8s.api.networking.v1.HTTPIngressRuleValue: 1 property (paths: [#/$defs/io.k8s.api.networking.v1.HTTPIngressPath])
+  io.k8s.api.networking.v1.IPBlock: 2 properties (cidr: STRING, except: [STRING])
+  io.k8s.api.networking.v1.IngressBackend: 2 properties (resource: #/$defs/io.k8s.api.core.v1.TypedLocalObjectReference, service: #/$defs/io.k8s.api.networking.v1.IngressServiceBackend)
+  io.k8s.api.networking.v1.IngressLoadBalancerIngress: 3 properties (hostname: STRING, ip: STRING, ports: [#/$defs/io.k8s.api.networking.v1.IngressPortStatus])
+  io.k8s.api.networking.v1.IngressLoadBalancerStatus: 1 property (ingress: [#/$defs/io.k8s.api.networking.v1.IngressLoadBalancerIngress])
+  io.k8s.api.networking.v1.IngressPortStatus: 3 properties (error: STRING, port: INTEGER, protocol: STRING)
+  io.k8s.api.networking.v1.IngressRule: 2 properties (host: STRING, http: #/$defs/io.k8s.api.networking.v1.HTTPIngressRuleValue)
+  io.k8s.api.networking.v1.IngressServiceBackend: 2 properties (name: STRING, port: #/$defs/io.k8s.api.networking.v1.ServiceBackendPort)
+  io.k8s.api.networking.v1.IngressSpec: 4 properties (defaultBackend: #/$defs/io.k8s.api.networking.v1.IngressBackend, ingressClassName: STRING, rules: [#/$defs/io.k8s.api.networking.v1.IngressRule], tls: [#/$defs/io.k8s.api.networking.v1.IngressTLS])
+  io.k8s.api.networking.v1.IngressStatus: 1 property (loadBalancer: #/$defs/io.k8s.api.networking.v1.IngressLoadBalancerStatus)
+  io.k8s.api.networking.v1.IngressTLS: 2 properties (hosts: [STRING], secretName: STRING)
+  io.k8s.api.networking.v1.NetworkPolicyEgressRule: 2 properties (ports: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyPort], to: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyPeer])
+  io.k8s.api.networking.v1.NetworkPolicyIngressRule: 2 properties (from: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyPeer], ports: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyPort])
+  io.k8s.api.networking.v1.NetworkPolicyPeer: 3 properties (ipBlock: #/$defs/io.k8s.api.networking.v1.IPBlock, namespaceSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, podSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector)
+  io.k8s.api.networking.v1.NetworkPolicyPort: 3 properties (endPort: INTEGER, port: #/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString, protocol: STRING)
+  io.k8s.api.networking.v1.NetworkPolicySpec: 4 properties (egress: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyEgressRule], ingress: [#/$defs/io.k8s.api.networking.v1.NetworkPolicyIngressRule], podSelector: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector, policyTypes: [STRING])
+  io.k8s.api.networking.v1.ServiceBackendPort: 2 properties (name: STRING, number: INTEGER)
+  io.k8s.apimachinery.pkg.apis.meta.v1.Condition: 6 properties (lastTransitionTime: DATETIME_UTC, message: STRING, observedGeneration: INTEGER, reason: STRING, status: STRING, type: STRING)
+  io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector: 2 properties (matchExpressions: [#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement], matchLabels: MAP)
+  io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement: 3 properties (key: STRING, operator: STRING, values: [STRING])
+  io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry: 7 properties (apiVersion: STRING, fieldsType: STRING, fieldsV1: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1, manager: STRING, operation: STRING, subresource: STRING, time: DATETIME_UTC)
+  io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta: 15 properties (annotations: MAP, creationTimestamp: DATETIME_UTC, deletionGracePeriodSeconds: INTEGER, deletionTimestamp: DATETIME_UTC, finalizers: [STRING], generateName: STRING, generation: INTEGER, labels: MAP, managedFields: [#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry], name: STRING, namespace: STRING, ownerReferences: [#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference], resourceVersion: STRING, selfLink: STRING, uid: STRING)
+  io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference: 6 properties (apiVersion: STRING, blockOwnerDeletion: BOOLEAN, controller: BOOLEAN, kind: STRING, name: STRING, uid: STRING)
+  io.k8s.apimachinery.pkg.version.Info: 9 properties (buildDate: STRING, compiler: STRING, gitCommit: STRING, gitTreeState: STRING, gitVersion: STRING, goVersion: STRING, major: STRING, minor: STRING, platform: STRING)
+
+"#;
+        assert_eq!(schema, expected);
+    }
 }
