@@ -6,14 +6,13 @@ use rmcp::model::{
     PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, ProtocolVersion,
 };
 use rmcp::{
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler,
 };
 
 use ariadne_core::memgraph_async::MemgraphAsync;
 use rmcp::service::RequestContext;
-use std::future::Future;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteCypherQueryRequest {
@@ -86,7 +85,10 @@ impl ServerHandler for KubeTool {
                 .build(),
             server_info: Implementation {
                 name: PROJECT_NAME.to_owned(),
+                title: Some(PROJECT_NAME.to_owned()),
                 version: APP_VERSION.to_owned(),
+                icons: None,
+                website_url: None,
             },
             instructions: Some(instruction),
         }
@@ -104,6 +106,7 @@ impl ServerHandler for KubeTool {
                 Some("Asks the LLM to analyze user question and suggest next steps"),
                 Some(vec![PromptArgument {
                     name: "question".to_string(),
+                    title: Some("Question".to_string()),
                     description: Some("A question to analyze".to_string()),
                     required: Some(true),
                 }]),

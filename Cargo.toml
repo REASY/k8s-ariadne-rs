@@ -29,7 +29,7 @@ futures = {  version = "0.3" }
 k8s-openapi = { version = "0.25.0", features = ["v1_31", "schemars"] }
 kube = { version = "1.1.0", features = ["default", "runtime"] }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
-rmcp = { version = "0.5.0", features = ["server", "transport-streamable-http-server", "macros", "transport-worker"] }
+rmcp = { version = "0.8.5", features = ["server", "transport-streamable-http-server", "macros", "transport-worker"] }
 rsmgclient = { git = "https://github.com/memgraph/rsmgclient.git", rev = "9141722e2bbf0ab35dab7d3912249b90c27b15ea" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
