@@ -171,7 +171,7 @@ impl ClusterStateResolver {
         client: Arc<Box<dyn KubeClient>>,
     ) -> Result<ObservedClusterSnapshot> {
         let namespaces = client.get_namespaces().await?;
-        let events: Vec<Arc<Event>> = Self::get_events(&client, namespaces.as_slice()).await;
+        let events: Vec<Arc<Event>> = client.get_events().await?;
         let nodes = client
             .get_nodes()
             .await
@@ -381,33 +381,6 @@ impl ClusterStateResolver {
             }
         }
         all_logs
-    }
-
-    async fn get_events(
-        client: &Arc<Box<dyn KubeClient>>,
-        namespaces: &[Arc<Namespace>],
-    ) -> Vec<Arc<Event>> {
-        let mut events: Vec<Arc<Event>> = Vec::with_capacity(namespaces.len());
-        let mut handles = Vec::new();
-
-        for p in namespaces {
-            if let Some(ns) = p.metadata.name.as_deref() {
-                let ns = ns.to_string();
-                let client = client.clone();
-                handles.push(tokio::spawn(
-                    async move { (client.get_events(&ns).await).ok() },
-                ));
-            }
-        }
-        for handle in handles {
-            match handle.await.unwrap_or(None) {
-                None => {}
-                Some(mut this_events) => {
-                    events.append(&mut this_events);
-                }
-            }
-        }
-        events
     }
 
     pub async fn resolve(&self) -> Result<Arc<Mutex<ClusterState>>> {

@@ -22,8 +22,10 @@ use kube::{Api, Client, Config, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tokio::time::timeout;
+use tracing::{debug, info, warn};
 
 #[async_trait]
 pub trait KubeClient: Sync + Send {
@@ -52,10 +54,7 @@ pub trait KubeClient: Sync + Send {
         pod_name: &str,
         container: Option<String>,
     ) -> Result<String>;
-    async fn get_events(
-        &self,
-        namespace: &str,
-    ) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>>;
+    async fn get_events(&self) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>>;
 }
 
 pub struct KubeClientImpl {
@@ -253,12 +252,8 @@ impl KubeClient for KubeClientImpl {
         Ok(logs)
     }
 
-    async fn get_events(
-        &self,
-        namespace: &str,
-    ) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>> {
-        let api: Api<k8s_openapi::api::events::v1::Event> =
-            Api::namespaced(self.client.clone(), namespace);
+    async fn get_events(&self) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>> {
+        let api: Api<k8s_openapi::api::events::v1::Event> = Api::all(self.client.clone());
         get_object(&api).await
     }
 }
@@ -509,13 +504,19 @@ impl KubeClient for CachedKubeClient {
         Ok(logs)
     }
 
-    async fn get_events(&self, namespace: &str) -> Result<Vec<Arc<Event>>> {
+    async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
         let store = &self.event_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Event store is not ready");
-        Ok(store.state())
+        match timeout(Duration::from_secs(2), store.wait_until_ready()).await {
+            Ok(wait_result) => {
+                wait_result.expect("Event store is not ready");
+                let state = store.state();
+                Ok(state)
+            }
+            Err(_elapsed) => {
+                warn!("Timed out waiting for events after 2s; returning empty list",);
+                Ok(Vec::new())
+            }
+        }
     }
 }
 impl CachedKubeClient {
@@ -585,9 +586,7 @@ impl CachedKubeClient {
             .map(|ns| Api::namespaced(client.clone(), ns))
             .unwrap_or_else(|| Api::all(client.clone()));
 
-        let event_api: Api<Event> = maybe_ns
-            .map(|ns| Api::namespaced(client.clone(), ns))
-            .unwrap_or_else(|| Api::all(client.clone()));
+        let event_api: Api<Event> = Api::all(client.clone());
 
         let (pod_store, pod_watch) = make_store_and_watch(pod_api);
         let (deployment_store, deployment_watch) = make_store_and_watch(deployment_api);
@@ -650,7 +649,7 @@ impl CachedKubeClient {
             node_watch: tokio::spawn(node_watch),
             service_account_store,
             service_account_watch: tokio::spawn(service_account_watch),
-            event_store: event_store,
+            event_store,
             event_store_watch: tokio::spawn(event_watch),
         })
     }
