@@ -171,7 +171,7 @@ impl ClusterStateResolver {
         client: Arc<Box<dyn KubeClient>>,
     ) -> Result<ObservedClusterSnapshot> {
         let namespaces = client.get_namespaces().await?;
-        let events: Vec<Arc<Event>> = Vec::new(); //Self::get_events(&client, namespaces.as_slice()).await;
+        let events: Vec<Arc<Event>> = Self::get_events(&client, namespaces.as_slice()).await;
         let nodes = client
             .get_nodes()
             .await

@@ -10,6 +10,7 @@ use k8s_openapi::api::core::v1::{
     ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::version::Info;
@@ -316,6 +317,9 @@ pub struct CachedKubeClient {
     service_account_store: Store<ServiceAccount>,
     #[allow(unused)]
     service_account_watch: JoinHandle<()>,
+    event_store: Store<Event>,
+    #[allow(unused)]
+    event_store_watch: JoinHandle<()>,
 }
 
 #[async_trait]
@@ -505,13 +509,13 @@ impl KubeClient for CachedKubeClient {
         Ok(logs)
     }
 
-    async fn get_events(
-        &self,
-        namespace: &str,
-    ) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>> {
-        let api: Api<k8s_openapi::api::events::v1::Event> =
-            Api::namespaced(self.client.clone(), namespace);
-        get_object(&api).await
+    async fn get_events(&self, namespace: &str) -> Result<Vec<Arc<Event>>> {
+        let store = &self.event_store;
+        store
+            .wait_until_ready()
+            .await
+            .expect("Event store is not ready");
+        Ok(store.state())
     }
 }
 impl CachedKubeClient {
@@ -581,6 +585,10 @@ impl CachedKubeClient {
             .map(|ns| Api::namespaced(client.clone(), ns))
             .unwrap_or_else(|| Api::all(client.clone()));
 
+        let event_api: Api<Event> = maybe_ns
+            .map(|ns| Api::namespaced(client.clone(), ns))
+            .unwrap_or_else(|| Api::all(client.clone()));
+
         let (pod_store, pod_watch) = make_store_and_watch(pod_api);
         let (deployment_store, deployment_watch) = make_store_and_watch(deployment_api);
         let (stateful_set_store, stateful_set_watch) = make_store_and_watch(stateful_set_api);
@@ -602,6 +610,8 @@ impl CachedKubeClient {
         let (service_account_store, service_account_watch) =
             make_store_and_watch(service_account_api);
         let (namespace_store, namespace_watch) = make_store_and_watch(namespace_api);
+
+        let (event_store, event_watch) = make_store_and_watch(event_api);
 
         Ok(Self {
             config: cfg.clone(),
@@ -640,6 +650,8 @@ impl CachedKubeClient {
             node_watch: tokio::spawn(node_watch),
             service_account_store,
             service_account_watch: tokio::spawn(service_account_watch),
+            event_store: event_store,
+            event_store_watch: tokio::spawn(event_watch),
         })
     }
 }
