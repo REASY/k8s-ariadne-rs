@@ -157,7 +157,7 @@ impl ClusterStateResolver {
         let last_snapshot =
             Self::get_observed_snapshot(cluster.clone(), kube_client.clone()).await?;
         let derived_snapshot = Self::get_derived_snapshot(&last_snapshot)?;
-        let container_logs = Self::get_logs(&kube_client, &derived_snapshot.containers).await;
+        let container_logs: Vec<Logs> = Vec::new(); // Self::get_logs(&kube_client, &derived_snapshot.containers).await;
         let augmented = AugmentedClusterSnapshot {
             observed: last_snapshot,
             derived: derived_snapshot,
@@ -171,7 +171,7 @@ impl ClusterStateResolver {
         client: Arc<Box<dyn KubeClient>>,
     ) -> Result<ObservedClusterSnapshot> {
         let namespaces = client.get_namespaces().await?;
-        let events = Self::get_events(&client, namespaces.as_slice()).await;
+        let events: Vec<Arc<Event>> = Vec::new(); //Self::get_events(&client, namespaces.as_slice()).await;
         let nodes = client
             .get_nodes()
             .await
