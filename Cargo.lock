@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-app"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "ariadne-core",
  "axum",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "async-trait",
  "chrono",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-tools"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "ariadne-core",
  "clap",
