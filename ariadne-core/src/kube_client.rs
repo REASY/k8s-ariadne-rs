@@ -27,6 +27,14 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
+use crate::kube_access::{
+    AccessChecker, RESOURCE_CONFIG_MAP, RESOURCE_DAEMON_SET, RESOURCE_DEPLOYMENT,
+    RESOURCE_ENDPOINT_SLICE, RESOURCE_EVENT, RESOURCE_INGRESS, RESOURCE_JOB, RESOURCE_NAMESPACE,
+    RESOURCE_NETWORK_POLICY, RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME,
+    RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
+    RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS,
+};
+
 #[async_trait]
 pub trait KubeClient: Sync + Send {
     async fn get_namespaces(&self) -> Result<Vec<Arc<Namespace>>>;
@@ -261,215 +269,130 @@ impl KubeClient for KubeClientImpl {
 pub struct CachedKubeClient {
     config: Config,
     client: Client,
-    namespace_store: Store<Namespace>,
+    namespace_store: Option<Store<Namespace>>,
     #[allow(unused)]
-    namespace_watch: JoinHandle<()>,
-    pod_store: Store<Pod>,
+    namespace_watch: Option<JoinHandle<()>>,
+    pod_store: Option<Store<Pod>>,
     #[allow(unused)]
-    pod_watch: JoinHandle<()>,
-    deployment_store: Store<Deployment>,
+    pod_watch: Option<JoinHandle<()>>,
+    deployment_store: Option<Store<Deployment>>,
     #[allow(unused)]
-    deployment_watch: JoinHandle<()>,
-    stateful_set_store: Store<StatefulSet>,
+    deployment_watch: Option<JoinHandle<()>>,
+    stateful_set_store: Option<Store<StatefulSet>>,
     #[allow(unused)]
-    stateful_set_watch: JoinHandle<()>,
-    replica_set_store: Store<ReplicaSet>,
+    stateful_set_watch: Option<JoinHandle<()>>,
+    replica_set_store: Option<Store<ReplicaSet>>,
     #[allow(unused)]
-    replica_set_watch: JoinHandle<()>,
-    daemon_set_store: Store<DaemonSet>,
+    replica_set_watch: Option<JoinHandle<()>>,
+    daemon_set_store: Option<Store<DaemonSet>>,
     #[allow(unused)]
-    daemon_set_watch: JoinHandle<()>,
-    job_store: Store<Job>,
+    daemon_set_watch: Option<JoinHandle<()>>,
+    job_store: Option<Store<Job>>,
     #[allow(unused)]
-    job_watch: JoinHandle<()>,
-    ingress_store: Store<Ingress>,
+    job_watch: Option<JoinHandle<()>>,
+    ingress_store: Option<Store<Ingress>>,
     #[allow(unused)]
-    ingress_watch: JoinHandle<()>,
-    service_store: Store<Service>,
+    ingress_watch: Option<JoinHandle<()>>,
+    service_store: Option<Store<Service>>,
     #[allow(unused)]
-    service_watch: JoinHandle<()>,
-    endpoint_slice_store: Store<EndpointSlice>,
+    service_watch: Option<JoinHandle<()>>,
+    endpoint_slice_store: Option<Store<EndpointSlice>>,
     #[allow(unused)]
-    endpoint_slice_watch: JoinHandle<()>,
-    network_policy_store: Store<NetworkPolicy>,
+    endpoint_slice_watch: Option<JoinHandle<()>>,
+    network_policy_store: Option<Store<NetworkPolicy>>,
     #[allow(unused)]
-    network_policy_watch: JoinHandle<()>,
-    config_map_store: Store<ConfigMap>,
+    network_policy_watch: Option<JoinHandle<()>>,
+    config_map_store: Option<Store<ConfigMap>>,
     #[allow(unused)]
-    config_map_watch: JoinHandle<()>,
-    storage_class_store: Store<StorageClass>,
+    config_map_watch: Option<JoinHandle<()>>,
+    storage_class_store: Option<Store<StorageClass>>,
     #[allow(unused)]
-    storage_class_watch: JoinHandle<()>,
-    persistent_volume_store: Store<PersistentVolume>,
+    storage_class_watch: Option<JoinHandle<()>>,
+    persistent_volume_store: Option<Store<PersistentVolume>>,
     #[allow(unused)]
-    persistent_volume_watch: JoinHandle<()>,
-    persistent_volume_claim_store: Store<PersistentVolumeClaim>,
+    persistent_volume_watch: Option<JoinHandle<()>>,
+    persistent_volume_claim_store: Option<Store<PersistentVolumeClaim>>,
     #[allow(unused)]
-    persistent_volume_claim_watch: JoinHandle<()>,
-    node_store: Store<Node>,
+    persistent_volume_claim_watch: Option<JoinHandle<()>>,
+    node_store: Option<Store<Node>>,
     #[allow(unused)]
-    node_watch: JoinHandle<()>,
-    service_account_store: Store<ServiceAccount>,
+    node_watch: Option<JoinHandle<()>>,
+    service_account_store: Option<Store<ServiceAccount>>,
     #[allow(unused)]
-    service_account_watch: JoinHandle<()>,
-    event_store: Store<Event>,
+    service_account_watch: Option<JoinHandle<()>>,
+    event_store: Option<Store<Event>>,
     #[allow(unused)]
-    event_store_watch: JoinHandle<()>,
+    event_store_watch: Option<JoinHandle<()>>,
 }
 
 #[async_trait]
 impl KubeClient for CachedKubeClient {
     async fn get_namespaces(&self) -> Result<Vec<Arc<Namespace>>> {
-        let store = &self.namespace_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Namespace store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.namespace_store, "Namespace").await
     }
 
     async fn get_pods(&self) -> Result<Vec<Arc<Pod>>> {
-        let store = &self.pod_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Pod store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.pod_store, "Pod").await
     }
 
     async fn get_deployments(&self) -> Result<Vec<Arc<Deployment>>> {
-        let store = &self.deployment_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Deployment store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.deployment_store, "Deployment").await
     }
 
     async fn get_stateful_sets(&self) -> Result<Vec<Arc<StatefulSet>>> {
-        let store = &self.stateful_set_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("StatefulSet store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.stateful_set_store, "StatefulSet").await
     }
 
     async fn get_replica_sets(&self) -> Result<Vec<Arc<ReplicaSet>>> {
-        let store = &self.replica_set_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("ReplicaSet store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.replica_set_store, "ReplicaSet").await
     }
 
     async fn get_daemon_sets(&self) -> Result<Vec<Arc<DaemonSet>>> {
-        let store = &self.daemon_set_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("DaemonSet store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.daemon_set_store, "DaemonSet").await
     }
 
     async fn get_jobs(&self) -> Result<Vec<Arc<Job>>> {
-        let store = &self.job_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Job store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.job_store, "Job").await
     }
 
     async fn get_ingresses(&self) -> Result<Vec<Arc<Ingress>>> {
-        let store = &self.ingress_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Ingress store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.ingress_store, "Ingress").await
     }
 
     async fn get_services(&self) -> Result<Vec<Arc<Service>>> {
-        let store = &self.service_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Service store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.service_store, "Service").await
     }
 
     async fn get_endpoint_slices(&self) -> Result<Vec<Arc<EndpointSlice>>> {
-        let store = &self.endpoint_slice_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("EndpointSlice store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.endpoint_slice_store, "EndpointSlice").await
     }
 
     async fn get_network_policies(&self) -> Result<Vec<Arc<NetworkPolicy>>> {
-        let store = &self.network_policy_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("NetworkPolicy store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.network_policy_store, "NetworkPolicy").await
     }
 
     async fn get_config_maps(&self) -> Result<Vec<Arc<ConfigMap>>> {
-        let store = &self.config_map_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("ConfigMap store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.config_map_store, "ConfigMap").await
     }
 
     async fn get_storage_classes(&self) -> Result<Vec<Arc<StorageClass>>> {
-        let store = &self.storage_class_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("StorageClass store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.storage_class_store, "StorageClass").await
     }
 
     async fn get_persistent_volumes(&self) -> Result<Vec<Arc<PersistentVolume>>> {
-        let store = &self.persistent_volume_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("PersistentVolume store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.persistent_volume_store, "PersistentVolume").await
     }
 
     async fn get_persistent_volume_claims(&self) -> Result<Vec<Arc<PersistentVolumeClaim>>> {
-        let store = &self.persistent_volume_claim_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("PersistentVolumeClaim store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.persistent_volume_claim_store, "PersistentVolumeClaim").await
     }
 
     async fn get_nodes(&self) -> Result<Vec<Arc<Node>>> {
-        let store = &self.node_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("Node store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.node_store, "Node").await
     }
 
     async fn get_service_accounts(&self) -> Result<Vec<Arc<ServiceAccount>>> {
-        let store = &self.service_account_store;
-        store
-            .wait_until_ready()
-            .await
-            .expect("ServiceAccount store is not ready");
-        Ok(store.state())
+        store_state_or_empty(&self.service_account_store, "ServiceAccount").await
     }
 
     async fn apiserver_version(&self) -> Result<Info> {
@@ -505,12 +428,13 @@ impl KubeClient for CachedKubeClient {
     }
 
     async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
-        let store = &self.event_store;
+        let Some(store) = &self.event_store else {
+            return Ok(Vec::new());
+        };
         match timeout(Duration::from_secs(2), store.wait_until_ready()).await {
             Ok(wait_result) => {
                 wait_result.expect("Event store is not ready");
-                let state = store.state();
-                Ok(state)
+                Ok(store.state())
             }
             Err(_elapsed) => {
                 warn!("Timed out waiting for events after 2s; returning empty list",);
@@ -519,6 +443,43 @@ impl KubeClient for CachedKubeClient {
         }
     }
 }
+
+fn start_store_if_allowed<T>(
+    api: Api<T>,
+    allowed: bool,
+) -> (Option<Store<T>>, Option<JoinHandle<()>>)
+where
+    T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
+    T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+{
+    if allowed {
+        let (store, watch) = make_store_and_watch(api);
+        (Some(store), Some(tokio::spawn(watch)))
+    } else {
+        (None, None)
+    }
+}
+
+async fn store_state_or_empty<T>(
+    store: &Option<Store<T>>,
+    kind: &'static str,
+) -> Result<Vec<Arc<T>>>
+where
+    T: Resource + Clone + Debug + Send + Sync + 'static,
+    T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+{
+    match store {
+        Some(store) => {
+            store
+                .wait_until_ready()
+                .await
+                .expect(&format!("{kind} store is not ready"));
+            Ok(store.state())
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
 impl CachedKubeClient {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
         let cfg = match Config::from_kubeconfig(options).await {
@@ -586,71 +547,103 @@ impl CachedKubeClient {
             .map(|ns| Api::namespaced(client.clone(), ns))
             .unwrap_or_else(|| Api::all(client.clone()));
 
-        let event_api: Api<Event> = Api::all(client.clone());
+        let event_api: Api<Event> = maybe_ns
+            .map(|ns| Api::namespaced(client.clone(), ns))
+            .unwrap_or_else(|| Api::all(client.clone()));
 
-        let (pod_store, pod_watch) = make_store_and_watch(pod_api);
-        let (deployment_store, deployment_watch) = make_store_and_watch(deployment_api);
-        let (stateful_set_store, stateful_set_watch) = make_store_and_watch(stateful_set_api);
-        let (replica_set_store, replica_set_watch) = make_store_and_watch(replica_set_api);
-        let (daemon_set_store, daemon_set_watch) = make_store_and_watch(daemon_set_api);
-        let (job_store, job_watch) = make_store_and_watch(job_api);
-        let (ingress_store, ingress_watch) = make_store_and_watch(ingress_api);
-        let (service_store, service_watch) = make_store_and_watch(service_api);
+        let access = AccessChecker::new(client.clone(), maybe_ns);
+
+        let namespace_allowed = access.can_read(RESOURCE_NAMESPACE).await;
+        let pod_allowed = access.can_read(RESOURCE_POD).await;
+        let deployment_allowed = access.can_read(RESOURCE_DEPLOYMENT).await;
+        let stateful_set_allowed = access.can_read(RESOURCE_STATEFUL_SET).await;
+        let replica_set_allowed = access.can_read(RESOURCE_REPLICA_SET).await;
+        let daemon_set_allowed = access.can_read(RESOURCE_DAEMON_SET).await;
+        let job_allowed = access.can_read(RESOURCE_JOB).await;
+        let ingress_allowed = access.can_read(RESOURCE_INGRESS).await;
+        let service_allowed = access.can_read(RESOURCE_SERVICE).await;
+        let endpoint_slice_allowed = access.can_read(RESOURCE_ENDPOINT_SLICE).await;
+        let network_policy_allowed = access.can_read(RESOURCE_NETWORK_POLICY).await;
+        let config_map_allowed = access.can_read(RESOURCE_CONFIG_MAP).await;
+        let storage_class_allowed = access.can_read(RESOURCE_STORAGE_CLASS).await;
+        let persistent_volume_allowed = access.can_read(RESOURCE_PERSISTENT_VOLUME).await;
+        let persistent_volume_claim_allowed =
+            access.can_read(RESOURCE_PERSISTENT_VOLUME_CLAIM).await;
+        let node_allowed = access.can_read(RESOURCE_NODE).await;
+        let service_account_allowed = access.can_read(RESOURCE_SERVICE_ACCOUNT).await;
+        let event_allowed = access.can_read(RESOURCE_EVENT).await;
+
+        let (pod_store, pod_watch) = start_store_if_allowed(pod_api, pod_allowed);
+        let (deployment_store, deployment_watch) =
+            start_store_if_allowed(deployment_api, deployment_allowed);
+        let (stateful_set_store, stateful_set_watch) =
+            start_store_if_allowed(stateful_set_api, stateful_set_allowed);
+        let (replica_set_store, replica_set_watch) =
+            start_store_if_allowed(replica_set_api, replica_set_allowed);
+        let (daemon_set_store, daemon_set_watch) =
+            start_store_if_allowed(daemon_set_api, daemon_set_allowed);
+        let (job_store, job_watch) = start_store_if_allowed(job_api, job_allowed);
+        let (ingress_store, ingress_watch) = start_store_if_allowed(ingress_api, ingress_allowed);
+        let (service_store, service_watch) = start_store_if_allowed(service_api, service_allowed);
         let (endpoint_slice_store, endpoint_slice_watch) =
-            make_store_and_watch(endpoint_slices_api);
-        let (network_policy_store, network_policy_watch) = make_store_and_watch(network_policy_api);
-        let (config_map_store, config_map_watch) = make_store_and_watch(config_map_api);
-        let (storage_class_store, storage_class_watch) = make_store_and_watch(storage_class_api);
+            start_store_if_allowed(endpoint_slices_api, endpoint_slice_allowed);
+        let (network_policy_store, network_policy_watch) =
+            start_store_if_allowed(network_policy_api, network_policy_allowed);
+        let (config_map_store, config_map_watch) =
+            start_store_if_allowed(config_map_api, config_map_allowed);
+        let (storage_class_store, storage_class_watch) =
+            start_store_if_allowed(storage_class_api, storage_class_allowed);
         let (persistent_volume_store, persistent_volume_watch) =
-            make_store_and_watch(persistent_volume_api);
+            start_store_if_allowed(persistent_volume_api, persistent_volume_allowed);
         let (persistent_volume_claim_store, persistent_volume_claim_watch) =
-            make_store_and_watch(persistent_volume_claim_api);
-        let (node_store, node_watch) = make_store_and_watch(node_api);
+            start_store_if_allowed(persistent_volume_claim_api, persistent_volume_claim_allowed);
+        let (node_store, node_watch) = start_store_if_allowed(node_api, node_allowed);
         let (service_account_store, service_account_watch) =
-            make_store_and_watch(service_account_api);
-        let (namespace_store, namespace_watch) = make_store_and_watch(namespace_api);
+            start_store_if_allowed(service_account_api, service_account_allowed);
+        let (namespace_store, namespace_watch) =
+            start_store_if_allowed(namespace_api, namespace_allowed);
 
-        let (event_store, event_watch) = make_store_and_watch(event_api);
+        let (event_store, event_store_watch) = start_store_if_allowed(event_api, event_allowed);
 
         Ok(Self {
             config: cfg.clone(),
             client: client.clone(),
             namespace_store,
-            namespace_watch: tokio::spawn(namespace_watch),
+            namespace_watch,
             pod_store,
-            pod_watch: tokio::spawn(pod_watch),
+            pod_watch,
             deployment_store,
-            deployment_watch: tokio::spawn(deployment_watch),
+            deployment_watch,
             stateful_set_store,
-            stateful_set_watch: tokio::spawn(stateful_set_watch),
+            stateful_set_watch,
             replica_set_store,
-            replica_set_watch: tokio::spawn(replica_set_watch),
+            replica_set_watch,
             daemon_set_store,
-            daemon_set_watch: tokio::spawn(daemon_set_watch),
+            daemon_set_watch,
             job_store,
-            job_watch: tokio::spawn(job_watch),
+            job_watch,
             ingress_store,
-            ingress_watch: tokio::spawn(ingress_watch),
+            ingress_watch,
             service_store,
-            service_watch: tokio::spawn(service_watch),
+            service_watch,
             endpoint_slice_store,
-            endpoint_slice_watch: tokio::spawn(endpoint_slice_watch),
+            endpoint_slice_watch,
             network_policy_store,
-            network_policy_watch: tokio::spawn(network_policy_watch),
+            network_policy_watch,
             config_map_store,
-            config_map_watch: tokio::spawn(config_map_watch),
+            config_map_watch,
             storage_class_store,
-            storage_class_watch: tokio::spawn(storage_class_watch),
+            storage_class_watch,
             persistent_volume_store,
-            persistent_volume_watch: tokio::spawn(persistent_volume_watch),
+            persistent_volume_watch,
             persistent_volume_claim_store,
-            persistent_volume_claim_watch: tokio::spawn(persistent_volume_claim_watch),
+            persistent_volume_claim_watch,
             node_store,
-            node_watch: tokio::spawn(node_watch),
+            node_watch,
             service_account_store,
-            service_account_watch: tokio::spawn(service_account_watch),
+            service_account_watch,
             event_store,
-            event_store_watch: tokio::spawn(event_watch),
+            event_store_watch,
         })
     }
 }

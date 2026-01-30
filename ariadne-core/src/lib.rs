@@ -1,4 +1,5 @@
 pub mod errors;
+mod kube_access;
 
 pub mod prelude {
     use crate::errors;

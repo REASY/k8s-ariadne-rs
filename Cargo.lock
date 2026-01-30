@@ -134,6 +134,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "http",
  "k8s-openapi",
  "kube",
  "petgraph",
@@ -146,6 +147,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
 ]
 

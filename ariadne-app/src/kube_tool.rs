@@ -2,7 +2,7 @@ use crate::build::PROJECT_NAME;
 use crate::APP_VERSION;
 use rmcp::model::{
     CallToolResult, Content, GetPromptRequestParams, GetPromptResult, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, PaginatedRequestParam, Prompt,
+    InitializeRequestParams, InitializeResult, ListPromptsResult, PaginatedRequestParams, Prompt,
     PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, ProtocolVersion,
 };
 use rmcp::{
@@ -96,7 +96,7 @@ impl ServerHandler for KubeTool {
 
     async fn list_prompts(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         Ok(ListPromptsResult {
