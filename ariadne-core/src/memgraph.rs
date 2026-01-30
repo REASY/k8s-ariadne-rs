@@ -128,7 +128,7 @@ impl Memgraph {
                 .then(a.2.to_string().cmp(&b.2.to_string()))
         });
 
-        info!("There are {} edges in this graph", unique_edges.len());
+        info!("There are {} edge types in this graph", unique_edges.len());
         for (source_type, target_type, edge_type) in &unique_edges {
             trace!(
                 "(:{:?})-[:{:?}]->(:{:?})",
