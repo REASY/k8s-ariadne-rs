@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[async_trait]
 pub trait KubeClient: Sync + Send {

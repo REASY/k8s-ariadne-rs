@@ -1,8 +1,8 @@
 use crate::build::PROJECT_NAME;
 use crate::APP_VERSION;
 use rmcp::model::{
-    CallToolResult, Content, GetPromptRequestParam, GetPromptResult, Implementation,
-    InitializeRequestParam, InitializeResult, ListPromptsResult, PaginatedRequestParam, Prompt,
+    CallToolResult, Content, GetPromptRequestParams, GetPromptResult, Implementation,
+    InitializeRequestParams, InitializeResult, ListPromptsResult, PaginatedRequestParam, Prompt,
     PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, ProtocolVersion,
 };
 use rmcp::{
@@ -60,7 +60,7 @@ const CURRENT_PROMPT: &str = include_str!("../../prompt.txt");
 impl ServerHandler for KubeTool {
     async fn initialize(
         &self,
-        _request: InitializeRequestParam,
+        _request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         if let Some(http_request_part) = context.extensions.get::<axum::http::request::Parts>() {
@@ -100,6 +100,7 @@ impl ServerHandler for KubeTool {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         Ok(ListPromptsResult {
+            meta: None,
             next_cursor: None,
             prompts: vec![Prompt::new(
                 "analyze_question",
@@ -116,7 +117,9 @@ impl ServerHandler for KubeTool {
 
     async fn get_prompt(
         &self,
-        GetPromptRequestParam { name, arguments }: GetPromptRequestParam,
+        GetPromptRequestParams {
+            name, arguments, ..
+        }: GetPromptRequestParams,
         _: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         match name.as_str() {

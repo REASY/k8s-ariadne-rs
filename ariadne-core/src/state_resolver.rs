@@ -1048,7 +1048,7 @@ impl ClusterStateResolver {
     }
 
     fn endpoint_to_pod(
-        endpoints_slices: &[Arc<EndpointSlice>],
+        _endpoints_slices: &[Arc<EndpointSlice>],
         endpoints: &[Arc<Endpoint>],
         endpoint_addresses: &[Arc<EndpointAddress>],
         state: &mut ClusterState,
