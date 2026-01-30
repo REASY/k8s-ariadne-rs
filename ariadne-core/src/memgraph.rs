@@ -252,6 +252,9 @@ impl Memgraph {
         for records in records {
             result.push(Self::record_to_json(cols.as_slice(), &records)?);
         }
+        self.connection
+            .commit()
+            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
         Ok(result)
     }
 

@@ -12,6 +12,7 @@ use crate::state::{ClusterState, ClusterStateDiff};
 use rsmgclient::ConnectParams;
 use serde_json::Value;
 use tracing::error;
+use tracing::info;
 
 /// Commands sent to the worker thread that owns the Memgraph connection.
 enum Command {
@@ -112,16 +113,35 @@ impl MemgraphAsync {
                 while let Ok(cmd) = rx.recv() {
                     match cmd {
                         Command::Create { lock, resp } => {
+                            info!("memgraph: create");
                             let state = lock.lock().expect("Failed to lock cluster state");
                             let res = mg.create(&state);
+                            if let Err(err) = &res {
+                                error!("memgraph: create failed: {err}");
+                            }
                             let _ = resp.send(res);
                         }
                         Command::Update { diff, resp } => {
+                            info!(
+                                "memgraph: update (+{} nodes, -{} nodes, ~{} nodes, +{} edges, -{} edges)",
+                                diff.added_nodes.len(),
+                                diff.removed_nodes.len(),
+                                diff.modified_nodes.len(),
+                                diff.added_edges.len(),
+                                diff.removed_edges.len()
+                            );
                             let res = mg.update_from_diff(&diff);
+                            if let Err(err) = &res {
+                                error!("memgraph: update failed: {err}");
+                            }
                             let _ = resp.send(res);
                         }
                         Command::ExecuteQuery { query, resp } => {
+                            info!("memgraph: execute_query");
                             let res = mg.execute_query(&query);
+                            if let Err(err) = &res {
+                                error!("memgraph: execute_query failed: {err}");
+                            }
                             let _ = resp.send(res);
                         }
                         Command::Shutdown { resp } => {

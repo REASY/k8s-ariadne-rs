@@ -265,10 +265,7 @@ mod tests {
                         serde_json::from_slice(&body).expect("parse request body");
                     requests.lock().expect("lock requests").push(value);
                 }
-                let response = responses
-                    .lock()
-                    .expect("lock responses")
-                    .remove(0);
+                let response = responses.lock().expect("lock responses").remove(0);
                 Ok::<_, Infallible>(response)
             }
         });

@@ -10,6 +10,7 @@ use rmcp::{
     model::{ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler,
 };
+use serde_json::json;
 
 use ariadne_core::memgraph_async::MemgraphAsync;
 use rmcp::service::RequestContext;
@@ -41,12 +42,16 @@ impl KubeTool {
         &self,
         Parameters(ExecuteCypherQueryRequest { query }): Parameters<ExecuteCypherQueryRequest>,
     ) -> Result<CallToolResult, ErrorData> {
+        tracing::info!(cypher = %query, "execute_cypher_query");
         let records = {
             let records = self
                 .memgraph
                 .execute_query(query.as_str())
                 .await
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                .map_err(|e| {
+                    tracing::error!(cypher = %query, error = %e, "execute_cypher_query failed");
+                    ErrorData::internal_error(e.to_string(), Some(json!({ "cypher": query })))
+                })?;
             records
         };
         let content = Content::json(records)?;
