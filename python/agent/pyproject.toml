@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "k8s-graph-agent"
+version = "0.1.0"
+description = "ADK agent scaffold for the K8s graph MCP server"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "google-adk>=1.23.0",
+  "httpx>=0.27.0",
+  "litellm>=1.45.0",
+  "pydantic>=2.8.0",
+]
+
+[project.scripts]
+k8s-graph-agent = "k8s_graph_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/k8s_graph_agent"]
