@@ -14,15 +14,23 @@ class TestGraphSchema(unittest.TestCase):
         payload = {
             "relationships": [
                 {"from": "Host", "edge": "IsClaimedBy", "to": "Ingress"},
-                {"from": "Ingress", "edge": "DefinesBackend", "to": "IngressServiceBackend"},
+                {
+                    "from": "Ingress",
+                    "edge": "DefinesBackend",
+                    "to": "IngressServiceBackend",
+                },
             ]
         }
         schema = GraphSchema.from_payload(payload)
         self.assertIsNotNone(schema)
         assert schema is not None
         self.assertTrue(schema.allows("IsClaimedBy", "Host", "Ingress"))
-        self.assertTrue(schema.allows("DefinesBackend", "Ingress", "IngressServiceBackend"))
-        self.assertFalse(schema.allows("DefinesBackend", "Host", "IngressServiceBackend"))
+        self.assertTrue(
+            schema.allows("DefinesBackend", "Ingress", "IngressServiceBackend")
+        )
+        self.assertFalse(
+            schema.allows("DefinesBackend", "Host", "IngressServiceBackend")
+        )
 
 
 if __name__ == "__main__":

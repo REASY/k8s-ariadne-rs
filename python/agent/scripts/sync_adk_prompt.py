@@ -61,7 +61,7 @@ def _render_agent_yaml(*, model: str, instruction: str) -> str:
         "agent_class: LlmAgent\n"
         "name: k8s_graph_agent\n"
         f"model: {model}\n"
-        "description: \"Translate SRE questions to Cypher and query the K8s graph.\"\n"
+        'description: "Translate SRE questions to Cypher and query the K8s graph."\n'
         "instruction: |\n"
         f"{instruction}\n\n"
         "tools:\n"

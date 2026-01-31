@@ -15,7 +15,9 @@ from .translate import PrefixCypherTranslator
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="K8s graph agent (MCP client)")
-    parser.add_argument("question", nargs="?", help="Natural language question or cypher: ...")
+    parser.add_argument(
+        "question", nargs="?", help="Natural language question or cypher: ..."
+    )
     parser.add_argument("--cypher", help="Execute a Cypher query directly")
     parser.add_argument("--raw", action="store_true", help="Print raw JSON result")
     parser.add_argument(
@@ -29,7 +31,9 @@ def main() -> None:
         action="store_true",
         help="Skip the summary and only print rows/raw output",
     )
-    parser.add_argument("--use-adk", action="store_true", help="Use Google ADK for translation")
+    parser.add_argument(
+        "--use-adk", action="store_true", help="Use Google ADK for translation"
+    )
     parser.add_argument("--adk-model", help="Override ADK model name")
     parser.add_argument(
         "--simple",
@@ -52,7 +56,9 @@ def main() -> None:
     )
 
     graph = GraphMcpClient(mcp=mcp)
-    synthesizer = SimpleResponseSynthesizer() if args.simple else SreResponseSynthesizer()
+    synthesizer = (
+        SimpleResponseSynthesizer() if args.simple else SreResponseSynthesizer()
+    )
 
     if args.use_adk:
         _configure_logging()
@@ -130,7 +136,9 @@ def _print_rows(result: object, limit: int) -> None:
     print(header)
     print(sep)
     for row in rows:
-        line = " | ".join(_format_cell(row.get(col)).ljust(widths[col]) for col in columns)
+        line = " | ".join(
+            _format_cell(row.get(col)).ljust(widths[col]) for col in columns
+        )
         print(line)
 
 

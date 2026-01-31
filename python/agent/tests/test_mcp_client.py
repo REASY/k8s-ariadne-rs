@@ -15,7 +15,7 @@ from k8s_graph_agent.mcp_client import (
 
 class TestMcpClientHelpers(unittest.TestCase):
     def test_parse_sse_messages(self) -> None:
-        body = "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"
+        body = 'data: {"jsonrpc":"2.0","id":1,"result":{}}\n\n'
         messages = _parse_sse_messages(body)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["id"], 1)
@@ -32,7 +32,7 @@ class TestMcpClientHelpers(unittest.TestCase):
     def test_extract_json_content(self) -> None:
         tool_result = {
             "content": [
-                {"type": "text", "text": "[{\"pod\": \"a\"}]"},
+                {"type": "text", "text": '[{"pod": "a"}]'},
             ]
         }
         extracted = extract_json_content(tool_result)

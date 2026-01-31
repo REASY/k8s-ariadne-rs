@@ -60,6 +60,8 @@ class TestCypherSchemaValidator(unittest.TestCase):
         self.assertIn("ListedIn", message)
         self.assertIn("Endpoint", message)
         self.assertIn("EndpointAddress", message)
+        self.assertIn("[rule=", message)
+        self.assertIn("Hint:", message)
 
     def test_rejects_wrong_direction_from_log_example(self) -> None:
         cypher = (
@@ -82,6 +84,8 @@ class TestCypherSchemaValidator(unittest.TestCase):
         self.assertIn("HasAddress", message)
         self.assertIn("Endpoint", message)
         self.assertIn("EndpointAddress", message)
+        self.assertIn("[rule=", message)
+        self.assertIn("Hint:", message)
 
     def test_accepts_valid_query_from_log_example(self) -> None:
         cypher = (

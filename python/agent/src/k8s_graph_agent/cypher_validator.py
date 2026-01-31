@@ -65,7 +65,8 @@ class SchemaViolation:
     right_labels: tuple[str, ...]
     direction: str
     snippet: str
-    rule_name: str
+    rule_path: str
+    allowed_pairs: tuple[tuple[str, str], ...]
 
 
 class CypherValidationError(ValueError):
@@ -103,48 +104,51 @@ class CypherSchemaValidator:
         except CypherParseError as exc:
             raise CypherValidationError(str(exc)) from exc
 
-        compatibility_issues = _find_compatibility_issues(ast.text, ast.tree, ast.parser)
+        compatibility_issues = _find_compatibility_issues(
+            ast.text, ast.tree, ast.parser
+        )
         if compatibility_issues:
             raise CypherCompatibilityError(compatibility_issues)
 
         pattern_parts: list[tuple[str, str]] = []
-        for rule_name, ctx in _iter_rule_contexts(ast.tree, ast.parser):
+        for rule_name, ctx, rule_path in _iter_rule_contexts(ast.tree, ast.parser):
             if _is_pattern_context(rule_name):
-                pattern_parts.append((rule_name, ctx.getText()))
+                pattern_parts.append(("/".join(rule_path), ctx.getText()))
 
         variable_labels = _collect_variable_labels(
             [pattern_text for _, pattern_text in pattern_parts]
         )
 
         violations: list[SchemaViolation] = []
-        for rule_name, pattern_text in pattern_parts:
+        for rule_path, pattern_text in pattern_parts:
             for rel_use in _iter_relationships(pattern_text):
                 rel_types = _extract_rel_types(rel_use.rel_text)
                 if not rel_types:
                     continue
-                    left_labels = _resolve_labels(
-                        rel_use.left_labels, rel_use.left_var, variable_labels
+                left_labels = _resolve_labels(
+                    rel_use.left_labels, rel_use.left_var, variable_labels
+                )
+                right_labels = _resolve_labels(
+                    rel_use.right_labels, rel_use.right_var, variable_labels
+                )
+                if not left_labels or not right_labels:
+                    continue
+                direction = _direction_from_match(rel_use.left_dir, rel_use.right_dir)
+                if _is_allowed(
+                    self._schema, rel_types, left_labels, right_labels, direction
+                ):
+                    continue
+                violations.append(
+                    SchemaViolation(
+                        rel_type="|".join(rel_types),
+                        left_labels=left_labels,
+                        right_labels=right_labels,
+                        direction=direction,
+                        snippet=_format_snippet(rel_use),
+                        rule_path=rule_path,
+                        allowed_pairs=_allowed_pairs(self._schema, rel_types),
                     )
-                    right_labels = _resolve_labels(
-                        rel_use.right_labels, rel_use.right_var, variable_labels
-                    )
-                    if not left_labels or not right_labels:
-                        continue
-                    direction = _direction_from_match(rel_use.left_dir, rel_use.right_dir)
-                    if _is_allowed(
-                        self._schema, rel_types, left_labels, right_labels, direction
-                    ):
-                        continue
-                    violations.append(
-                        SchemaViolation(
-                            rel_type="|".join(rel_types),
-                            left_labels=left_labels,
-                            right_labels=right_labels,
-                            direction=direction,
-                            snippet=_format_snippet(rel_use),
-                            rule_name=rule_name,
-                        )
-                    )
+                )
         if violations:
             raise SchemaValidationError(violations)
 
@@ -178,9 +182,11 @@ def _find_compatibility_issues(text: str, tree: object, parser: object) -> list[
         issues.append("Fixed-length patterns using '{n}' are not supported")
 
     if _case_when_has_multiple_values(stripped):
-        issues.append("CASE WHEN with multiple values (comma-separated) is not supported")
+        issues.append(
+            "CASE WHEN with multiple values (comma-separated) is not supported"
+        )
 
-    for rule_name, ctx in _iter_rule_contexts(tree, parser):
+    for rule_name, ctx, _ in _iter_rule_contexts(tree, parser):
         if _is_function_context(rule_name):
             func_name, args_text = _split_function_invocation(ctx.getText())
             func_name = func_name.lower()
@@ -189,7 +195,9 @@ def _find_compatibility_issues(text: str, tree: object, parser: object) -> list[
                 continue
             if func_name == "exists":
                 if not _looks_like_pattern_expression(args_text):
-                    issues.append("exists(n.property) is not supported; use IS NOT NULL")
+                    issues.append(
+                        "exists(n.property) is not supported; use IS NOT NULL"
+                    )
                 continue
             if _looks_like_pattern_expression(args_text):
                 issues.append(
@@ -255,15 +263,18 @@ def _looks_like_pattern_expression(text: str) -> bool:
     return any(token in text for token in ("-[:", "<-[", "]-", "->", "<-", ")-", "-("))
 
 
-def _iter_rule_contexts(tree: object, parser: object) -> Iterable[tuple[str, ParserRuleContext]]:
-    stack = [tree]
+def _iter_rule_contexts(
+    tree: object, parser: object
+) -> Iterable[tuple[str, ParserRuleContext, tuple[str, ...]]]:
+    stack: list[tuple[object, tuple[str, ...]]] = [(tree, ())]
     while stack:
-        node = stack.pop()
+        node, path = stack.pop()
         if isinstance(node, ParserRuleContext):
             rule_name = parser.ruleNames[node.getRuleIndex()]
-            yield rule_name, node
+            next_path = path + (rule_name,)
+            yield rule_name, node, next_path
             if node.children:
-                stack.extend(reversed(node.children))
+                stack.extend((child, next_path) for child in reversed(node.children))
 
 
 def _is_pattern_context(rule_name: str) -> bool:
@@ -404,7 +415,9 @@ def _iter_relationships(cypher: str) -> Iterable[_RelationshipUse]:
         i += 1
 
 
-def _consume_group(text: str, start: int, open_char: str, close_char: str) -> tuple[str, int]:
+def _consume_group(
+    text: str, start: int, open_char: str, close_char: str
+) -> tuple[str, int]:
     i = start + 1
     while i < len(text) and text[i] != close_char:
         i += 1
@@ -501,15 +514,39 @@ def _format_violations(violations: list[SchemaViolation]) -> str:
             arrow = "<->"
         else:
             arrow = "-"
+        allowed = _format_allowed_pairs(violation.allowed_pairs)
         lines.append(
-            "- %s %s %s via %s (%s) [rule=%s]"
+            "- Invalid relationship: %s %s %s via %s. Allowed: %s. Pattern: %s [rule=%s]"
             % (
                 ",".join(violation.left_labels),
                 arrow,
                 ",".join(violation.right_labels),
                 violation.rel_type,
+                allowed,
                 violation.snippet,
-                violation.rule_name,
+                violation.rule_path,
             )
         )
+        lines.append(
+            "  Hint: %s is only allowed as %s. Check direction and node labels."
+            % (violation.rel_type, allowed)
+        )
     return "\n".join(lines)
+
+
+def _allowed_pairs(
+    schema: GraphSchema, rel_types: list[str]
+) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, str]] = []
+    for rel_type in rel_types:
+        for src, dst in schema.relationships.get(rel_type, frozenset()):
+            pair = (src, dst)
+            if pair not in pairs:
+                pairs.append(pair)
+    return tuple(pairs)
+
+
+def _format_allowed_pairs(pairs: tuple[tuple[str, str], ...]) -> str:
+    if not pairs:
+        return "none"
+    return "; ".join(f"{src} -> {dst}" for src, dst in pairs)

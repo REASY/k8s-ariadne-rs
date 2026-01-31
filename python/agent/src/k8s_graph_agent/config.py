@@ -16,9 +16,7 @@ class AgentConfig:
     def from_env(cls) -> "AgentConfig":
         return cls(
             mcp_url=os.environ.get("MCP_URL", "http://localhost:8080/mcp"),
-            request_timeout_seconds=float(
-                os.environ.get("MCP_TIMEOUT_SECONDS", "30")
-            ),
+            request_timeout_seconds=float(os.environ.get("MCP_TIMEOUT_SECONDS", "30")),
             client_name=os.environ.get("MCP_CLIENT_NAME", "k8s-graph-agent"),
             client_version=os.environ.get("MCP_CLIENT_VERSION", "0.1.0"),
             mcp_auth_token=os.environ.get("MCP_AUTH_TOKEN"),
@@ -55,7 +53,9 @@ class AdkConfig:
         if provider in {"openai", "openai-compatible"}:
             api_key = os.environ.get("OPENAI_API_KEY")
         elif provider in {"google", "gemini"}:
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get(
+                "GOOGLE_API_KEY"
+            )
 
         return cls(
             model=model,

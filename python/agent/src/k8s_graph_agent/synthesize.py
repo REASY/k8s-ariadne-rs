@@ -7,8 +7,7 @@ from .models import JsonValue
 
 
 class ResponseSynthesizer(Protocol):
-    def synthesize(self, question: str, cypher: str, result: JsonValue) -> str:
-        ...
+    def synthesize(self, question: str, cypher: str, result: JsonValue) -> str: ...
 
 
 class SimpleResponseSynthesizer:

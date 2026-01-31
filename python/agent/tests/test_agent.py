@@ -30,7 +30,7 @@ class FakeMcp(McpClient):
 
     def call_tool(self, name, arguments=None):
         self.calls.append((name, arguments))
-        return {"content": [{"type": "text", "text": "[{\"pod\": \"a\"}]"}]}
+        return {"content": [{"type": "text", "text": '[{"pod": "a"}]'}]}
 
 
 class TestGraphAgent(unittest.TestCase):

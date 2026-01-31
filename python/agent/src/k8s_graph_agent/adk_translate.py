@@ -38,7 +38,9 @@ class AdkCypherTranslator:
         self._logger = logging.getLogger(__name__)
 
     def translate(self, question: str) -> CypherQuery:
-        self._logger.info("translate question (use_mcp_prompt=%s)", self.config.use_mcp_prompt)
+        self._logger.info(
+            "translate question (use_mcp_prompt=%s)", self.config.use_mcp_prompt
+        )
         prompt_text = question
         if self.config.use_mcp_prompt:
             prompt = self.mcp.get_prompt("analyze_question", {"question": question})
@@ -60,17 +62,24 @@ class AdkCypherTranslator:
 
         max_attempts = 2
         current_prompt = prompt_text
+        total_usage = TokenUsage()
+        last_error: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             self._logger.info("cypher translation attempt %d/%d", attempt, max_attempts)
-            content = types.Content(role="user", parts=[types.Part(text=current_prompt)])
-            response_text = _run_agent(runner, self.config, content)
+            content = types.Content(
+                role="user", parts=[types.Part(text=current_prompt)]
+            )
+            response_text, usage = _run_agent(runner, self.config, content)
+            total_usage.add(usage)
             try:
                 translation = CypherTranslation.model_validate_json(response_text)
             except ValidationError as exc:
-                raise ValueError(f"ADK output did not match schema: {exc}") from exc
+                last_error = ValueError(f"ADK output did not match schema: {exc}")
+                break
             cypher = translation.cypher.strip()
             if not cypher:
-                raise ValueError("ADK returned empty Cypher query")
+                last_error = ValueError("ADK returned empty Cypher query")
+                break
             self._logger.debug("cypher candidate:\n%s", cypher)
             try:
                 validator.validate(cypher)
@@ -80,10 +89,15 @@ class AdkCypherTranslator:
                 if attempt < max_attempts:
                     current_prompt = _build_retry_prompt(prompt_text, cypher, str(exc))
                     continue
-                raise ValueError(str(exc)) from exc
+                last_error = ValueError(str(exc))
+                break
             self._logger.info("cypher validation succeeded")
+            _log_total_usage(self._logger, total_usage)
             return CypherQuery(text=cypher)
 
+        _log_total_usage(self._logger, total_usage)
+        if last_error is not None:
+            raise last_error
         raise ValueError("Cypher translation failed after retries")
 
     def _get_runner(self) -> tuple[object, object]:
@@ -157,7 +171,9 @@ def _format_model(model: str, provider: str | None) -> str:
     return normalized
 
 
-def _run_agent(runner: object, config: AdkConfig, content: object) -> str:
+def _run_agent(
+    runner: object, config: AdkConfig, content: object
+) -> tuple[str, "TokenUsage"]:
     response_text = ""
     usage = TokenUsage()
     for event in runner.run(
@@ -175,7 +191,7 @@ def _run_agent(runner: object, config: AdkConfig, content: object) -> str:
     if not response_text:
         raise ValueError("ADK returned no response content")
     usage.log_if_present()
-    return response_text
+    return response_text, usage
 
 
 def _build_retry_prompt(base_prompt: str, cypher: str, error: str) -> str:
@@ -239,6 +255,18 @@ class TokenUsage:
             _format_usage(self.total_tokens),
         )
 
+    def add(self, other: "TokenUsage") -> None:
+        self.prompt_tokens = _sum_usage(self.prompt_tokens, other.prompt_tokens)
+        self.output_tokens = _sum_usage(self.output_tokens, other.output_tokens)
+        self.total_tokens = _sum_usage(self.total_tokens, other.total_tokens)
+
+    def has_any(self) -> bool:
+        return (
+            self.prompt_tokens is not None
+            or self.output_tokens is not None
+            or self.total_tokens is not None
+        )
+
 
 def _read_usage_value(usage: object, keys: list[str]) -> int | None:
     for key in keys:
@@ -258,6 +286,25 @@ def _coalesce_usage(existing: int | None, incoming: int | None) -> int | None:
     if existing is None:
         return incoming
     return max(existing, incoming)
+
+
+def _sum_usage(existing: int | None, incoming: int | None) -> int | None:
+    if incoming is None:
+        return existing
+    if existing is None:
+        return incoming
+    return existing + incoming
+
+
+def _log_total_usage(logger: logging.Logger, usage: TokenUsage) -> None:
+    if not usage.has_any():
+        return
+    logger.info(
+        "adk tokens (all attempts): prompt=%s output=%s total=%s",
+        _format_usage(usage.prompt_tokens),
+        _format_usage(usage.output_tokens),
+        _format_usage(usage.total_tokens),
+    )
 
 
 def _format_usage(value: int | None) -> str:
