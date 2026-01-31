@@ -86,3 +86,24 @@ use the code-based translator (`k8s-graph-agent --use-adk`).
 ```bash
 python -m unittest discover -s python/agent/tests
 ```
+
+## Evaluation harness
+
+Run NL → Cypher evaluation against a dataset (YAML or JSON):
+```bash
+MCP_URL=http://localhost:8080/mcp \
+LLM_MODEL=openai/gpt-5.2 \
+  k8s-graph-eval --dataset ./eval/questions.yaml --mode retry --runs 3 --output ./eval/results.jsonl
+```
+
+Dataset entry example:
+```yaml
+- id: q001
+  question: "What are the pods backing DNS name litmus.qa.agoda.is?"
+  deterministic: true
+  expected:
+    columns: [namespace, pod_name]
+    rows:
+      - ["litmus", "chaos-litmus-frontend-..."]
+  tags: [dns, ingress, endpointslice, pod]
+```

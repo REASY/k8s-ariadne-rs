@@ -1244,6 +1244,7 @@ dependencies = [
     { name = "httpx" },
     { name = "litellm" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1254,6 +1255,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "litellm", specifier = ">=1.45.0" },
     { name = "pydantic", specifier = ">=2.8.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [[package]]

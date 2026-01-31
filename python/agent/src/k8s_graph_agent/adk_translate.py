@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import asyncio
 import logging
 import os
+import uuid
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -27,6 +28,23 @@ class CypherTranslation(BaseModel):
     )
 
 
+@dataclass(frozen=True)
+class TranslationAttempt:
+    attempt: int
+    cypher: str | None
+    valid: bool
+    error: str | None
+    usage: "TokenUsage"
+
+
+@dataclass(frozen=True)
+class TranslationOutcome:
+    cypher: str | None
+    attempts: list[TranslationAttempt]
+    total_usage: "TokenUsage"
+    error: str | None
+
+
 @dataclass
 class AdkCypherTranslator:
     mcp: McpClient
@@ -35,9 +53,18 @@ class AdkCypherTranslator:
     def __post_init__(self) -> None:
         self._runner = None
         self._validator = None
+        self._session_service = None
         self._logger = logging.getLogger(__name__)
 
     def translate(self, question: str) -> CypherQuery:
+        outcome = self.translate_with_attempts(question, max_attempts=2)
+        if outcome.cypher is None:
+            raise ValueError(outcome.error or "Cypher translation failed after retries")
+        return CypherQuery(text=outcome.cypher)
+
+    def translate_with_attempts(
+        self, question: str, max_attempts: int = 2
+    ) -> TranslationOutcome:
         self._logger.info(
             "translate question (use_mcp_prompt=%s)", self.config.use_mcp_prompt
         )
@@ -60,45 +87,106 @@ class AdkCypherTranslator:
             validator = CypherSchemaValidator(schema)
             self._validator = validator
 
-        max_attempts = 2
         current_prompt = prompt_text
         total_usage = TokenUsage()
-        last_error: Exception | None = None
+        attempts: list[TranslationAttempt] = []
+        last_error: str | None = None
+        base_session_id = f"{self.config.session_id}-{uuid.uuid4().hex}"
         for attempt in range(1, max_attempts + 1):
             self._logger.info("cypher translation attempt %d/%d", attempt, max_attempts)
+            session_id = f"{base_session_id}-a{attempt}"
+            self._ensure_session(session_id)
             content = types.Content(
                 role="user", parts=[types.Part(text=current_prompt)]
             )
-            response_text, usage = _run_agent(runner, self.config, content)
-            total_usage.add(usage)
+            try:
+                response_text, usage = _run_agent(
+                    runner, self.config, content, session_id
+                )
+                total_usage.add(usage)
+            except Exception as exc:
+                error = str(exc)
+                last_error = error
+                self._logger.warning("cypher generation failed: %s", error)
+                attempts.append(
+                    TranslationAttempt(
+                        attempt=attempt,
+                        cypher=None,
+                        valid=False,
+                        error=error,
+                        usage=TokenUsage(),
+                    )
+                )
+                if attempt < max_attempts:
+                    if (
+                        _is_context_length_error(exc)
+                        and self.config.use_mcp_prompt
+                        and current_prompt != question
+                    ):
+                        self._logger.warning(
+                            "context length exceeded; retrying with raw question"
+                        )
+                        current_prompt = question
+                        continue
+                break
+            cypher: str | None = None
             try:
                 translation = CypherTranslation.model_validate_json(response_text)
-            except ValidationError as exc:
-                last_error = ValueError(f"ADK output did not match schema: {exc}")
-                break
-            cypher = translation.cypher.strip()
-            if not cypher:
-                last_error = ValueError("ADK returned empty Cypher query")
-                break
-            self._logger.debug("cypher candidate:\n%s", cypher)
-            try:
+                cypher = translation.cypher.strip()
+                if not cypher:
+                    raise ValueError("ADK returned empty Cypher query")
+                self._logger.debug("cypher candidate:\n%s", cypher)
                 validator.validate(cypher)
-            except CypherValidationError as exc:
-                self._logger.warning("cypher validation failed: %s", exc)
-                self._logger.warning("invalid cypher:\n%s", cypher)
+                self._logger.info("cypher validation succeeded")
+                attempts.append(
+                    TranslationAttempt(
+                        attempt=attempt,
+                        cypher=cypher,
+                        valid=True,
+                        error=None,
+                        usage=usage,
+                    )
+                )
+                _log_total_usage(self._logger, total_usage)
+                return TranslationOutcome(
+                    cypher=cypher,
+                    attempts=attempts,
+                    total_usage=total_usage,
+                    error=None,
+                )
+            except (ValidationError, CypherValidationError, ValueError) as exc:
+                error = (
+                    f"ADK output did not match schema: {exc}"
+                    if isinstance(exc, ValidationError)
+                    else str(exc)
+                )
+                last_error = error
+                self._logger.warning("cypher validation failed: %s", error)
+                if cypher:
+                    self._logger.warning("invalid cypher:\n%s", cypher)
+                attempts.append(
+                    TranslationAttempt(
+                        attempt=attempt,
+                        cypher=cypher,
+                        valid=False,
+                        error=error,
+                        usage=usage,
+                    )
+                )
                 if attempt < max_attempts:
-                    current_prompt = _build_retry_prompt(prompt_text, cypher, str(exc))
+                    current_prompt = _build_retry_prompt(
+                        prompt_text, cypher or "", error
+                    )
                     continue
-                last_error = ValueError(str(exc))
                 break
-            self._logger.info("cypher validation succeeded")
-            _log_total_usage(self._logger, total_usage)
-            return CypherQuery(text=cypher)
 
         _log_total_usage(self._logger, total_usage)
-        if last_error is not None:
-            raise last_error
-        raise ValueError("Cypher translation failed after retries")
+        return TranslationOutcome(
+            cypher=None,
+            attempts=attempts,
+            total_usage=total_usage,
+            error=last_error or "Cypher translation failed after retries",
+        )
 
     def _get_runner(self) -> tuple[object, object]:
         if self._runner is not None:
@@ -144,13 +232,7 @@ class AdkCypherTranslator:
             ),
         )
         session_service = InMemorySessionService()
-        _run_async(
-            session_service.create_session(
-                app_name=self.config.app_name,
-                user_id=self.config.user_id,
-                session_id=self.config.session_id,
-            )
-        )
+        self._session_service = session_service
         self._runner = (
             Runner(
                 agent=agent,
@@ -160,6 +242,17 @@ class AdkCypherTranslator:
             types,
         )
         return self._runner
+
+    def _ensure_session(self, session_id: str) -> None:
+        if self._session_service is None:
+            return
+        _run_async(
+            self._session_service.create_session(
+                app_name=self.config.app_name,
+                user_id=self.config.user_id,
+                session_id=session_id,
+            )
+        )
 
 
 def _format_model(model: str, provider: str | None) -> str:
@@ -172,13 +265,13 @@ def _format_model(model: str, provider: str | None) -> str:
 
 
 def _run_agent(
-    runner: object, config: AdkConfig, content: object
+    runner: object, config: AdkConfig, content: object, session_id: str
 ) -> tuple[str, "TokenUsage"]:
     response_text = ""
     usage = TokenUsage()
     for event in runner.run(
         user_id=config.user_id,
-        session_id=config.session_id,
+        session_id=session_id,
         new_message=content,
     ):
         usage.update_from_event(event)
@@ -309,3 +402,16 @@ def _log_total_usage(logger: logging.Logger, usage: TokenUsage) -> None:
 
 def _format_usage(value: int | None) -> str:
     return str(value) if value is not None else "-"
+
+
+def _is_context_length_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        needle in message
+        for needle in (
+            "context_length_exceeded",
+            "context length",
+            "input tokens exceed",
+            "maximum context",
+        )
+    )

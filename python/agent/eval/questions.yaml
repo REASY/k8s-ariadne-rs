@@ -1,0 +1,95 @@
+easy:
+  - id: e01
+    question: "List all namespaces in the cluster."
+    tags: [namespace, list]
+  - id: e02
+    question: "How many namespaces are there in the cluster?"
+    tags: [namespace, count]
+  - id: e03
+    question: "List all pods in namespace litmus."
+    tags: [pod, namespace, list]
+  - id: e04
+    question: "List all services in namespace litmus."
+    tags: [service, namespace, list]
+  - id: e05
+    question: "List all ingresses in namespace litmus."
+    tags: [ingress, namespace, list]
+  - id: e06
+    question: "List all endpoint slices in namespace litmus."
+    tags: [endpointslice, namespace, list]
+  - id: e07
+    question: "List all nodes in the cluster."
+    tags: [node, list]
+  - id: e08
+    question: "List all storage classes in the cluster."
+    tags: [storageclass, list]
+  - id: e09
+    question: "List all persistent volumes in the cluster."
+    tags: [pv, list]
+  - id: e10
+    question: "List all service accounts in namespace litmus."
+    tags: [serviceaccount, namespace, list]
+
+medium:
+  - id: m01
+    question: "For namespace litmus, list deployments and the replica sets they manage."
+    tags: [deployment, replicaset, namespace, join]
+  - id: m02
+    question: "For namespace litmus, list replica sets and the pods they manage."
+    tags: [replicaset, pod, namespace, join]
+  - id: m03
+    question: "For namespace litmus, list daemon sets and the pods they manage."
+    tags: [daemonset, pod, namespace, join]
+  - id: m04
+    question: "For namespace litmus, list stateful sets and the pods they manage."
+    tags: [statefulset, pod, namespace, join]
+  - id: m05
+    question: "For namespace litmus, list jobs and the pods they manage."
+    tags: [job, pod, namespace, join]
+  - id: m06
+    question: "For namespace litmus, list services and the endpoint slices they manage."
+    tags: [service, endpointslice, namespace, join]
+  - id: m07
+    question: "For namespace litmus, list services and the pods backing each service."
+    tags: [service, endpointslice, endpoint, pod, namespace, join]
+  - id: m08
+    question: "List all pods running on node <node>."
+    tags: [pod, node, join]
+  - id: m09
+    question: "For namespace litmus, list PVCs and the PVs they are bound to."
+    tags: [pvc, pv, namespace, join]
+  - id: m10
+    question: "List events concerning pods in namespace litmus with event reason and pod name."
+    tags: [event, pod, namespace, join]
+
+hard:
+  - id: h01
+    question: "For each namespace, count pods and return the top 5 namespaces by pod count."
+    tags: [namespace, pod, aggregation]
+  - id: h02
+    question: "Which nodes run more than 50 pods?"
+    tags: [node, pod, aggregation]
+  - id: h03
+    question: "For each namespace, compute total requested and limit memory (MiB) across all pod containers."
+    tags: [pod, container, resources, unwind, aggregation]
+  - id: h04
+    question: "Find services in namespace litmus that have no endpoint slices."
+    tags: [service, endpointslice, namespace, negative]
+  - id: h05
+    question: "Find ingresses in namespace litmus whose backend services have no endpoints."
+    tags: [ingress, service, endpointslice, endpoint, namespace, negative]
+  - id: h06
+    question: "For host <host>, list backend services and pods backing that host."
+    tags: [host, ingress, service, pod, join]
+  - id: h07
+    question: "For each service, count distinct backing pod IPs."
+    tags: [service, pod, aggregation]
+  - id: h08
+    question: "List deployments where ready replicas are fewer than desired replicas."
+    tags: [deployment, status, filter]
+  - id: h09
+    question: "List pods in namespace litmus that are not managed by any Deployment, StatefulSet, DaemonSet, Job, or ReplicaSet."
+    tags: [pod, namespace, negative]
+  - id: h10
+    question: "List PVCs in namespace pyroscope whose bound PV uses a storage class with provisioner <provisioner>."
+    tags: [pvc, pv, storageclass, provisioner, namespace, join]

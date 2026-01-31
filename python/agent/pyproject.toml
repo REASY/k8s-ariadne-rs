@@ -14,11 +14,13 @@ dependencies = [
   "google-adk>=1.23.0",
   "httpx>=0.27.0",
   "litellm>=1.45.0",
+  "pyyaml>=6.0.2",
   "pydantic>=2.8.0",
 ]
 
 [project.scripts]
 k8s-graph-agent = "k8s_graph_agent.cli:main"
+k8s-graph-eval = "k8s_graph_agent.eval.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8s_graph_agent"]
