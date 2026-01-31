@@ -26,7 +26,7 @@ cargo build
 ## Run web app
 
 ```bash
-KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
+CLUSTER=tools.hk-tools-2t KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
 
    Compiling ariadne-app v0.1.0 (/Users/abalaian/github/REASY/k8s-graph-rs/ariadne-app)
    Compiling ariadne-core v0.1.0 (/Users/abalaian/github/REASY/k8s-graph-rs/ariadne-core)
@@ -36,6 +36,42 @@ KUBE_NAMESPACE=pyroscope KUBE_CONTEXT=tools.hk-tools-2t cargo run --release
 2025-07-04T07:00:09.905196Z  INFO main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:95: Created fetch_state_handle
 2025-07-04T07:00:09.905307Z  INFO tokio-runtime-worker ThreadId(15) ariadne_app: ariadne-app/src/main.rs:52: Starting fetch_state
 2025-07-04T07:00:10.105757Z  INFO                 main ThreadId(01) ariadne_app: ariadne-app/src/main.rs:127: Server listening for HTTP on http://127.0.0.1:18080
+```
+
+## Snapshots (export/import)
+
+Export a snapshot from a live cluster without starting the server:
+```bash
+CLUSTER=tools.hk-tools-2t KUBE_CONTEXT=tools.hk-tools-2t \
+  cargo run --release -p ariadne-app -- snapshot export --output-dir ./snapshot
+```
+
+Load a snapshot instead of talking to K8s:
+```bash
+CLUSTER=tools.hk-tools-2t KUBE_SNAPSHOT_DIR=./snapshot cargo run --release -p ariadne-app
+```
+
+Snapshot directory format (JSON):
+```
+cluster.json
+namespaces.json
+pods.json
+deployments.json
+statefulsets.json
+replicasets.json
+daemonsets.json
+jobs.json
+ingresses.json
+services.json
+endpointslices.json
+networkpolicies.json
+configmaps.json
+storageclasses.json
+persistentvolumes.json
+persistentvolumeclaims.json
+nodes.json
+serviceaccounts.json
+events.json
 ```
 
 ## Open the browser at http://127.0.0.1:18080/index.html

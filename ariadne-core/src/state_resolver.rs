@@ -3,6 +3,15 @@ use crate::prelude::*;
 use crate::create_generic_object;
 use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::memgraph_async::MemgraphAsync;
+use crate::snapshot::{
+    write_json_to_dir, write_list_to_dir, SNAPSHOT_CLUSTER_FILE, SNAPSHOT_CONFIG_MAPS_FILE,
+    SNAPSHOT_DAEMON_SETS_FILE, SNAPSHOT_DEPLOYMENTS_FILE, SNAPSHOT_ENDPOINT_SLICES_FILE,
+    SNAPSHOT_EVENTS_FILE, SNAPSHOT_INGRESSES_FILE, SNAPSHOT_JOBS_FILE, SNAPSHOT_NAMESPACES_FILE,
+    SNAPSHOT_NETWORK_POLICIES_FILE, SNAPSHOT_NODES_FILE, SNAPSHOT_PERSISTENT_VOLUMES_FILE,
+    SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE, SNAPSHOT_PODS_FILE, SNAPSHOT_REPLICA_SETS_FILE,
+    SNAPSHOT_SERVICES_FILE, SNAPSHOT_SERVICE_ACCOUNTS_FILE, SNAPSHOT_STATEFUL_SETS_FILE,
+    SNAPSHOT_STORAGE_CLASSES_FILE,
+};
 use crate::state::ClusterState;
 use crate::types::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -23,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -125,6 +135,13 @@ impl ClusterStateResolver {
         maybe_ns: Option<&str>,
     ) -> Result<Self> {
         let kube_client = CachedKubeClient::new(options, maybe_ns).await?;
+        Self::new_with_kube_client(cluster_name, Box::new(kube_client)).await
+    }
+
+    pub async fn new_with_kube_client(
+        cluster_name: String,
+        kube_client: Box<dyn KubeClient>,
+    ) -> Result<Self> {
         let cluster_url = kube_client.get_cluster_url().await?;
         let info = kube_client.apiserver_version().await?;
         let cluster: Cluster = Cluster::new(
@@ -137,7 +154,7 @@ impl ClusterStateResolver {
             cluster_url.as_ref(),
             info,
         );
-        let kube_client: Arc<Box<dyn KubeClient>> = Arc::new(Box::new(kube_client));
+        let kube_client: Arc<Box<dyn KubeClient>> = Arc::new(kube_client);
         let augmented = Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
 
         let last_state = Arc::new(Mutex::new(Self::create_state(&augmented)));
@@ -385,6 +402,63 @@ impl ClusterStateResolver {
 
     pub async fn resolve(&self) -> Result<Arc<Mutex<ClusterState>>> {
         Ok(self.last_state.clone())
+    }
+
+    pub fn export_observed_snapshot_dir(&self, dir: impl AsRef<Path>) -> Result<()> {
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir)?;
+        let snapshot = {
+            let last_snapshot_guard = self
+                .last_snapshot
+                .lock()
+                .expect("Failed to lock last_snapshot for export");
+            last_snapshot_guard.observed.clone()
+        };
+
+        write_json_to_dir(dir, SNAPSHOT_CLUSTER_FILE, &snapshot.cluster)?;
+        write_list_to_dir(dir, SNAPSHOT_NAMESPACES_FILE, &snapshot.namespaces)?;
+        write_list_to_dir(dir, SNAPSHOT_PODS_FILE, &snapshot.pods)?;
+        write_list_to_dir(dir, SNAPSHOT_DEPLOYMENTS_FILE, &snapshot.deployments)?;
+        write_list_to_dir(dir, SNAPSHOT_STATEFUL_SETS_FILE, &snapshot.stateful_sets)?;
+        write_list_to_dir(dir, SNAPSHOT_REPLICA_SETS_FILE, &snapshot.replica_sets)?;
+        write_list_to_dir(dir, SNAPSHOT_DAEMON_SETS_FILE, &snapshot.daemon_sets)?;
+        write_list_to_dir(dir, SNAPSHOT_JOBS_FILE, &snapshot.jobs)?;
+        write_list_to_dir(dir, SNAPSHOT_INGRESSES_FILE, &snapshot.ingresses)?;
+        write_list_to_dir(dir, SNAPSHOT_SERVICES_FILE, &snapshot.services)?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_ENDPOINT_SLICES_FILE,
+            &snapshot.endpoint_slices,
+        )?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_NETWORK_POLICIES_FILE,
+            &snapshot.network_policies,
+        )?;
+        write_list_to_dir(dir, SNAPSHOT_CONFIG_MAPS_FILE, &snapshot.config_maps)?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_STORAGE_CLASSES_FILE,
+            &snapshot.storage_classes,
+        )?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_PERSISTENT_VOLUMES_FILE,
+            &snapshot.persistent_volumes,
+        )?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE,
+            &snapshot.persistent_volume_claims,
+        )?;
+        write_list_to_dir(dir, SNAPSHOT_NODES_FILE, &snapshot.nodes)?;
+        write_list_to_dir(
+            dir,
+            SNAPSHOT_SERVICE_ACCOUNTS_FILE,
+            &snapshot.service_accounts,
+        )?;
+        write_list_to_dir(dir, SNAPSHOT_EVENTS_FILE, &snapshot.events)?;
+        Ok(())
     }
 
     fn create_state(augmented: &AugmentedClusterSnapshot) -> ClusterState {

@@ -20,7 +20,10 @@ pub const APP_VERSION: &str = shadow_rs::formatcp!(
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version = APP_VERSION, about, long_about = None)]
 struct AppArgs {
-    #[arg(long, help = "Print the full prompt template with schema and relationships")]
+    #[arg(
+        long,
+        help = "Print the full prompt template with schema and relationships"
+    )]
     full_prompt: bool,
 }
 

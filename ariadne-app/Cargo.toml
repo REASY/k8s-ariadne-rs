@@ -11,6 +11,7 @@ ariadne-core = { workspace = true }
 ariadne-tools = { workspace = true }
 axum = { workspace = true }
 axum-prometheus = { workspace = true }
+clap = { workspace = true, features = ["env"] }
 kube = { workspace = true }
 rmcp = { workspace = true }
 rsmgclient = { workspace = true }

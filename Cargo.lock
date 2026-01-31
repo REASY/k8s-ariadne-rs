@@ -112,6 +112,7 @@ dependencies = [
  "ariadne-tools",
  "axum",
  "axum-prometheus",
+ "clap",
  "kube",
  "rmcp",
  "rsmgclient",

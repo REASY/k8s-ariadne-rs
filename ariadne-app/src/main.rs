@@ -1,3 +1,4 @@
+use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
 use axum::http::header;
@@ -6,6 +7,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use axum_prometheus::PrometheusMetricLayer;
+use clap::{Parser, Subcommand};
 use kube::config::KubeConfigOptions;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
@@ -26,6 +28,36 @@ pub mod logger;
 mod routes;
 
 shadow!(build);
+
+#[derive(Parser)]
+#[command(name = "ariadne-app")]
+#[command(about = "Kubernetes graph service and snapshot tools", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+    #[arg(long, env = "CLUSTER")]
+    cluster: String,
+    #[arg(long, env = "KUBE_CONTEXT")]
+    kube_context: Option<String>,
+    #[arg(long, env = "KUBE_NAMESPACE")]
+    kube_namespace: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SnapshotCommand {
+    Export {
+        #[arg(long, env = "SNAPSHOT_EXPORT_DIR")]
+        output_dir: String,
+    },
+}
 
 pub const APP_VERSION: &str = shadow_rs::formatcp!(
     "{} ({} {}), build_env: {}, {}, {}",
@@ -82,16 +114,17 @@ async fn fetch_state(
 async fn main() -> errors::Result<()> {
     logger::setup("INFO");
 
-    let cluster_name: String =
-        std::env::var("CLUSTER").expect("Env variable `CLUSTER` is required but not present");
+    let cli = Cli::parse();
+
+    let cluster_name: String = cli.cluster;
     info!("CLUSTER: {}", cluster_name);
 
     let memgraph_uri: String = std::env::var("MEMGRAPH_URI")
         .ok()
         .unwrap_or_else(|| "bolt://localhost:7687".to_string());
 
-    let kube_context: Option<String> = std::env::var("KUBE_CONTEXT").ok();
-    let kube_namespace: Option<String> = std::env::var("KUBE_NAMESPACE").ok();
+    let kube_context: Option<String> = cli.kube_context;
+    let kube_namespace: Option<String> = cli.kube_namespace;
     info!("KUBE_CONTEXT: {kube_context:?}, KUBE_NAMESPACE: {kube_namespace:?}");
 
     let kube_opts = KubeConfigOptions {
@@ -100,13 +133,37 @@ async fn main() -> errors::Result<()> {
         user: None,
     };
 
+    if let Some(Command::Snapshot {
+        command: SnapshotCommand::Export { output_dir },
+    }) = cli.command
+    {
+        let resolver =
+            ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
+                .await?;
+        resolver.export_observed_snapshot_dir(output_dir)?;
+        info!("Snapshot export complete");
+        return Ok(());
+    }
+
     let memgraph: MemgraphAsync = MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?;
 
-    let resolver =
+    let snapshot_dir: Option<String> = std::env::var("KUBE_SNAPSHOT_DIR").ok();
+    let resolver = if let Some(snapshot_dir) = snapshot_dir {
+        info!("Loading snapshot from directory: {snapshot_dir}");
+        let snapshot_client = SnapshotKubeClient::from_dir(snapshot_dir)?;
+        ClusterStateResolver::new_with_kube_client(cluster_name.clone(), Box::new(snapshot_client))
+            .await?
+    } else {
         ClusterStateResolver::new(cluster_name.clone(), &kube_opts, kube_namespace.as_deref())
-            .await?;
+            .await?
+    };
     let cluster_state = resolver.resolve().await?;
     memgraph.create(cluster_state.clone()).await?;
+
+    if let Ok(export_dir) = std::env::var("SNAPSHOT_EXPORT_DIR") {
+        info!("Exporting snapshot to directory: {export_dir}");
+        resolver.export_observed_snapshot_dir(export_dir)?;
+    }
 
     let token: CancellationToken = CancellationToken::new();
 
