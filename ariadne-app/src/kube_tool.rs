@@ -13,12 +13,17 @@ use rmcp::{
 use serde_json::json;
 
 use ariadne_core::memgraph_async::MemgraphAsync;
+use ariadne_tools::{full_prompt, graph_relationships, schema_prompt};
 use rmcp::service::RequestContext;
+use std::sync::OnceLock;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteCypherQueryRequest {
     pub query: String,
 }
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema, Default)]
+pub struct GetGraphSchemaRequest {}
 
 #[derive(Debug, Clone)]
 pub struct KubeTool {
@@ -57,9 +62,31 @@ impl KubeTool {
         let content = Content::json(records)?;
         Ok(CallToolResult::success(vec![content]))
     }
+
+    #[tool(
+        name = "get_graph_schema",
+        description = "Return graph schema (node properties and relationships)"
+    )]
+    async fn get_graph_schema(
+        &self,
+        Parameters(_): Parameters<GetGraphSchemaRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let relationships = graph_relationships();
+        let payload = json!({
+            "node_properties_prompt": schema_prompt(),
+            "relationships": relationships,
+            "version": APP_VERSION,
+        });
+        let content = Content::json(payload)?;
+        Ok(CallToolResult::success(vec![content]))
+    }
 }
 
-const CURRENT_PROMPT: &str = include_str!("../../prompt.txt");
+static PROMPT_CACHE: OnceLock<String> = OnceLock::new();
+
+fn current_prompt() -> &'static str {
+    PROMPT_CACHE.get_or_init(full_prompt).as_str()
+}
 
 #[tool_handler]
 impl ServerHandler for KubeTool {
@@ -135,7 +162,7 @@ impl ServerHandler for KubeTool {
                         ErrorData::invalid_params("No message provided to analyze_question", None)
                     })?;
 
-                let prompt = format!("{CURRENT_PROMPT}\n\nUser question: '{question}'");
+                let prompt = format!("{}\n\nUser question: '{question}'", current_prompt());
                 Ok(GetPromptResult {
                     description: None,
                     messages: vec![PromptMessage {

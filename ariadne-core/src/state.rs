@@ -1,4 +1,5 @@
 use crate::diff::{Diff, ObservedClusterSnapshotDiff};
+use crate::graph_schema;
 use crate::id_gen::{GetNextIdResult, IdGen};
 use crate::state_resolver::ObservedClusterSnapshot;
 use crate::types::{Cluster, Edge, GenericObject, ResourceType};
@@ -122,6 +123,13 @@ impl ClusterState {
         target_type: ResourceType,
         edge: Edge,
     ) {
+        debug_assert!(
+            graph_schema::is_known_edge(&source_type, &edge, &target_type),
+            "Unknown edge: {:?}-[:{:?}]->{:?}",
+            source_type,
+            edge,
+            target_type
+        );
         let maybe_source = self.get_node(source);
         let maybe_target = self.get_node(target);
 

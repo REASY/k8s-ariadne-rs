@@ -109,6 +109,7 @@ name = "ariadne-app"
 version = "0.4.13"
 dependencies = [
  "ariadne-core",
+ "ariadne-tools",
  "axum",
  "axum-prometheus",
  "kube",

@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 
 [dependencies]
 ariadne-core = { workspace = true }
+ariadne-tools = { workspace = true }
 axum = { workspace = true }
 axum-prometheus = { workspace = true }
 kube = { workspace = true }

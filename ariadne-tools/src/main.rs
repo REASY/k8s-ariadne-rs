@@ -1,25 +1,9 @@
 use crate::logger::setup;
 use clap::Parser;
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
-use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
-};
-use k8s_openapi::api::discovery::v1::EndpointSlice;
-use k8s_openapi::api::events::v1::Event;
-use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-use k8s_openapi::api::storage::v1::StorageClass;
-use schemars::Schema;
 use shadow_rs::shadow;
 use tracing::info;
 pub mod logger;
-mod schema;
-
-use crate::schema::{get_schema, write_schema_prompt, SchemaInfo};
-use ariadne_core::types::{
-    Cluster, Container, Endpoint, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
-};
-use k8s_openapi::schemars::schema_for;
+use ariadne_tools::{full_prompt, schema_prompt};
 
 shadow!(build);
 
@@ -35,61 +19,22 @@ pub const APP_VERSION: &str = shadow_rs::formatcp!(
 
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version = APP_VERSION, about, long_about = None)]
-struct AppArgs {}
+struct AppArgs {
+    #[arg(long, help = "Print the full prompt template with schema and relationships")]
+    full_prompt: bool,
+}
 
 fn main() {
     setup("ariadne_tools", "debug");
     let args = AppArgs::parse();
     info!("Received args: {:?}", args);
 
-    let prompt = get_schema_as_prompt();
+    let prompt = if args.full_prompt {
+        full_prompt()
+    } else {
+        schema_prompt()
+    };
     println!("{prompt}");
-}
-
-fn get_schema_as_prompt() -> String {
-    let derived_schema = generate_schema();
-    let prompt = write_schema_prompt(derived_schema);
-    prompt
-}
-
-fn generate_schema() -> Vec<SchemaInfo> {
-    let logical_types: Vec<Schema> = vec![
-        schema_for!(Cluster),
-        schema_for!(Container),
-        schema_for!(Endpoint),
-        schema_for!(EndpointAddress),
-        schema_for!(Host),
-        schema_for!(IngressServiceBackend),
-        schema_for!(Logs),
-        schema_for!(Provisioner),
-    ];
-    let k8s_types: Vec<Schema> = vec![
-        schema_for!(ConfigMap),
-        schema_for!(DaemonSet),
-        schema_for!(Deployment),
-        schema_for!(EndpointSlice),
-        schema_for!(Event),
-        schema_for!(Ingress),
-        schema_for!(Job),
-        schema_for!(Namespace),
-        schema_for!(NetworkPolicy),
-        schema_for!(Node),
-        schema_for!(PersistentVolume),
-        schema_for!(Pod),
-        schema_for!(ReplicaSet),
-        schema_for!(Service),
-        schema_for!(ServiceAccount),
-        schema_for!(StatefulSet),
-        schema_for!(StorageClass),
-    ];
-    let mut all_types = logical_types;
-    all_types.extend(k8s_types);
-    let mut derived_schema: Vec<SchemaInfo> = Vec::new();
-    for schema in all_types {
-        derived_schema.push(get_schema(&schema));
-    }
-    derived_schema.sort_by_key(|x| x.root_type.name.clone());
-    derived_schema
 }
 
 #[cfg(test)]
@@ -98,7 +43,7 @@ mod tests {
 
     #[test]
     fn test_get_schema() {
-        let schema = get_schema_as_prompt();
+        let schema = schema_prompt();
         let expected = r#"Node properties:
   Cluster: 5 properties (cluster_url: STRING, info: #/$defs/io.k8s.apimachinery.pkg.version.Info, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta, name: STRING, retrieved_at: #/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time)
   ConfigMap: 6 properties (apiVersion: STRING, binaryData: MAP, data: MAP, immutable: BOOLEAN, kind: STRING, metadata: #/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta)

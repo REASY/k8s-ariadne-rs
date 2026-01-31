@@ -1,4 +1,5 @@
 pub mod errors;
+pub mod graph_schema;
 mod kube_access;
 
 pub mod prelude {
