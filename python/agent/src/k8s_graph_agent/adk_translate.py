@@ -8,6 +8,7 @@ import os
 from pydantic import BaseModel, Field, ValidationError
 
 from .config import AdkConfig
+from .cypher_validator import CypherSchemaValidator, CypherValidationError
 from .mcp_client import McpClient
 from .models import CypherQuery
 from .prompting import extract_prompt_text
@@ -32,6 +33,7 @@ class AdkCypherTranslator:
 
     def __post_init__(self) -> None:
         self._runner = None
+        self._validator = None
 
     def translate(self, question: str) -> CypherQuery:
         prompt_text = question
@@ -50,6 +52,14 @@ class AdkCypherTranslator:
         cypher = translation.cypher.strip()
         if not cypher:
             raise ValueError("ADK returned empty Cypher query")
+        validator = self._validator
+        if validator is None:
+            validator = CypherSchemaValidator.for_default_schema()
+            self._validator = validator
+        try:
+            validator.validate(cypher)
+        except CypherValidationError as exc:
+            raise ValueError(str(exc)) from exc
         return CypherQuery(text=cypher)
 
     def _get_runner(self) -> tuple[object, object]:
