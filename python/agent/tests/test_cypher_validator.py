@@ -61,6 +61,43 @@ class TestCypherSchemaValidator(unittest.TestCase):
         self.assertIn("Endpoint", message)
         self.assertIn("EndpointAddress", message)
 
+    def test_rejects_wrong_direction_from_log_example(self) -> None:
+        cypher = (
+            "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)\n"
+            "WHERE h.name = 'litmus.qa.agoda.is'\n"
+            "MATCH (i)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(s:Service)\n"
+            "MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)\n"
+            "MATCH (e)<-[:HasAddress]-(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\n"
+            "RETURN DISTINCT\n"
+            "  p['metadata']['namespace'] AS namespace,\n"
+            "  p['metadata']['name'] AS pod,\n"
+            "  p['status']['podIP'] AS pod_ip,\n"
+            "  s['metadata']['name'] AS service,\n"
+            "  i['metadata']['name'] AS ingress\n"
+            "ORDER BY namespace, pod"
+        )
+        with self.assertRaises(SchemaValidationError) as context:
+            self.validator.validate(cypher)
+        message = str(context.exception)
+        self.assertIn("HasAddress", message)
+        self.assertIn("Endpoint", message)
+        self.assertIn("EndpointAddress", message)
+
+    def test_accepts_valid_query_from_log_example(self) -> None:
+        cypher = (
+            "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)-[:DefinesBackend]->(b:IngressServiceBackend)"
+            "-[:TargetsService]->(s:Service)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)"
+            "-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\n"
+            "WHERE h.name = 'litmus.qa.agoda.is'\n"
+            "RETURN DISTINCT\n"
+            "  p['metadata']['namespace'] AS namespace,\n"
+            "  p['metadata']['name'] AS pod,\n"
+            "  p['status']['podIP'] AS podIP,\n"
+            "  p['status']['phase'] AS phase\n"
+            "ORDER BY namespace, pod;"
+        )
+        self.validator.validate(cypher)
+
     def test_rejects_unsupported_function(self) -> None:
         cypher = "MATCH (n:Pod) RETURN time() AS now"
         with self.assertRaises(CypherCompatibilityError) as context:

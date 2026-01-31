@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 from typing import Iterable
 
@@ -44,6 +45,17 @@ class _RelationshipUse:
     rel_text: str
     left_dir: str
     right_dir: str
+    left_var: str | None
+    right_var: str | None
+    left_labels: tuple[str, ...]
+    right_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _NodeUse:
+    text: str
+    var: str | None
+    labels: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -53,6 +65,7 @@ class SchemaViolation:
     right_labels: tuple[str, ...]
     direction: str
     snippet: str
+    rule_name: str
 
 
 class CypherValidationError(ValueError):
@@ -78,6 +91,7 @@ class CypherCompatibilityError(CypherValidationError):
 class CypherSchemaValidator:
     def __init__(self, schema: GraphSchema) -> None:
         self._schema = schema
+        self._logger = logging.getLogger(__name__)
 
     @classmethod
     def for_default_schema(cls) -> "CypherSchemaValidator":
@@ -93,15 +107,27 @@ class CypherSchemaValidator:
         if compatibility_issues:
             raise CypherCompatibilityError(compatibility_issues)
 
-        violations: list[SchemaViolation] = []
+        pattern_parts: list[tuple[str, str]] = []
         for rule_name, ctx in _iter_rule_contexts(ast.tree, ast.parser):
             if _is_pattern_context(rule_name):
-                for rel_use in _iter_relationships(ctx.getText()):
-                    rel_types = _extract_rel_types(rel_use.rel_text)
-                    if not rel_types:
-                        continue
-                    left_labels = tuple(_extract_labels(rel_use.left_node))
-                    right_labels = tuple(_extract_labels(rel_use.right_node))
+                pattern_parts.append((rule_name, ctx.getText()))
+
+        variable_labels = _collect_variable_labels(
+            [pattern_text for _, pattern_text in pattern_parts]
+        )
+
+        violations: list[SchemaViolation] = []
+        for rule_name, pattern_text in pattern_parts:
+            for rel_use in _iter_relationships(pattern_text):
+                rel_types = _extract_rel_types(rel_use.rel_text)
+                if not rel_types:
+                    continue
+                    left_labels = _resolve_labels(
+                        rel_use.left_labels, rel_use.left_var, variable_labels
+                    )
+                    right_labels = _resolve_labels(
+                        rel_use.right_labels, rel_use.right_var, variable_labels
+                    )
                     if not left_labels or not right_labels:
                         continue
                     direction = _direction_from_match(rel_use.left_dir, rel_use.right_dir)
@@ -116,6 +142,7 @@ class CypherSchemaValidator:
                             right_labels=right_labels,
                             direction=direction,
                             snippet=_format_snippet(rel_use),
+                            rule_name=rule_name,
                         )
                     )
         if violations:
@@ -335,12 +362,13 @@ def _strip_string_literals(text: str) -> str:
 def _iter_relationships(cypher: str) -> Iterable[_RelationshipUse]:
     text = _strip_string_literals(cypher)
     i = 0
-    last_node: str | None = None
+    last_node: _NodeUse | None = None
     pending: _RelationshipUse | None = None
     while i < len(text):
         char = text[i]
         if char == "(":
             node_text, end = _consume_group(text, i, "(", ")")
+            node = _parse_node(node_text)
             if pending is not None:
                 yield _RelationshipUse(
                     left_node=pending.left_node,
@@ -348,20 +376,28 @@ def _iter_relationships(cypher: str) -> Iterable[_RelationshipUse]:
                     rel_text=pending.rel_text,
                     left_dir=pending.left_dir,
                     right_dir=pending.right_dir,
+                    left_var=pending.left_var,
+                    right_var=node.var,
+                    left_labels=pending.left_labels,
+                    right_labels=node.labels,
                 )
                 pending = None
-            last_node = node_text
+            last_node = node
             i = end + 1
             continue
         if char == "[":
             rel_text, end = _consume_group(text, i, "[", "]")
             if last_node is not None:
                 pending = _RelationshipUse(
-                    left_node=last_node,
+                    left_node=last_node.text,
                     right_node="",
                     rel_text=rel_text,
                     left_dir=_read_left_dir(text, i),
                     right_dir=_read_right_dir(text, end),
+                    left_var=last_node.var,
+                    right_var=None,
+                    left_labels=last_node.labels,
+                    right_labels=(),
                 )
             i = end + 1
             continue
@@ -373,6 +409,56 @@ def _consume_group(text: str, start: int, open_char: str, close_char: str) -> tu
     while i < len(text) and text[i] != close_char:
         i += 1
     return text[start + 1 : i], i
+
+
+def _parse_node(node_text: str) -> _NodeUse:
+    trimmed = node_text.split("{", 1)[0].strip()
+    if not trimmed:
+        return _NodeUse(node_text, None, ())
+    parts = [part.strip() for part in trimmed.split(":")]
+    var_part = parts[0].strip()
+    if var_part:
+        var = var_part.strip("` ")
+        labels = parts[1:]
+    else:
+        var = None
+        labels = parts[1:]
+    cleaned = tuple(label.strip("` ") for label in labels if label.strip())
+    return _NodeUse(node_text, var, cleaned)
+
+
+def _iter_nodes(cypher: str) -> Iterable[_NodeUse]:
+    text = _strip_string_literals(cypher)
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "(":
+            node_text, end = _consume_group(text, i, "(", ")")
+            yield _parse_node(node_text)
+            i = end + 1
+            continue
+        i += 1
+
+
+def _collect_variable_labels(pattern_texts: Iterable[str]) -> dict[str, frozenset[str]]:
+    labels_by_var: dict[str, set[str]] = {}
+    for pattern_text in pattern_texts:
+        for node in _iter_nodes(pattern_text):
+            if node.var and node.labels:
+                labels_by_var.setdefault(node.var, set()).update(node.labels)
+    return {var: frozenset(labels) for var, labels in labels_by_var.items()}
+
+
+def _resolve_labels(
+    explicit: tuple[str, ...],
+    var: str | None,
+    variable_labels: dict[str, frozenset[str]],
+) -> tuple[str, ...]:
+    if explicit:
+        return explicit
+    if var and var in variable_labels:
+        return tuple(variable_labels[var])
+    return ()
 
 
 def _read_left_dir(text: str, rel_start: int) -> str:
@@ -407,14 +493,23 @@ def _format_snippet(rel_use: _RelationshipUse) -> str:
 def _format_violations(violations: list[SchemaViolation]) -> str:
     lines = ["Cypher schema validation failed:"]
     for violation in violations:
+        if violation.direction == "left_to_right":
+            arrow = "->"
+        elif violation.direction == "right_to_left":
+            arrow = "<-"
+        elif violation.direction == "both":
+            arrow = "<->"
+        else:
+            arrow = "-"
         lines.append(
-            "- %s %s %s via %s (%s)"
+            "- %s %s %s via %s (%s) [rule=%s]"
             % (
                 ",".join(violation.left_labels),
-                "->" if violation.direction == "left_to_right" else "<->",
+                arrow,
                 ",".join(violation.right_labels),
                 violation.rel_type,
                 violation.snippet,
+                violation.rule_name,
             )
         )
     return "\n".join(lines)

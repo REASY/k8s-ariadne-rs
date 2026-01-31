@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 from typing import Iterable
 
+from .mcp_client import McpClient, extract_json_content
+from .models import JsonObject
+
 
 _REL_LINE_PATTERN = re.compile(
     r"\(:(?P<src>[A-Za-z_][\w]*)\)\s*-\s*\[:(?P<rel>[A-Za-z_][\w]*)\]\s*->\s*\(:(?P<dst>[A-Za-z_][\w]*)\)"
@@ -39,6 +42,35 @@ class GraphSchema:
         if loaded is not None:
             return loaded
         return cls.from_edges(_fallback_edges())
+
+    @classmethod
+    def load_from_mcp(cls, mcp: McpClient) -> "GraphSchema" | None:
+        try:
+            result = mcp.call_tool("get_graph_schema", {})
+            payload = extract_json_content(result)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return cls.from_payload(payload)
+
+    @classmethod
+    def from_payload(cls, payload: JsonObject) -> "GraphSchema" | None:
+        relationships = payload.get("relationships")
+        if not isinstance(relationships, list):
+            return None
+        edges: list[tuple[str, str, str]] = []
+        for item in relationships:
+            if not isinstance(item, dict):
+                continue
+            src = _read_string(item, ("from", "src", "source"))
+            rel = _read_string(item, ("edge", "type", "relationship"))
+            dst = _read_string(item, ("to", "dst", "target"))
+            if src and rel and dst:
+                edges.append((src, rel, dst))
+        if not edges:
+            return None
+        return cls.from_edges(edges)
 
     @classmethod
     def _load_from_adk_config(cls, path: Path) -> "GraphSchema" | None:
@@ -76,3 +108,11 @@ def _fallback_edges() -> list[tuple[str, str, str]]:
         ("EndpointAddress", "IsAddressOf", "Pod"),
         ("EndpointAddress", "ListedIn", "EndpointSlice"),
     ]
+
+
+def _read_string(item: JsonObject, keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .config import AdkConfig
 from .cypher_validator import CypherSchemaValidator, CypherValidationError
+from .graph_schema import GraphSchema
 from .mcp_client import McpClient
 from .models import CypherQuery
 from .prompting import extract_prompt_text
@@ -34,33 +35,56 @@ class AdkCypherTranslator:
     def __post_init__(self) -> None:
         self._runner = None
         self._validator = None
+        self._logger = logging.getLogger(__name__)
 
     def translate(self, question: str) -> CypherQuery:
+        self._logger.info("translate question (use_mcp_prompt=%s)", self.config.use_mcp_prompt)
         prompt_text = question
         if self.config.use_mcp_prompt:
             prompt = self.mcp.get_prompt("analyze_question", {"question": question})
             extracted = extract_prompt_text(prompt)
             if extracted:
                 prompt_text = extracted
+                self._logger.debug("using MCP prompt template")
         runner, types = self._get_runner()
-        content = types.Content(role="user", parts=[types.Part(text=prompt_text)])
-        response_text = _run_agent(runner, self.config, content)
-        try:
-            translation = CypherTranslation.model_validate_json(response_text)
-        except ValidationError as exc:
-            raise ValueError(f"ADK output did not match schema: {exc}") from exc
-        cypher = translation.cypher.strip()
-        if not cypher:
-            raise ValueError("ADK returned empty Cypher query")
         validator = self._validator
         if validator is None:
-            validator = CypherSchemaValidator.for_default_schema()
+            schema = GraphSchema.load_from_mcp(self.mcp)
+            if schema is None:
+                self._logger.info("schema loaded from local/default config")
+                schema = GraphSchema.load_default()
+            else:
+                self._logger.info("schema loaded from MCP")
+            validator = CypherSchemaValidator(schema)
             self._validator = validator
-        try:
-            validator.validate(cypher)
-        except CypherValidationError as exc:
-            raise ValueError(str(exc)) from exc
-        return CypherQuery(text=cypher)
+
+        max_attempts = 2
+        current_prompt = prompt_text
+        for attempt in range(1, max_attempts + 1):
+            self._logger.info("cypher translation attempt %d/%d", attempt, max_attempts)
+            content = types.Content(role="user", parts=[types.Part(text=current_prompt)])
+            response_text = _run_agent(runner, self.config, content)
+            try:
+                translation = CypherTranslation.model_validate_json(response_text)
+            except ValidationError as exc:
+                raise ValueError(f"ADK output did not match schema: {exc}") from exc
+            cypher = translation.cypher.strip()
+            if not cypher:
+                raise ValueError("ADK returned empty Cypher query")
+            self._logger.debug("cypher candidate:\n%s", cypher)
+            try:
+                validator.validate(cypher)
+            except CypherValidationError as exc:
+                self._logger.warning("cypher validation failed: %s", exc)
+                self._logger.warning("invalid cypher:\n%s", cypher)
+                if attempt < max_attempts:
+                    current_prompt = _build_retry_prompt(prompt_text, cypher, str(exc))
+                    continue
+                raise ValueError(str(exc)) from exc
+            self._logger.info("cypher validation succeeded")
+            return CypherQuery(text=cypher)
+
+        raise ValueError("Cypher translation failed after retries")
 
     def _get_runner(self) -> tuple[object, object]:
         if self._runner is not None:
@@ -152,6 +176,18 @@ def _run_agent(runner: object, config: AdkConfig, content: object) -> str:
         raise ValueError("ADK returned no response content")
     usage.log_if_present()
     return response_text
+
+
+def _build_retry_prompt(base_prompt: str, cypher: str, error: str) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "The previous Cypher failed schema validation.\n"
+        f"Error: {error}\n"
+        "Previous Cypher:\n"
+        f"{cypher}\n"
+        "Fix the query to satisfy the schema and rules. "
+        "Return only JSON with keys: cypher, optional notes, optional confidence."
+    )
 
 
 def _run_async(coro: object) -> None:
