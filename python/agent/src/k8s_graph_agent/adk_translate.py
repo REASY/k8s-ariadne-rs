@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import asyncio
 import logging
 import os
+import re
 import uuid
 
 from pydantic import BaseModel, Field, ValidationError
@@ -131,7 +132,10 @@ class AdkCypherTranslator:
                 break
             cypher: str | None = None
             try:
-                translation = CypherTranslation.model_validate_json(response_text)
+                cleaned_response = _strip_code_fences(response_text)
+                if cleaned_response != response_text:
+                    self._logger.debug("stripped code fences from LLM response")
+                translation = CypherTranslation.model_validate_json(cleaned_response)
                 cypher = translation.cypher.strip()
                 if not cypher:
                     raise ValueError("ADK returned empty Cypher query")
@@ -162,6 +166,14 @@ class AdkCypherTranslator:
                 )
                 last_error = error
                 self._logger.warning("cypher validation failed: %s", error)
+                dump_path = _dump_response_text(
+                    response_text=response_text,
+                    reason="invalid_json",
+                    attempt=attempt,
+                    session_id=session_id,
+                )
+                if dump_path:
+                    self._logger.warning("raw LLM response dumped to %s", dump_path)
                 if cypher:
                     self._logger.warning("invalid cypher:\n%s", cypher)
                 attempts.append(
@@ -193,6 +205,7 @@ class AdkCypherTranslator:
             return self._runner
         try:
             from google.adk.agents import Agent
+            from google.adk.models import Gemini
             from google.adk.models.lite_llm import LiteLlm
             from google.adk.runners import Runner
             from google.adk.sessions import InMemorySessionService
@@ -204,14 +217,19 @@ class AdkCypherTranslator:
                 "Install with `uv pip install -e .` or `uv sync`"
             ) from exc
 
-        model_name = _format_model(self.config.model, self.config.provider)
-        if self.config.provider in {"google", "gemini"} and self.config.api_key:
+        use_native_gemini = _is_gemini_provider(self.config.provider, self.config.model)
+        if use_native_gemini:
+            model_name = _strip_provider_prefix(self.config.model)
+        else:
+            model_name = _format_model(self.config.model, self.config.provider)
+
+        if use_native_gemini and self.config.api_key:
             os.environ.setdefault("GOOGLE_API_KEY", self.config.api_key)
 
         lite_llm_kwargs: dict[str, object] = {}
-        if self.config.api_key:
+        if self.config.api_key and not use_native_gemini:
             lite_llm_kwargs["api_key"] = self.config.api_key
-        if self.config.base_url:
+        if self.config.base_url and not use_native_gemini:
             lite_llm_kwargs["api_base"] = self.config.base_url
 
         litellm.set_verbose = False
@@ -222,14 +240,19 @@ class AdkCypherTranslator:
             "Return only JSON with keys: cypher (string), optional notes (string), "
             "optional confidence (number between 0 and 1)."
         )
+        generate_config = _build_generate_content_config(self.config, types)
+        output_schema = CypherTranslation if use_native_gemini else None
+        if use_native_gemini:
+            model = Gemini(model=model_name)
+        else:
+            model = LiteLlm(model=model_name, **lite_llm_kwargs)
+
         agent = Agent(
             name="cypher_translator",
-            model=LiteLlm(model=model_name, **lite_llm_kwargs),
+            model=model,
             instruction=instruction,
-            generate_content_config=types.GenerateContentConfig(
-                temperature=self.config.temperature,
-                max_output_tokens=self.config.max_output_tokens,
-            ),
+            generate_content_config=generate_config,
+            output_schema=output_schema,
         )
         session_service = InMemorySessionService()
         self._session_service = session_service
@@ -264,24 +287,89 @@ def _format_model(model: str, provider: str | None) -> str:
     return normalized
 
 
+def _strip_provider_prefix(model: str) -> str:
+    normalized = model.strip()
+    if "/" in normalized:
+        return normalized.split("/", 1)[1]
+    return normalized
+
+
+def _is_gemini_provider(provider: str | None, model: str) -> bool:
+    if provider and provider.strip().lower() in {"gemini", "google"}:
+        return True
+    return model.strip().lower().startswith(("gemini", "google/gemini", "gemini/"))
+
+
+def _build_generate_content_config(config: AdkConfig, types: object) -> object:
+    kwargs: dict[str, object] = {
+        "temperature": config.temperature,
+        "max_output_tokens": config.max_output_tokens,
+    }
+    http_options = _build_http_options(config, types)
+    if http_options is not None:
+        kwargs["http_options"] = http_options
+
+    if _is_gemini_provider(config.provider, config.model):
+        kwargs["response_mime_type"] = "application/json"
+
+    return types.GenerateContentConfig(**kwargs)
+
+
+def _build_http_options(config: AdkConfig, types: object) -> object | None:
+    headers: dict[str, str] = {}
+    base_url = config.base_url
+    api_version: str | None = None
+    if _is_gemini_provider(config.provider, config.model) and base_url:
+        base_url, api_version = _normalize_gemini_base_url(base_url)
+    if config.base_url and config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    if not base_url and not headers:
+        return None
+    return types.HttpOptions(
+        base_url=base_url,
+        api_version=api_version,
+        headers=headers or None,
+    )
+
+
+def _normalize_gemini_base_url(base_url: str) -> tuple[str, str | None]:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1beta"):
+        return normalized[: -len("/v1beta")], "v1beta"
+    if normalized.endswith("/v1alpha"):
+        return normalized[: -len("/v1alpha")], "v1alpha"
+    return normalized, None
+
+
 def _run_agent(
     runner: object, config: AdkConfig, content: object, session_id: str
 ) -> tuple[str, "TokenUsage"]:
     response_text = ""
     usage = TokenUsage()
+    last_event_summary: str | None = None
     for event in runner.run(
         user_id=config.user_id,
         session_id=session_id,
         new_message=content,
     ):
         usage.update_from_event(event)
+        last_event_summary = _summarize_event(event)
         if getattr(event, "is_final_response")() and getattr(event, "content", None):
             parts = getattr(event.content, "parts", [])
             if parts:
-                text = getattr(parts[0], "text", None)
-                if isinstance(text, str):
-                    response_text = text
+                text_parts: list[str] = []
+                for part in parts:
+                    text = getattr(part, "text", None)
+                    thought = getattr(part, "thought", False)
+                    if isinstance(text, str) and not thought:
+                        text_parts.append(text)
+                if text_parts:
+                    response_text = "".join(text_parts)
     if not response_text:
+        if last_event_summary:
+            raise ValueError(
+                f"ADK returned no response content; last_event={last_event_summary}"
+            )
         raise ValueError("ADK returned no response content")
     usage.log_if_present()
     return response_text, usage
@@ -309,6 +397,80 @@ def _run_async(coro: object) -> None:
         "ADK session setup requires a sync context. "
         "Call AdkCypherTranslator from a non-async entrypoint."
     )
+
+
+_CODE_FENCE_RE = re.compile(r"^```(?:[A-Za-z0-9_-]+)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    match = _CODE_FENCE_RE.match(stripped)
+    if match:
+        return match.group(1).strip()
+    if "```" in stripped:
+        match = re.search(
+            r"```(?:[A-Za-z0-9_-]+)?\s*\n?(.*?)\n?```", stripped, re.DOTALL
+        )
+        if match:
+            return match.group(1).strip()
+    return text
+
+
+def _summarize_event(event: object) -> str:
+    pieces: list[str] = [f"type={type(event).__name__}"]
+    is_final = getattr(event, "is_final_response", None)
+    if callable(is_final):
+        try:
+            pieces.append(f"final={is_final()}")
+        except Exception:
+            pieces.append("final=<error>")
+    elif isinstance(is_final, bool):
+        pieces.append(f"final={is_final}")
+
+    finish_reason = getattr(event, "finish_reason", None)
+    if finish_reason is not None:
+        pieces.append(f"finish_reason={finish_reason}")
+
+    error = getattr(event, "error", None)
+    if error is not None:
+        pieces.append(f"error={error}")
+
+    error_message = getattr(event, "error_message", None)
+    if error_message is not None:
+        pieces.append(f"error_message={error_message}")
+
+    content = getattr(event, "content", None)
+    if content is not None:
+        parts = getattr(content, "parts", None)
+        if isinstance(parts, list):
+            pieces.append(f"parts={len(parts)}")
+            if parts:
+                text = getattr(parts[0], "text", None)
+                if isinstance(text, str):
+                    snippet = text.strip().replace("\n", " ")
+                    if len(snippet) > 160:
+                        snippet = snippet[:157] + "..."
+                    pieces.append(f"text_snippet={snippet!r}")
+
+    return " ".join(pieces)
+
+
+def _dump_response_text(
+    response_text: str, reason: str, attempt: int, session_id: str
+) -> str | None:
+    dump_dir = os.environ.get("ADK_RESPONSE_DUMP_DIR")
+    if not dump_dir:
+        return None
+    os.makedirs(dump_dir, exist_ok=True)
+    safe_reason = re.sub(r"[^a-zA-Z0-9_-]+", "_", reason).strip("_")
+    filename = f"adk_response_{safe_reason}_a{attempt}_{session_id}.txt"
+    path = os.path.join(dump_dir, filename)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(response_text)
+    except OSError:
+        return None
+    return path
 
 
 class TokenUsage:

@@ -26,6 +26,12 @@ class TestCypherSchemaValidator(unittest.TestCase):
             ("Endpoint", "HasAddress", "EndpointAddress"),
             ("EndpointAddress", "IsAddressOf", "Pod"),
             ("EndpointAddress", "ListedIn", "EndpointSlice"),
+            ("Pod", "BelongsTo", "Namespace"),
+            ("Deployment", "Manages", "ReplicaSet"),
+            ("ReplicaSet", "Manages", "Pod"),
+            ("StatefulSet", "Manages", "Pod"),
+            ("DaemonSet", "Manages", "Pod"),
+            ("Job", "Manages", "Pod"),
         ]
         schema = GraphSchema.from_edges(edges)
         self.validator = CypherSchemaValidator(schema)
@@ -41,6 +47,10 @@ class TestCypherSchemaValidator(unittest.TestCase):
             "-[:IsAddressOf]->(p:Pod) "
             "RETURN p"
         )
+        self.validator.validate(cypher)
+
+    def test_accepts_multiple_with_clauses(self) -> None:
+        cypher = "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress) WITH h, i WITH h RETURN h"
         self.validator.validate(cypher)
 
     def test_invalid_edge_direction_and_node(self) -> None:
@@ -99,6 +109,33 @@ class TestCypherSchemaValidator(unittest.TestCase):
             "  p['status']['podIP'] AS podIP,\n"
             "  p['status']['phase'] AS phase\n"
             "ORDER BY namespace, pod;"
+        )
+        self.validator.validate(cypher)
+
+    def test_accepts_exists_subquery_without_return(self) -> None:
+        cypher = (
+            "MATCH (s:Service)\n"
+            "WHERE NOT EXISTS { MATCH (s)-[:Manages]->(:EndpointSlice) }\n"
+            "RETURN s['metadata']['namespace'] AS namespace,\n"
+            "       s['metadata']['name'] AS service,\n"
+            "       s['spec']['type'] AS type\n"
+            "ORDER BY namespace, service"
+        )
+        self.validator.validate(cypher)
+
+    def test_accepts_multiple_exists_subqueries_without_return(self) -> None:
+        cypher = (
+            "MATCH (ns:Namespace)<-[:BelongsTo]-(p:Pod)\n"
+            "WHERE ns['metadata']['name'] = 'litmus'\n"
+            "  AND NOT EXISTS { MATCH (d:Deployment)-[:Manages]->(rs:ReplicaSet)-[:Manages]->(p) }\n"
+            "  AND NOT EXISTS { MATCH (ss:StatefulSet)-[:Manages]->(p) }\n"
+            "  AND NOT EXISTS { MATCH (ds:DaemonSet)-[:Manages]->(p) }\n"
+            "  AND NOT EXISTS { MATCH (j:Job)-[:Manages]->(p) }\n"
+            "  AND NOT EXISTS { MATCH (rs2:ReplicaSet)-[:Manages]->(p) }\n"
+            "RETURN p['metadata']['name'] AS pod,\n"
+            "       p['status']['phase'] AS phase,\n"
+            "       p['metadata']['uid'] AS uid\n"
+            "ORDER BY pod"
         )
         self.validator.validate(cypher)
 

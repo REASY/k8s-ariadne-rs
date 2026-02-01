@@ -7,7 +7,7 @@ from typing import Iterable
 
 from antlr4 import ParserRuleContext
 
-from .cypher_ast import CypherParseError, parse_cypher
+from .cypher_ast import CypherAst, CypherParseError, parse_cypher
 from .graph_schema import GraphSchema
 
 
@@ -99,21 +99,37 @@ class CypherSchemaValidator:
         return cls(GraphSchema.load_default())
 
     def validate(self, cypher: str) -> None:
+        used_fallback = False
+        asts: list[CypherAst] = []
+        normalized = _normalize_exists_subqueries(cypher)
         try:
-            ast = parse_cypher(cypher)
+            asts = [parse_cypher(normalized)]
         except CypherParseError as exc:
-            raise CypherValidationError(str(exc)) from exc
+            asts = _parse_with_fallback(normalized)
+            if not asts:
+                raise CypherValidationError(str(exc)) from exc
+            used_fallback = True
+            self._logger.warning(
+                "Cypher parse failed; using fallback segmentation for schema validation"
+            )
 
         compatibility_issues = _find_compatibility_issues(
-            ast.text, ast.tree, ast.parser
+            cypher,
+            asts[0].tree if not used_fallback else None,
+            asts[0].parser if not used_fallback else None,
         )
+        if used_fallback and compatibility_issues:
+            self._logger.warning(
+                "Compatibility checks are partial due to fallback parsing"
+            )
         if compatibility_issues:
             raise CypherCompatibilityError(compatibility_issues)
 
         pattern_parts: list[tuple[str, str]] = []
-        for rule_name, ctx, rule_path in _iter_rule_contexts(ast.tree, ast.parser):
-            if _is_pattern_context(rule_name):
-                pattern_parts.append(("/".join(rule_path), ctx.getText()))
+        for ast in asts:
+            for rule_name, ctx, rule_path in _iter_rule_contexts(ast.tree, ast.parser):
+                if _is_pattern_context(rule_name):
+                    pattern_parts.append(("/".join(rule_path), ctx.getText()))
 
         variable_labels = _collect_variable_labels(
             [pattern_text for _, pattern_text in pattern_parts]
@@ -153,7 +169,9 @@ class CypherSchemaValidator:
             raise SchemaValidationError(violations)
 
 
-def _find_compatibility_issues(text: str, tree: object, parser: object) -> list[str]:
+def _find_compatibility_issues(
+    text: str, tree: object | None, parser: object | None
+) -> list[str]:
     stripped = _strip_string_literals(text)
     issues: list[str] = []
 
@@ -185,6 +203,9 @@ def _find_compatibility_issues(text: str, tree: object, parser: object) -> list[
         issues.append(
             "CASE WHEN with multiple values (comma-separated) is not supported"
         )
+
+    if tree is None or parser is None:
+        return issues
 
     for rule_name, ctx, _ in _iter_rule_contexts(tree, parser):
         if _is_function_context(rule_name):
@@ -261,6 +282,261 @@ def _split_function_invocation(text: str) -> tuple[str, str]:
 
 def _looks_like_pattern_expression(text: str) -> bool:
     return any(token in text for token in ("-[:", "<-[", "]-", "->", "<-", ")-", "-("))
+
+
+_CLAUSE_START_RE = re.compile(
+    r"\b(OPTIONAL\s+MATCH|MATCH|UNWIND|CALL|CREATE|MERGE|SET|DELETE|DETACH|REMOVE|RETURN)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_with_fallback(text: str) -> list[CypherAst]:
+    segments = _split_top_level_keyword(text, "WITH")
+    asts: list[CypherAst] = []
+    for segment in segments:
+        trimmed = _strip_to_first_clause(segment)
+        if not trimmed:
+            continue
+        candidate = _ensure_return_clause(trimmed)
+        try:
+            asts.append(parse_cypher(candidate))
+        except CypherParseError:
+            continue
+    return asts
+
+
+def _normalize_exists_subqueries(text: str) -> str:
+    upper = text.upper()
+    result: list[str] = []
+    last = 0
+    i = 0
+    in_string = False
+    in_backtick = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            if char == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if char == "'":
+                in_string = False
+            i += 1
+            continue
+        if in_backtick:
+            if char == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if char == "'":
+            in_string = True
+            i += 1
+            continue
+        if char == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if upper.startswith("EXISTS", i) and _is_word_boundary(text, i, i + 6):
+            j = i + 6
+            while j < len(text) and text[j].isspace():
+                j += 1
+            if j < len(text) and text[j] == "{":
+                end = _find_matching_brace(text, j)
+                if end is None:
+                    break
+                body = text[j + 1 : end]
+                normalized_body = _normalize_exists_subqueries(body)
+                if not _subquery_has_top_level_return(normalized_body):
+                    normalized_body = normalized_body.rstrip()
+                    if normalized_body and not normalized_body.endswith(" "):
+                        normalized_body += " "
+                    normalized_body += "RETURN 1"
+                result.append(text[last:i])
+                result.append(text[i:j])
+                result.append("{")
+                result.append(normalized_body)
+                result.append("}")
+                i = end + 1
+                last = i
+                continue
+        i += 1
+    if last < len(text):
+        result.append(text[last:])
+    return "".join(result)
+
+
+def _find_matching_brace(text: str, start: int) -> int | None:
+    depth = 0
+    i = start
+    in_string = False
+    in_backtick = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            if char == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if char == "'":
+                in_string = False
+            i += 1
+            continue
+        if in_backtick:
+            if char == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if char == "'":
+            in_string = True
+            i += 1
+            continue
+        if char == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _subquery_has_top_level_return(text: str) -> bool:
+    upper = text.upper()
+    i = 0
+    depth_paren = 0
+    depth_bracket = 0
+    depth_brace = 0
+    in_string = False
+    in_backtick = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            if char == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if char == "'":
+                in_string = False
+            i += 1
+            continue
+        if in_backtick:
+            if char == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if char == "'":
+            in_string = True
+            i += 1
+            continue
+        if char == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if char == "(":
+            depth_paren += 1
+        elif char == ")":
+            depth_paren = max(0, depth_paren - 1)
+        elif char == "[":
+            depth_bracket += 1
+        elif char == "]":
+            depth_bracket = max(0, depth_bracket - 1)
+        elif char == "{":
+            depth_brace += 1
+        elif char == "}":
+            depth_brace = max(0, depth_brace - 1)
+
+        if depth_paren == 0 and depth_bracket == 0 and depth_brace == 0:
+            if upper.startswith("RETURN", i) and _is_word_boundary(text, i, i + 6):
+                return True
+        i += 1
+    return False
+
+
+def _split_top_level_keyword(text: str, keyword: str) -> list[str]:
+    upper = text.upper()
+    target = keyword.upper()
+    segments: list[str] = []
+    start = 0
+    i = 0
+    depth_paren = 0
+    depth_bracket = 0
+    depth_brace = 0
+    in_string = False
+    in_backtick = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            if char == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if char == "'":
+                in_string = False
+            i += 1
+            continue
+        if in_backtick:
+            if char == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if char == "'":
+            in_string = True
+            i += 1
+            continue
+        if char == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if char == "(":
+            depth_paren += 1
+        elif char == ")":
+            depth_paren = max(0, depth_paren - 1)
+        elif char == "[":
+            depth_bracket += 1
+        elif char == "]":
+            depth_bracket = max(0, depth_bracket - 1)
+        elif char == "{":
+            depth_brace += 1
+        elif char == "}":
+            depth_brace = max(0, depth_brace - 1)
+
+        if depth_paren == 0 and depth_bracket == 0 and depth_brace == 0:
+            if upper.startswith(target, i) and _is_word_boundary(
+                text, i, i + len(target)
+            ):
+                segments.append(text[start:i])
+                i += len(target)
+                start = i
+                continue
+        i += 1
+    segments.append(text[start:])
+    return segments
+
+
+def _strip_to_first_clause(text: str) -> str:
+    match = _CLAUSE_START_RE.search(text)
+    if not match:
+        return ""
+    return text[match.start() :].strip()
+
+
+def _ensure_return_clause(text: str) -> str:
+    trimmed = text.strip().rstrip(";")
+    if re.search(r"\bRETURN\b", trimmed, re.IGNORECASE):
+        return trimmed
+    if re.search(
+        r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE)\b", trimmed, re.IGNORECASE
+    ):
+        return trimmed
+    return f"{trimmed} RETURN 1"
+
+
+def _is_word_boundary(text: str, start: int, end: int) -> bool:
+    if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        return False
+    if end < len(text) and (text[end].isalnum() or text[end] == "_"):
+        return False
+    return True
 
 
 def _iter_rule_contexts(

@@ -66,7 +66,7 @@ class AdkConfig:
             user_id=os.environ.get("ADK_USER_ID", "local-user"),
             session_id=os.environ.get("ADK_SESSION_ID", "local-session"),
             temperature=float(os.environ.get("ADK_TEMPERATURE", "0.2")),
-            max_output_tokens=int(os.environ.get("ADK_MAX_OUTPUT_TOKENS", "1024")),
+            max_output_tokens=int(os.environ.get("ADK_MAX_OUTPUT_TOKENS", "24576")),
             use_mcp_prompt=os.environ.get("ADK_USE_MCP_PROMPT", "true").lower()
             in {"1", "true", "yes"},
         )
@@ -77,7 +77,7 @@ def _infer_provider(model: str) -> str | None:
     if "/" in lowered:
         return _normalize_provider(lowered.split("/", 1)[0])
     if lowered.startswith("gemini"):
-        return "google"
+        return "gemini"
     if lowered.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
     return None
@@ -87,6 +87,6 @@ def _normalize_provider(provider: str | None) -> str | None:
     if provider is None:
         return None
     lowered = provider.strip().lower()
-    if lowered == "gemini":
-        return "google"
+    if lowered in {"gemini", "google"}:
+        return "gemini"
     return lowered

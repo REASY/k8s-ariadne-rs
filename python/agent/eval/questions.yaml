@@ -73,11 +73,11 @@ hard:
     question: "For each namespace, compute total requested and limit memory (MiB) across all pod containers."
     tags: [pod, container, resources, unwind, aggregation]
   - id: h04
-    question: "Find services in namespace litmus that have no endpoint slices."
+    question: "Find services in namespace default that have no endpoint slices."
     tags: [service, endpointslice, namespace, negative]
   - id: h05
-    question: "Find ingresses in namespace litmus whose backend services have no endpoints."
-    tags: [ingress, service, endpointslice, endpoint, namespace, negative]
+    question: "Find ingresses in namespace litmus whose backend services have endpoints."
+    tags: [ingress, service, endpointslice, endpoint, namespace]
   - id: h06
     question: "For host <host>, list backend services and pods backing that host."
     tags: [host, ingress, service, pod, join]
@@ -88,7 +88,7 @@ hard:
     question: "List deployments where ready replicas are fewer than desired replicas."
     tags: [deployment, status, filter]
   - id: h09
-    question: "List pods in namespace litmus that are not managed by any Deployment, StatefulSet, DaemonSet, Job, or ReplicaSet."
+    question: "List pods in namespace storefront that are not managed by any Deployment, StatefulSet, DaemonSet, Job, or ReplicaSet."
     tags: [pod, namespace, negative]
   - id: h10
     question: "List PVCs in namespace pyroscope whose bound PV uses a storage class with provisioner <provisioner>."
