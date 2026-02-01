@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
 use k8s_openapi::Metadata;
-use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record};
+use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record, SSLMode, TrustCallback};
 use serde::Serialize;
 use serde_json::{Number, Value};
 use std::collections::{HashMap, HashSet};
@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use std::time::Instant;
 use strum::IntoEnumIterator;
 use thiserror::Error;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 #[derive(Error, Debug)]
 pub enum MemgraphError {
@@ -24,6 +24,66 @@ pub enum MemgraphError {
 
 pub struct Memgraph {
     connection: Connection,
+    connect_params: ConnectParamsSnapshot,
+}
+
+struct ConnectParamsSnapshot {
+    port: u16,
+    host: Option<String>,
+    address: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    client_name: String,
+    sslmode: SSLMode,
+    sslcert: Option<String>,
+    sslkey: Option<String>,
+    trust_callback: Option<TrustCallback>,
+    lazy: bool,
+    autocommit: bool,
+}
+
+fn clone_sslmode(mode: &SSLMode) -> SSLMode {
+    match mode {
+        SSLMode::Disable => SSLMode::Disable,
+        SSLMode::Require => SSLMode::Require,
+    }
+}
+
+impl ConnectParamsSnapshot {
+    fn from_params(params: &ConnectParams) -> Self {
+        Self {
+            port: params.port,
+            host: params.host.clone(),
+            address: params.address.clone(),
+            username: params.username.clone(),
+            password: params.password.clone(),
+            client_name: params.client_name.clone(),
+            sslmode: clone_sslmode(&params.sslmode),
+            sslcert: params.sslcert.clone(),
+            sslkey: params.sslkey.clone(),
+            trust_callback: params.trust_callback,
+            lazy: params.lazy,
+            autocommit: params.autocommit,
+        }
+    }
+
+    fn to_params(&self) -> ConnectParams {
+        ConnectParams {
+            port: self.port,
+            host: self.host.clone(),
+            address: self.address.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            client_name: self.client_name.clone(),
+            sslmode: clone_sslmode(&self.sslmode),
+            sslcert: self.sslcert.clone(),
+            sslkey: self.sslkey.clone(),
+            trust_callback: self.trust_callback,
+            lazy: self.lazy,
+            autocommit: self.autocommit,
+            ..Default::default()
+        }
+    }
 }
 
 impl Memgraph {
@@ -46,6 +106,7 @@ impl Memgraph {
         Self::try_new(params)
     }
     pub fn try_new(params: ConnectParams) -> Result<Self> {
+        let connect_params = ConnectParamsSnapshot::from_params(&params);
         let connection: Connection = Connection::connect(&params)
             .map_err(|e| MemgraphError::ConnectionError(e.to_string()))?;
         let status = connection.status();
@@ -56,10 +117,46 @@ impl Memgraph {
             )))?;
         }
 
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            connect_params,
+        })
+    }
+
+    fn ensure_connected(&mut self) -> Result<()> {
+        let status = self.connection.status();
+        if status == ConnectionStatus::Bad || status == ConnectionStatus::Closed {
+            self.reconnect()?;
+        }
+        Ok(())
+    }
+
+    fn reconnect(&mut self) -> Result<()> {
+        info!("Reconnecting to memgraph");
+        let params = self.connect_params.to_params();
+        let connection: Connection = Connection::connect(&params)
+            .map_err(|e| MemgraphError::ConnectionError(e.to_string()))?;
+        let status = connection.status();
+        if status != ConnectionStatus::Ready {
+            return Err(
+                MemgraphError::ConnectionError(format!("Connection status {status:?}")).into(),
+            );
+        }
+        self.connection = connection;
+        Ok(())
+    }
+
+    fn reconnect_if_bad(&mut self) {
+        let status = self.connection.status();
+        if status == ConnectionStatus::Bad || status == ConnectionStatus::Closed {
+            if let Err(err) = self.reconnect() {
+                warn!("Failed to reconnect memgraph after bad connection: {err}");
+            }
+        }
     }
 
     pub fn create(&mut self, cluster_state: &ClusterState) -> Result<()> {
+        self.ensure_connected()?;
         let s = Instant::now();
 
         // Clear the graph.
@@ -144,6 +241,7 @@ impl Memgraph {
         if diff.is_empty() {
             return Ok(());
         }
+        self.ensure_connected()?;
         let s = Instant::now();
 
         let mut changed = false;
@@ -240,21 +338,30 @@ impl Memgraph {
     }
 
     pub fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
-        let cols = self
-            .connection
-            .execute(query, None)
-            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
-        let records = self
-            .connection
-            .fetchall()
-            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+        self.ensure_connected()?;
+        let cols = self.connection.execute(query, None);
+        let cols = match cols {
+            Ok(cols) => cols,
+            Err(err) => {
+                let msg = err.to_string();
+                self.reconnect_if_bad();
+                return Err(MemgraphError::QueryError(msg).into());
+            }
+        };
+        let records = self.connection.fetchall().map_err(|e| {
+            let msg = e.to_string();
+            self.reconnect_if_bad();
+            MemgraphError::QueryError(msg)
+        })?;
         let mut result: Vec<Value> = Vec::with_capacity(records.len());
         for records in records {
             result.push(Self::record_to_json(cols.as_slice(), &records)?);
         }
-        self.connection
-            .commit()
-            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
+        self.connection.commit().map_err(|e| {
+            let msg = e.to_string();
+            self.reconnect_if_bad();
+            MemgraphError::CommitError(msg)
+        })?;
         Ok(result)
     }
 
