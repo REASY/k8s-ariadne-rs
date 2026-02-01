@@ -79,7 +79,7 @@ hard:
     question: "Find ingresses in namespace litmus whose backend services have endpoints."
     tags: [ingress, service, endpointslice, endpoint, namespace]
   - id: h06
-    question: "For host <host>, list backend services and pods backing that host."
+    question: "For host litmus.qa.agoda.is, list backend services and pods backing that host."
     tags: [host, ingress, service, pod, join]
   - id: h07
     question: "For each service, count distinct backing pod IPs."
@@ -91,5 +91,5 @@ hard:
     question: "List pods in namespace storefront that are not managed by any Deployment, StatefulSet, DaemonSet, Job, or ReplicaSet."
     tags: [pod, namespace, negative]
   - id: h10
-    question: "List PVCs in namespace pyroscope whose bound PV uses a storage class with provisioner <provisioner>."
-    tags: [pvc, pv, storageclass, provisioner, namespace, join]
+    question: "List PVCs in namespace pyroscope with their bound PV name and storage class (if any)."
+    tags: [pvc, pv, storageclass, namespace, join]
