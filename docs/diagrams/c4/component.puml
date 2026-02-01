@@ -1,0 +1,30 @@
+@startuml
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+Person(sre, "SRE / Developer", "Asks questions about the cluster")
+System(k8s, "Kubernetes Cluster", "Live K8s API")
+System_Ext(llm, "LLM Provider", "OpenAI / Gemini / etc.")
+
+Container_Boundary(ariadne, "k8s-graph-rs") {
+  Container(rust_app, "ariadne-app", "Rust", "Ingests K8s state, exposes MCP + HTTP")
+  Container(rust_core, "ariadne-core", "Rust", "Graph modeling + Memgraph integration")
+  Container(mcp, "MCP Server", "HTTP/JSON-RPC", "Query + prompt/schema tools")
+  Container(py_agent, "k8s-graph-agent", "Python (ADK)", "English -> Cypher w/ AST validation")
+  Container(eval, "k8s-graph-eval", "Python", "NL -> Cypher evaluation harness")
+}
+
+Container(memgraph, "Memgraph", "GraphDB", "Stores cluster graph, serves Cypher")
+
+Rel(sre, py_agent, "Asks questions", "CLI/ADK")
+Rel(py_agent, llm, "Prompts for Cypher", "HTTPS")
+Rel(py_agent, mcp, "Calls tools", "HTTP/JSON-RPC")
+Rel(mcp, rust_app, "Delegates tool calls", "in-process")
+Rel(rust_app, rust_core, "Builds graph", "in-process")
+Rel(rust_core, memgraph, "Writes/queries graph", "Bolt")
+Rel(rust_app, k8s, "Watches + lists", "K8s API")
+Rel(eval, py_agent, "Runs eval dataset", "CLI")
+Rel(eval, mcp, "Executes Cypher", "HTTP/JSON-RPC")
+@enduml
