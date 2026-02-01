@@ -57,6 +57,9 @@ class AdkConfig:
                 "GOOGLE_API_KEY"
             )
 
+        temperature = float(os.environ.get("ADK_TEMPERATURE", "0.2"))
+        temperature = _coerce_temperature(model, provider, temperature)
+
         return cls(
             model=model,
             provider=provider,
@@ -65,7 +68,7 @@ class AdkConfig:
             app_name=os.environ.get("ADK_APP_NAME", "k8s-graph-agent"),
             user_id=os.environ.get("ADK_USER_ID", "local-user"),
             session_id=os.environ.get("ADK_SESSION_ID", "local-session"),
-            temperature=float(os.environ.get("ADK_TEMPERATURE", "0.2")),
+            temperature=temperature,
             max_output_tokens=int(os.environ.get("ADK_MAX_OUTPUT_TOKENS", "24576")),
             use_mcp_prompt=os.environ.get("ADK_USE_MCP_PROMPT", "true").lower()
             in {"1", "true", "yes"},
@@ -90,3 +93,14 @@ def _normalize_provider(provider: str | None) -> str | None:
     if lowered in {"gemini", "google"}:
         return "gemini"
     return lowered
+
+
+def _coerce_temperature(
+    model: str, provider: str | None, temperature: float
+) -> float:
+    normalized = model.strip().lower()
+    if "/" in normalized:
+        normalized = normalized.split("/", 1)[1]
+    if normalized.startswith("gpt-5") and (provider in {None, "openai"}):
+        return 1.0
+    return temperature

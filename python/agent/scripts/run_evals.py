@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from dataclasses import asdict
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import re
+from typing import Iterator
+
+from k8s_graph_agent.eval.runner import run_evaluation
+
+
+DEFAULT_MODELS = [
+    "openai/gpt-5-mini-2025-08-07",
+    "openai/gpt-5-nano-2025-08-07",
+    "openai/gpt-5.2-2025-12-11",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run NL → Cypher evals across multiple models."
+    )
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("eval/questions.yaml"),
+        help="Dataset path (YAML or JSON). Defaults to eval/questions.yaml.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("single-shot", "retry"),
+        default="retry",
+        help="Evaluation mode.",
+    )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="Number of repetitions per question.",
+    )
+    parser.add_argument(
+        "--models",
+        help=(
+            "Comma-separated model list. If omitted, uses EVAL_MODELS env or a "
+            "built-in default list."
+        ),
+    )
+    parser.add_argument(
+        "--preset",
+        choices=("all",),
+        help="Use a predefined model list.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("eval/runs"),
+        help="Directory to store run folders (default: eval/runs).",
+    )
+    args = parser.parse_args()
+
+    models = _resolve_models(args.models, args.preset)
+    if not models:
+        raise SystemExit("No models provided. Use --models or set EVAL_MODELS.")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = args.output_dir / timestamp
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "created_at": timestamp,
+        "dataset": str(args.dataset),
+        "mode": args.mode,
+        "runs": args.runs,
+        "models": models,
+        "parallelism": os.environ.get("K8S_GRAPH_EVAL_PARALLELISM")
+        or os.environ.get("EVAL_PARALLELISM"),
+    }
+    (run_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
+
+    for model in models:
+        provider = _detect_provider(model)
+        output_path = run_dir / f"results_{_sanitize_model(model)}.jsonl"
+        env_updates, env_clears = _model_env(provider, model)
+        if not os.environ.get("K8S_GRAPH_LOG_FILE") and not os.environ.get(
+            "K8S_GRAPH_LOG_DIR"
+        ):
+            env_updates["K8S_GRAPH_LOG_FILE"] = str(
+                run_dir / f"eval_{_sanitize_model(model)}.log"
+            )
+        print(
+            f"[eval] model={model} provider={provider or 'auto'} output={output_path}"
+        )
+        with _temp_env(env_updates, env_clears):
+            run_evaluation(
+                dataset_path=args.dataset,
+                mode=args.mode,
+                runs=args.runs,
+                output_path=output_path,
+            )
+
+
+def _resolve_models(cli_models: str | None, preset: str | None) -> list[str]:
+    if preset == "all":
+        return DEFAULT_MODELS[:]
+    if cli_models:
+        return [m.strip() for m in cli_models.split(",") if m.strip()]
+    env_models = os.environ.get("EVAL_MODELS")
+    if env_models:
+        return [m.strip() for m in env_models.split(",") if m.strip()]
+    return DEFAULT_MODELS[:]
+
+
+def _detect_provider(model: str) -> str | None:
+    lowered = model.strip().lower()
+    if "/" in lowered:
+        prefix = lowered.split("/", 1)[0]
+        if prefix in {"openai", "gemini", "google"}:
+            return "gemini" if prefix in {"gemini", "google"} else "openai"
+    if lowered.startswith("gemini"):
+        return "gemini"
+    if lowered.startswith(("gpt", "o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
+def _model_env(provider: str | None, model: str) -> tuple[dict[str, str], list[str]]:
+    updates: dict[str, str] = {"LLM_MODEL": model}
+    clears: list[str] = ["LLM_BASE_URL"]
+    if provider:
+        updates["LLM_PROVIDER"] = provider
+    if provider == "openai":
+        base_url = os.environ.get("OPENAI_BASE_URL")
+        if base_url:
+            updates["LLM_BASE_URL"] = base_url
+    elif provider == "gemini":
+        base_url = os.environ.get("GOOGLE_GEMINI_BASE_URL")
+        if base_url:
+            updates["LLM_BASE_URL"] = base_url
+    return updates, clears
+
+
+@contextmanager
+def _temp_env(updates: dict[str, str], clears: list[str]) -> Iterator[None]:
+    keys = set(updates) | set(clears)
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in clears:
+            os.environ.pop(key, None)
+        for key, value in updates.items():
+            os.environ[key] = value
+        yield
+    finally:
+        for key in keys:
+            old_value = previous.get(key)
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _sanitize_model(model: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", model)
+
+
+if __name__ == "__main__":
+    main()

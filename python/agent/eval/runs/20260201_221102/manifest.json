@@ -1,0 +1,16 @@
+{
+  "created_at": "20260201_221102",
+  "dataset": "eval/questions.yaml",
+  "mode": "retry",
+  "runs": 3,
+  "models": [
+    "openai/gpt-5-mini-2025-08-07",
+    "openai/gpt-5-nano-2025-08-07",
+    "openai/gpt-5.2-2025-12-11",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview"
+  ],
+  "parallelism": "16"
+}

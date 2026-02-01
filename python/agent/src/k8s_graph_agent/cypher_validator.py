@@ -101,17 +101,21 @@ class CypherSchemaValidator:
     def validate(self, cypher: str) -> None:
         used_fallback = False
         asts: list[CypherAst] = []
-        normalized = _normalize_exists_subqueries(cypher)
+        normalized: str | None = None
         try:
-            asts = [parse_cypher(normalized)]
+            asts = [parse_cypher(cypher)]
         except CypherParseError as exc:
-            asts = _parse_with_fallback(normalized)
-            if not asts:
-                raise CypherValidationError(str(exc)) from exc
-            used_fallback = True
-            self._logger.warning(
-                "Cypher parse failed; using fallback segmentation for schema validation"
-            )
+            normalized = _normalize_exists_subqueries(cypher)
+            try:
+                asts = [parse_cypher(normalized)]
+            except CypherParseError:
+                asts = _parse_with_fallback(normalized)
+                if not asts:
+                    raise CypherValidationError(str(exc)) from exc
+                used_fallback = True
+                self._logger.warning(
+                    "Cypher parse failed; using fallback segmentation for schema validation"
+                )
 
         compatibility_issues = _find_compatibility_issues(
             cypher,
@@ -358,6 +362,21 @@ def _normalize_exists_subqueries(text: str) -> str:
                 i = end + 1
                 last = i
                 continue
+            if j < len(text) and text[j] == "(":
+                end = _find_matching_paren(text, j)
+                if end is None:
+                    break
+                body = text[j + 1 : end]
+                body_stripped = body.strip()
+                if _looks_like_pattern_expression(body_stripped):
+                    replacement = "EXISTS { MATCH "
+                    replacement += body_stripped
+                    replacement += " RETURN 1 }"
+                    result.append(text[last:i])
+                    result.append(replacement)
+                    i = end + 1
+                    last = i
+                    continue
         i += 1
     if last < len(text):
         result.append(text[last:])
@@ -395,6 +414,44 @@ def _find_matching_brace(text: str, start: int) -> int | None:
         if char == "{":
             depth += 1
         elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _find_matching_paren(text: str, start: int) -> int | None:
+    depth = 0
+    i = start
+    in_string = False
+    in_backtick = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            if char == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if char == "'":
+                in_string = False
+            i += 1
+            continue
+        if in_backtick:
+            if char == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if char == "'":
+            in_string = True
+            i += 1
+            continue
+        if char == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
             depth -= 1
             if depth == 0:
                 return i

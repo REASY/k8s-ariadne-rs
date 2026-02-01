@@ -1240,22 +1240,26 @@ source = { editable = "." }
 dependencies = [
     { name = "antlr4-cypher" },
     { name = "antlr4-python3-runtime" },
+    { name = "fastapi" },
     { name = "google-adk" },
     { name = "httpx" },
     { name = "litellm" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "antlr4-cypher", specifier = ">=0.1.2" },
     { name = "antlr4-python3-runtime", specifier = ">=4.13.2" },
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", specifier = ">=1.23.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "litellm", specifier = ">=1.45.0" },
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
 ]
 
 [[package]]

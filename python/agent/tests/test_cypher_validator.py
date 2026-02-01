@@ -123,6 +123,17 @@ class TestCypherSchemaValidator(unittest.TestCase):
         )
         self.validator.validate(cypher)
 
+    def test_accepts_exists_pattern_function(self) -> None:
+        cypher = (
+            "MATCH (s:Service)\n"
+            "WHERE NOT EXISTS((s)-[:Manages]->(:EndpointSlice))\n"
+            "RETURN s['metadata']['namespace'] AS namespace,\n"
+            "       s['metadata']['name'] AS service,\n"
+            "       s['spec']['type'] AS type\n"
+            "ORDER BY namespace, service"
+        )
+        self.validator.validate(cypher)
+
     def test_accepts_multiple_exists_subqueries_without_return(self) -> None:
         cypher = (
             "MATCH (ns:Namespace)<-[:BelongsTo]-(p:Pod)\n"

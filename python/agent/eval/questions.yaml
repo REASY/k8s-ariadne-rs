@@ -29,6 +29,36 @@ easy:
   - id: e10
     question: "List all service accounts in namespace litmus."
     tags: [serviceaccount, namespace, list]
+  - id: e11
+    question: "List all deployments in namespace litmus."
+    tags: [deployment, namespace, list]
+  - id: e12
+    question: "List all replica sets in namespace litmus."
+    tags: [replicaset, namespace, list]
+  - id: e13
+    question: "List all stateful sets in namespace litmus."
+    tags: [statefulset, namespace, list]
+  - id: e14
+    question: "List all daemon sets in namespace litmus."
+    tags: [daemonset, namespace, list]
+  - id: e15
+    question: "List all jobs in namespace litmus."
+    tags: [job, namespace, list]
+  - id: e16
+    question: "List all persistent volume claims in namespace litmus."
+    tags: [pvc, namespace, list]
+  - id: e17
+    question: "How many pods are in namespace litmus?"
+    tags: [pod, namespace, count]
+  - id: e18
+    question: "List all config maps in namespace litmus."
+    tags: [configmap, namespace, list]
+  - id: e19
+    question: "List all network policies in namespace litmus."
+    tags: [networkpolicy, namespace, list]
+  - id: e20
+    question: "List all containers in namespace litmus."
+    tags: [container, namespace, list]
 
 medium:
   - id: m01
@@ -61,6 +91,36 @@ medium:
   - id: m10
     question: "List events concerning pods in namespace litmus with event reason and pod name."
     tags: [event, pod, namespace, join]
+  - id: m11
+    question: "For namespace litmus, list pods and the nodes they run on."
+    tags: [pod, node, namespace, join]
+  - id: m12
+    question: "For namespace litmus, list pods and the PVCs they claim."
+    tags: [pod, pvc, namespace, join]
+  - id: m13
+    question: "For namespace litmus, list containers and the pods they run in."
+    tags: [container, pod, namespace, join]
+  - id: m14
+    question: "For namespace litmus, list containers and their logs (if any)."
+    tags: [container, logs, namespace, join]
+  - id: m15
+    question: "For namespace litmus, list ingresses and the services they target."
+    tags: [ingress, service, namespace, join]
+  - id: m16
+    question: "For namespace litmus, list endpoint slices and the pods they reference."
+    tags: [endpointslice, endpoint, pod, namespace, join]
+  - id: m17
+    question: "For namespace litmus, list events concerning services."
+    tags: [event, service, namespace, join]
+  - id: m18
+    question: "List persistent volumes and the storage classes they use."
+    tags: [pv, storageclass, join]
+  - id: m19
+    question: "For each node, count pods scheduled on that node."
+    tags: [node, pod, aggregation]
+  - id: m20
+    question: "For each namespace, count services."
+    tags: [namespace, service, aggregation]
 
 hard:
   - id: h01
@@ -93,3 +153,33 @@ hard:
   - id: h10
     question: "List PVCs in namespace pyroscope with their bound PV name and storage class (if any)."
     tags: [pvc, pv, storageclass, namespace, join]
+  - id: h11
+    question: "Find services in namespace litmus that have no endpoint slices."
+    tags: [service, endpointslice, namespace, negative]
+  - id: h12
+    question: "For each ingress in namespace litmus, list backend services that have no endpoint slices."
+    tags: [ingress, service, endpointslice, namespace, negative]
+  - id: h13
+    question: "List PVCs in namespace litmus that are not bound to any PV."
+    tags: [pvc, pv, namespace, negative]
+  - id: h14
+    question: "List pods in namespace litmus that claim PVCs whose PV has no storage class."
+    tags: [pod, pvc, pv, storageclass, namespace, negative]
+  - id: h15
+    question: "For each node, count distinct namespaces of pods scheduled there; return nodes with more than 1 namespace."
+    tags: [node, pod, namespace, aggregation]
+  - id: h16
+    question: "For each deployment in namespace litmus, count pods it ultimately manages via replica sets."
+    tags: [deployment, replicaset, pod, namespace, aggregation]
+  - id: h17
+    question: "List pods in namespace litmus that have at least one Warning event."
+    tags: [pod, event, namespace, filter]
+  - id: h18
+    question: "For each namespace, count services with zero endpoint slices."
+    tags: [namespace, service, endpointslice, aggregation, negative]
+  - id: h19
+    question: "List hosts and the backend services they route to."
+    tags: [host, ingress, service, join]
+  - id: h20
+    question: "For each service in namespace litmus, count pods by phase."
+    tags: [service, pod, namespace, aggregation]
