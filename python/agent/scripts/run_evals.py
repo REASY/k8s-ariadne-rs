@@ -21,6 +21,11 @@ DEFAULT_MODELS = [
     "gemini-2.5-flash",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+    "claude-opus-4-5-20251101",
+    "deepseek-r1",
 ]
 
 
@@ -88,7 +93,7 @@ def main() -> None:
     )
 
     for model in models:
-        provider = _detect_provider(model)
+        provider = _provider_override(model, _detect_provider(model))
         output_path = run_dir / f"results_{_sanitize_model(model)}.jsonl"
         env_updates, env_clears = _model_env(provider, model)
         if not os.environ.get("K8S_GRAPH_LOG_FILE") and not os.environ.get(
@@ -124,13 +129,61 @@ def _detect_provider(model: str) -> str | None:
     lowered = model.strip().lower()
     if "/" in lowered:
         prefix = lowered.split("/", 1)[0]
-        if prefix in {"openai", "gemini", "google"}:
-            return "gemini" if prefix in {"gemini", "google"} else "openai"
+        if prefix in {"openai", "gemini", "google", "anthropic", "claude", "deepseek"}:
+            if prefix in {"gemini", "google"}:
+                return "gemini"
+            if prefix in {"claude", "anthropic"}:
+                return "anthropic"
+            return prefix
     if lowered.startswith("gemini"):
         return "gemini"
+    if lowered.startswith("claude"):
+        return "anthropic"
+    if lowered.startswith("deepseek"):
+        return "deepseek"
     if lowered.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
     return None
+
+
+def _normalize_provider(value: str | None) -> str | None:
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"gemini", "google"}:
+        return "gemini"
+    if lowered in {"claude"}:
+        return "anthropic"
+    return lowered
+
+
+def _force_openai_proxy() -> bool:
+    return os.environ.get("K8S_GRAPH_EVAL_FORCE_OPENAI_PROXY", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    } or os.environ.get("EVAL_FORCE_OPENAI_PROXY", "").lower() in {"1", "true", "yes"}
+
+
+def _provider_override(model: str, provider: str | None) -> str | None:
+    lowered = model.strip().lower()
+    if provider in {"anthropic"} or lowered.startswith("claude"):
+        override = _normalize_provider(
+            os.environ.get("K8S_GRAPH_EVAL_CLAUDE_PROVIDER")
+            or os.environ.get("EVAL_CLAUDE_PROVIDER")
+        )
+        if override:
+            return override
+    if provider in {"deepseek"} or lowered.startswith("deepseek"):
+        override = _normalize_provider(
+            os.environ.get("K8S_GRAPH_EVAL_DEEPSEEK_PROVIDER")
+            or os.environ.get("EVAL_DEEPSEEK_PROVIDER")
+        )
+        if override:
+            return override
+    if _force_openai_proxy() and (provider in {"anthropic", "deepseek"}):
+        return "openai"
+    return provider
 
 
 def _model_env(provider: str | None, model: str) -> tuple[dict[str, str], list[str]]:
@@ -138,12 +191,22 @@ def _model_env(provider: str | None, model: str) -> tuple[dict[str, str], list[s
     clears: list[str] = ["LLM_BASE_URL"]
     if provider:
         updates["LLM_PROVIDER"] = provider
-    if provider == "openai":
-        base_url = os.environ.get("OPENAI_BASE_URL")
+    if provider in {"openai", "openai-compatible"}:
+        base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("LLM_BASE_URL")
         if base_url:
             updates["LLM_BASE_URL"] = base_url
     elif provider == "gemini":
         base_url = os.environ.get("GOOGLE_GEMINI_BASE_URL")
+        if base_url:
+            updates["LLM_BASE_URL"] = base_url
+    elif provider == "anthropic":
+        base_url = os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get(
+            "CLAUDE_BASE_URL"
+        )
+        if base_url:
+            updates["LLM_BASE_URL"] = base_url
+    elif provider == "deepseek":
+        base_url = os.environ.get("DEEPSEEK_BASE_URL")
         if base_url:
             updates["LLM_BASE_URL"] = base_url
     return updates, clears

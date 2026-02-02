@@ -18,6 +18,8 @@ dependencies = [
   "pyyaml>=6.0.2",
   "pydantic>=2.8.0",
   "uvicorn>=0.30.0",
+  "uv>=0.9.28",
+  "anthropic>=0.77.0",
 ]
 
 [project.scripts]

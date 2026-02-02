@@ -1,6 +1,7 @@
 import unittest
 
 from k8s_graph_agent.adk_translate import (
+    _is_anthropic_provider,
     _is_gemini_provider,
     _normalize_gemini_base_url,
     _strip_code_fences,
@@ -55,6 +56,23 @@ class TestGeminiHelpers(unittest.TestCase):
         )
         self.assertEqual(base, "https://genai-gateway.agoda.is/gemini")
         self.assertIsNone(version)
+
+
+class TestAnthropicHelpers(unittest.TestCase):
+    def test_is_anthropic_provider(self) -> None:
+        self.assertTrue(_is_anthropic_provider("anthropic", "gpt-5.2-2025-12-11"))
+        self.assertTrue(_is_anthropic_provider("claude", "gpt-5.2-2025-12-11"))
+        self.assertFalse(_is_anthropic_provider("openai", "claude-sonnet-4-20250514"))
+        self.assertTrue(_is_anthropic_provider(None, "claude-sonnet-4-20250514"))
+        self.assertTrue(
+            _is_anthropic_provider(None, "anthropic/claude-3-5-haiku-20241022-v1")
+        )
+        self.assertTrue(
+            _is_anthropic_provider(None, "claude/claude-3-5-haiku-20241022-v1")
+        )
+        self.assertFalse(
+            _is_anthropic_provider(None, "openai/claude-sonnet-4-20250514")
+        )
 
 
 if __name__ == "__main__":

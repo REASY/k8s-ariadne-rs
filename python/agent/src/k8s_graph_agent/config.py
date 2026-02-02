@@ -48,6 +48,12 @@ class AdkConfig:
             base_url = os.environ.get("OPENAI_BASE_URL")
         if base_url is None and provider in {"google", "gemini"}:
             base_url = os.environ.get("GOOGLE_GEMINI_BASE_URL")
+        if base_url is None and provider in {"anthropic"}:
+            base_url = os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get(
+                "CLAUDE_BASE_URL"
+            )
+        if base_url is None and provider in {"deepseek"}:
+            base_url = os.environ.get("DEEPSEEK_BASE_URL")
 
         api_key = None
         if provider in {"openai", "openai-compatible"}:
@@ -56,6 +62,12 @@ class AdkConfig:
             api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get(
                 "GOOGLE_API_KEY"
             )
+        elif provider in {"anthropic"}:
+            api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
+                "CLAUDE_API_KEY"
+            )
+        elif provider in {"deepseek"}:
+            api_key = os.environ.get("DEEPSEEK_API_KEY")
 
         temperature = float(os.environ.get("ADK_TEMPERATURE", "0.2"))
         temperature = _coerce_temperature(model, provider, temperature)
@@ -81,6 +93,10 @@ def _infer_provider(model: str) -> str | None:
         return _normalize_provider(lowered.split("/", 1)[0])
     if lowered.startswith("gemini"):
         return "gemini"
+    if lowered.startswith("claude"):
+        return "anthropic"
+    if lowered.startswith("deepseek"):
+        return "deepseek"
     if lowered.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
     return None
@@ -92,6 +108,8 @@ def _normalize_provider(provider: str | None) -> str | None:
     lowered = provider.strip().lower()
     if lowered in {"gemini", "google"}:
         return "gemini"
+    if lowered in {"claude", "anthropic"}:
+        return "anthropic"
     return lowered
 
 

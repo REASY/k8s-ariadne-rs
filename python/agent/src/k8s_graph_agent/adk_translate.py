@@ -220,13 +220,20 @@ class AdkCypherTranslator:
             ) from exc
 
         use_native_gemini = _is_gemini_provider(self.config.provider, self.config.model)
-        if use_native_gemini:
+        use_native_anthropic = _is_anthropic_provider(
+            self.config.provider, self.config.model
+        )
+        if use_native_gemini or use_native_anthropic:
             model_name = _strip_provider_prefix(self.config.model)
         else:
             model_name = _format_model(self.config.model, self.config.provider)
 
         if use_native_gemini and self.config.api_key:
             os.environ.setdefault("GOOGLE_API_KEY", self.config.api_key)
+        if use_native_anthropic and self.config.api_key:
+            os.environ.setdefault("ANTHROPIC_API_KEY", self.config.api_key)
+        if use_native_anthropic and self.config.base_url:
+            os.environ.setdefault("ANTHROPIC_BASE_URL", self.config.base_url)
 
         lite_llm_kwargs: dict[str, Any] = {}
         if self.config.api_key and not use_native_gemini:
@@ -246,6 +253,16 @@ class AdkCypherTranslator:
         output_schema = CypherTranslation if use_native_gemini else None
         if use_native_gemini:
             model = Gemini(model=model_name)
+        elif use_native_anthropic:
+            try:
+                from google.adk.models.anthropic_llm import AnthropicLlm
+            except ImportError as exc:  # pragma: no cover - integration only
+                raise ImportError(
+                    "Anthropic support requires google-adk[extensions] and anthropic."
+                ) from exc
+            model = AnthropicLlm(
+                model=model_name, max_tokens=self.config.max_output_tokens
+            )
         else:
             model = LiteLlm(model=model_name, **lite_llm_kwargs)
 
@@ -300,6 +317,15 @@ def _is_gemini_provider(provider: str | None, model: str) -> bool:
     if provider and provider.strip().lower() in {"gemini", "google"}:
         return True
     return model.strip().lower().startswith(("gemini", "google/gemini", "gemini/"))
+
+
+def _is_anthropic_provider(provider: str | None, model: str) -> bool:
+    if provider is not None:
+        return provider.strip().lower() in {"anthropic", "claude"}
+    normalized = model.strip().lower()
+    return normalized.startswith(
+        ("anthropic/claude", "claude/")
+    ) or normalized.startswith("claude")
 
 
 def _build_generate_content_config(config: AdkConfig, types: Any) -> Any:
