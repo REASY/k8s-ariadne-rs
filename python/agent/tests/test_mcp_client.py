@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from typing import cast
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if ROOT not in sys.path:
@@ -27,7 +28,11 @@ class TestMcpClientHelpers(unittest.TestCase):
         ]
         picked = _pick_response(responses, 2)
         self.assertIsNotNone(picked)
-        self.assertEqual(picked["result"]["value"], "b")
+        assert picked is not None
+        result = picked.get("result")
+        self.assertIsInstance(result, dict)
+        result_dict = cast(dict[str, object], result)
+        self.assertEqual(result_dict.get("value"), "b")
 
     def test_extract_json_content(self) -> None:
         tool_result = {
@@ -37,7 +42,12 @@ class TestMcpClientHelpers(unittest.TestCase):
         }
         extracted = extract_json_content(tool_result)
         self.assertIsInstance(extracted, list)
-        self.assertEqual(extracted[0]["pod"], "a")
+        extracted_list = cast(list[object], extracted)
+        self.assertTrue(extracted_list)
+        first = extracted_list[0]
+        self.assertIsInstance(first, dict)
+        first_dict = cast(dict[str, object], first)
+        self.assertEqual(first_dict.get("pod"), "a")
 
 
 if __name__ == "__main__":

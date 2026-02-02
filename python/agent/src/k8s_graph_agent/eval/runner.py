@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, cast
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -321,7 +321,8 @@ def _configure_file_logging() -> None:
         path = Path(log_file)
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = Path(log_dir) / f"k8s-graph-eval-{timestamp}-pid{os.getpid()}.log"
+        log_dir_str = cast(str, log_dir)
+        path = Path(log_dir_str) / f"k8s-graph-eval-{timestamp}-pid{os.getpid()}.log"
     path.parent.mkdir(parents=True, exist_ok=True)
 
     handler = logging.FileHandler(path, encoding="utf-8")
@@ -343,10 +344,13 @@ def _configure_file_logging() -> None:
 
 def _install_thread_excepthook() -> None:
     def _hook(args: threading.ExceptHookArgs) -> None:
+        thread_name = args.thread.name if args.thread is not None else "<unknown>"
+        exc_type = args.exc_type or RuntimeError
+        exc_value = args.exc_value or RuntimeError("thread exception without value")
         logger.error(
             "unhandled exception in thread %s",
-            args.thread.name,
-            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+            thread_name,
+            exc_info=(exc_type, exc_value, args.exc_traceback),
         )
 
     threading.excepthook = _hook
@@ -370,7 +374,11 @@ def _attempt_payload(attempt: TranslationAttempt) -> dict[str, Any]:
 def _match_expected(result: JsonValue, expected: ExpectedResult) -> bool:
     if not isinstance(result, list):
         return False
-    normalized = _normalize_rows(result, expected.columns)
+    if not all(isinstance(row, Mapping) for row in result):
+        return False
+    normalized = _normalize_rows(
+        cast(Iterable[Mapping[str, Any]], result), expected.columns
+    )
     if normalized is None:
         return False
     expected_rows = [tuple(row) for row in expected.rows]

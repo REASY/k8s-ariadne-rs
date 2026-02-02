@@ -27,3 +27,8 @@ k8s-graph-openai-bridge = "k8s_graph_agent.openai_bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8s_graph_agent"]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.14",
+]

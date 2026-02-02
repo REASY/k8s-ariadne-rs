@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from antlr4 import ParserRuleContext
 
 
 def _iter_rule_contexts(
-    tree: object, parser: object
+    tree: Any, parser: Any
 ) -> Iterable[tuple[str, ParserRuleContext, tuple[str, ...]]]:
-    stack: list[tuple[object, tuple[str, ...]]] = [(tree, ())]
+    stack: list[tuple[Any, tuple[str, ...]]] = [(tree, ())]
     while stack:
         node, path = stack.pop()
         if isinstance(node, ParserRuleContext):

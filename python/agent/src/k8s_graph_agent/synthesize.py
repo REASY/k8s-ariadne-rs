@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Protocol
+from typing import Protocol, cast
 
 from .models import JsonValue
 
@@ -134,10 +134,12 @@ def _summarize_result(result: JsonValue) -> tuple[int, list[str]]:
         if not result:
             return 0, []
         sample = result[0]
-        keys = list(sample.keys()) if isinstance(sample, dict) else []
-        return len(result), keys
+        if isinstance(sample, dict):
+            keys = [str(key) for key in sample.keys()]
+            return len(result), keys
+        return len(result), []
     if isinstance(result, dict):
-        return 1, list(result.keys())
+        return 1, [str(key) for key in result.keys()]
     if result is None:
         return 0, []
     return 1, []
@@ -159,14 +161,18 @@ def _format_markdown_table(
     sep = "| " + " | ".join("---" for _ in columns) + " |"
     lines = [header, sep]
     for row in limited:
-        line = "| " + " | ".join(
-            _format_markdown_cell_with_options(
-                row.get(col),
-                max_chars=max_cell_chars,
-                compact=compact_values,
+        line = (
+            "| "
+            + " | ".join(
+                _format_markdown_cell_with_options(
+                    row.get(col),
+                    max_chars=max_cell_chars,
+                    compact=compact_values,
+                )
+                for col in columns
             )
-            for col in columns
-        ) + " |"
+            + " |"
+        )
         lines.append(line)
     return "\n".join(lines)
 
@@ -198,9 +204,7 @@ def _format_markdown_cell_with_options(
     return text
 
 
-def _format_cell_with_options(
-    value: object, max_chars: int, compact: bool
-) -> str:
+def _format_cell_with_options(value: object, max_chars: int, compact: bool) -> str:
     if compact:
         compact_text = _compact_value(value)
         if compact_text is not None:
@@ -219,24 +223,27 @@ def _truncate(text: str, max_chars: int) -> str:
 
 def _compact_value(value: object) -> str | None:
     if isinstance(value, dict):
-        node = _summarize_graph_node(value)
+        value_dict = cast(dict[str, object], value)
+        node = _summarize_graph_node(value_dict)
         if node:
             return node
-        summary = _summarize_k8s_object(value)
+        summary = _summarize_k8s_object(value_dict)
         if summary:
             return summary
         if len(value) > 8:
             keys = list(value.keys())[:5]
             return "{" + ", ".join(f"{k}=…" for k in keys) + ", …}"
     if isinstance(value, list):
-        if not value:
+        value_list = cast(list[object], value)
+        if not value_list:
             return "[]"
-        if all(isinstance(item, str) for item in value[:5]):
-            preview = ", ".join(value[:5])
-            suffix = ", …" if len(value) > 5 else ""
+        if all(isinstance(item, str) for item in value_list[:5]):
+            preview_items = cast(list[str], value_list[:5])
+            preview = ", ".join(preview_items)
+            suffix = ", …" if len(value_list) > 5 else ""
             return f"[{preview}{suffix}]"
-        if len(value) > 10:
-            return f"[{len(value)} items]"
+        if len(value_list) > 10:
+            return f"[{len(value_list)} items]"
     return None
 
 
@@ -245,9 +252,11 @@ def _summarize_graph_node(value: dict[str, object]) -> str | None:
     props = value.get("properties")
     if not isinstance(labels, list) or not isinstance(props, dict):
         return None
+    props_dict = cast(dict[str, object], props)
     label = labels[0] if labels else "Node"
-    name, namespace = _extract_k8s_name_namespace(props)
-    phase = _extract_k8s_phase(props)
+    label = str(label)
+    name, namespace = _extract_k8s_name_namespace(props_dict)
+    phase = _extract_k8s_phase(props_dict)
     if name and namespace:
         base = f"{label} {namespace}/{name}"
     elif name:
@@ -274,8 +283,9 @@ def _extract_k8s_name_namespace(
 ) -> tuple[str | None, str | None]:
     metadata = props.get("metadata")
     if isinstance(metadata, dict):
-        name = metadata.get("name")
-        namespace = metadata.get("namespace")
+        metadata_dict = cast(dict[str, object], metadata)
+        name = metadata_dict.get("name")
+        namespace = metadata_dict.get("namespace")
         return _to_str(name), _to_str(namespace)
     name = props.get("name")
     namespace = props.get("namespace")
@@ -285,7 +295,8 @@ def _extract_k8s_name_namespace(
 def _extract_k8s_phase(props: dict[str, object]) -> str | None:
     status = props.get("status")
     if isinstance(status, dict):
-        return _to_str(status.get("phase"))
+        status_dict = cast(dict[str, object], status)
+        return _to_str(status_dict.get("phase"))
     return None
 
 
@@ -299,7 +310,7 @@ def _pretty_cypher(cypher: str) -> str:
     text = cypher.strip().rstrip(";")
     if not text:
         return text
-    keywords = [
+    keywords: list[str] = [
         "OPTIONAL MATCH",
         "MATCH",
         "UNWIND",
@@ -310,12 +321,12 @@ def _pretty_cypher(cypher: str) -> str:
         "SKIP",
         "LIMIT",
     ]
+
     def _normalize_ws(value: str) -> str:
         return re.sub(r"\s+", " ", value).strip()
 
     normalized = _normalize_ws(text)
     for kw in sorted(keywords, key=len, reverse=True):
-        normalized = re.sub(
-            rf"(?i)\b{re.escape(kw)}\b", f"\n{kw}", normalized
-        )
+        kw_str = str(kw)
+        normalized = re.sub(rf"(?i)\b{re.escape(kw_str)}\b", f"\n{kw_str}", normalized)
     return normalized.strip()

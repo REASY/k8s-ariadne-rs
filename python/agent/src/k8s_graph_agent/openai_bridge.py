@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,19 +171,18 @@ def _build_synthesizer():
         return SreResponseSynthesizer()
     max_rows = int(os.environ.get("K8S_GRAPH_BRIDGE_MAX_ROWS", "25"))
     max_cell_chars = int(os.environ.get("K8S_GRAPH_BRIDGE_MAX_CELL_CHARS", "120"))
-    include_cypher = (
-        os.environ.get("K8S_GRAPH_BRIDGE_INCLUDE_CYPHER", "false").lower()
-        in {"1", "true", "yes"}
-    )
-    cypher_fence = (
-        os.environ.get("K8S_GRAPH_BRIDGE_CYPHER_FENCE", "true").lower()
-        in {"1", "true", "yes"}
-    )
+    include_cypher = os.environ.get(
+        "K8S_GRAPH_BRIDGE_INCLUDE_CYPHER", "false"
+    ).lower() in {"1", "true", "yes"}
+    cypher_fence = os.environ.get("K8S_GRAPH_BRIDGE_CYPHER_FENCE", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     cypher_format = os.environ.get("K8S_GRAPH_BRIDGE_CYPHER_FORMAT", "pretty").lower()
-    compact_values = (
-        os.environ.get("K8S_GRAPH_BRIDGE_COMPACT_VALUES", "true").lower()
-        in {"1", "true", "yes"}
-    )
+    compact_values = os.environ.get(
+        "K8S_GRAPH_BRIDGE_COMPACT_VALUES", "true"
+    ).lower() in {"1", "true", "yes"}
     return WebUiResponseSynthesizer(
         max_rows=max_rows,
         include_cypher=include_cypher,
@@ -250,7 +249,7 @@ def _configure_cors(app: FastAPI) -> None:
     origins = os.environ.get("K8S_GRAPH_BRIDGE_CORS_ORIGINS", "*")
     allow_origins = [origin.strip() for origin in origins.split(",") if origin.strip()]
     app.add_middleware(
-        CORSMiddleware,
+        cast(Any, CORSMiddleware),
         allow_origins=allow_origins or ["*"],
         allow_credentials=True,
         allow_methods=["*"],

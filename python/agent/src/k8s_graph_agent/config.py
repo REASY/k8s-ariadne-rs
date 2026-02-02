@@ -95,9 +95,7 @@ def _normalize_provider(provider: str | None) -> str | None:
     return lowered
 
 
-def _coerce_temperature(
-    model: str, provider: str | None, temperature: float
-) -> float:
+def _coerce_temperature(model: str, provider: str | None, temperature: float) -> float:
     normalized = model.strip().lower()
     if "/" in normalized:
         normalized = normalized.split("/", 1)[1]

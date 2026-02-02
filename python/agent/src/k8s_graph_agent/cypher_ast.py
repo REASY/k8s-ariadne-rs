@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from antlr4 import CommonTokenStream, InputStream
+from antlr4 import CommonTokenStream, InputStream, ParserRuleContext
 from antlr4.error.ErrorListener import ErrorListener
 
 from antlr4_cypher import CypherLexer, CypherParser
@@ -15,7 +15,7 @@ class CypherParseError(ValueError):
 @dataclass(frozen=True)
 class CypherAst:
     text: str
-    tree: object
+    tree: ParserRuleContext
     parser: CypherParser
     tokens: CommonTokenStream
 
@@ -24,7 +24,7 @@ class _CypherErrorListener(ErrorListener):
     def __init__(self) -> None:
         self.errors: list[str] = []
 
-    def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):  # type: ignore[override]
+    def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
         self.errors.append(f"line {line}:{column} {msg}")
 
 

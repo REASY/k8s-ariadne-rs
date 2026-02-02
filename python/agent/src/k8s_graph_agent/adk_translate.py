@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import asyncio
 import logging
 import os
 import re
 import uuid
+from typing import Any, Coroutine
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -50,11 +51,12 @@ class TranslationOutcome:
 class AdkCypherTranslator:
     mcp: McpClient
     config: AdkConfig
+    _runner: tuple[Any, Any] | None = field(init=False, default=None)
+    _validator: CypherSchemaValidator | None = field(init=False, default=None)
+    _session_service: Any | None = field(init=False, default=None)
+    _logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
-        self._runner = None
-        self._validator = None
-        self._session_service = None
         self._logger = logging.getLogger(__name__)
 
     def translate(self, question: str) -> CypherQuery:
@@ -200,7 +202,7 @@ class AdkCypherTranslator:
             error=last_error or "Cypher translation failed after retries",
         )
 
-    def _get_runner(self) -> tuple[object, object]:
+    def _get_runner(self) -> tuple[Any, Any]:
         if self._runner is not None:
             return self._runner
         try:
@@ -226,7 +228,7 @@ class AdkCypherTranslator:
         if use_native_gemini and self.config.api_key:
             os.environ.setdefault("GOOGLE_API_KEY", self.config.api_key)
 
-        lite_llm_kwargs: dict[str, object] = {}
+        lite_llm_kwargs: dict[str, Any] = {}
         if self.config.api_key and not use_native_gemini:
             lite_llm_kwargs["api_key"] = self.config.api_key
         if self.config.base_url and not use_native_gemini:
@@ -300,8 +302,8 @@ def _is_gemini_provider(provider: str | None, model: str) -> bool:
     return model.strip().lower().startswith(("gemini", "google/gemini", "gemini/"))
 
 
-def _build_generate_content_config(config: AdkConfig, types: object) -> object:
-    kwargs: dict[str, object] = {
+def _build_generate_content_config(config: AdkConfig, types: Any) -> Any:
+    kwargs: dict[str, Any] = {
         "temperature": config.temperature,
         "max_output_tokens": config.max_output_tokens,
     }
@@ -315,7 +317,7 @@ def _build_generate_content_config(config: AdkConfig, types: object) -> object:
     return types.GenerateContentConfig(**kwargs)
 
 
-def _build_http_options(config: AdkConfig, types: object) -> object | None:
+def _build_http_options(config: AdkConfig, types: Any) -> Any | None:
     headers: dict[str, str] = {}
     base_url = config.base_url
     api_version: str | None = None
@@ -342,7 +344,7 @@ def _normalize_gemini_base_url(base_url: str) -> tuple[str, str | None]:
 
 
 def _run_agent(
-    runner: object, config: AdkConfig, content: object, session_id: str
+    runner: Any, config: AdkConfig, content: Any, session_id: str
 ) -> tuple[str, "TokenUsage"]:
     response_text = ""
     usage = TokenUsage()
@@ -387,7 +389,7 @@ def _build_retry_prompt(base_prompt: str, cypher: str, error: str) -> str:
     )
 
 
-def _run_async(coro: object) -> None:
+def _run_async(coro: Coroutine[Any, Any, Any]) -> None:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -416,7 +418,7 @@ def _strip_code_fences(text: str) -> str:
     return text
 
 
-def _summarize_event(event: object) -> str:
+def _summarize_event(event: Any) -> str:
     pieces: list[str] = [f"type={type(event).__name__}"]
     is_final = getattr(event, "is_final_response", None)
     if callable(is_final):
@@ -480,7 +482,7 @@ class TokenUsage:
         self.total_tokens: int | None = None
         self._logger = logging.getLogger(__name__)
 
-    def update_from_event(self, event: object) -> None:
+    def update_from_event(self, event: Any) -> None:
         usage = getattr(event, "usage_metadata", None)
         if usage is None:
             return
@@ -523,7 +525,7 @@ class TokenUsage:
         )
 
 
-def _read_usage_value(usage: object, keys: list[str]) -> int | None:
+def _read_usage_value(usage: Any, keys: list[str]) -> int | None:
     for key in keys:
         if isinstance(usage, dict) and key in usage:
             value = usage.get(key)

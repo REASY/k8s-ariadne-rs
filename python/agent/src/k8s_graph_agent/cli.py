@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+from typing import cast
 
 from .agent import GraphAgent, GraphMcpClient
 from .config import AgentConfig, AdkConfig
@@ -118,7 +119,7 @@ def _print_rows(result: object, limit: int) -> None:
         print("\nRows:")
         print(json.dumps(result, ensure_ascii=True))
         return
-    rows = [row for row in result if isinstance(row, dict)]
+    rows = [cast(dict[str, object], row) for row in result if isinstance(row, dict)]
     if not rows:
         print("\nRows: none")
         return

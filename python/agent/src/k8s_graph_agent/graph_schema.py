@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
-from typing import Iterable
+from typing import Iterable, cast
 
 from .mcp_client import McpClient, extract_json_content
 from .models import JsonObject
@@ -52,7 +52,7 @@ class GraphSchema:
             return None
         if not isinstance(payload, dict):
             return None
-        return cls.from_payload(payload)
+        return cls.from_payload(cast(JsonObject, payload))
 
     @classmethod
     def from_payload(cls, payload: JsonObject) -> "GraphSchema" | None:

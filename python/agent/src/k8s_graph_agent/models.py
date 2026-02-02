@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence, TypeAlias
+from typing import TypeAlias
 
 JsonValue: TypeAlias = (
-    None | bool | int | float | str | Mapping[str, "JsonValue"] | Sequence["JsonValue"]
+    None | bool | int | float | str | dict[str, "JsonValue"] | list["JsonValue"]
 )
 JsonObject: TypeAlias = dict[str, JsonValue]
 

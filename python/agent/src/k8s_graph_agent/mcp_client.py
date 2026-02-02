@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import itertools
 import json
-from typing import Iterable, Protocol
+from typing import Any, Iterable, Iterator, Protocol, cast
 
 from .models import JsonObject, JsonValue
 
@@ -47,15 +47,17 @@ class StreamableHttpMcpClient:
     client_version: str
     auth_token: str | None = None
     protocol_version: str = "2025-03-26"
+    _http: Any = field(init=False)
+    _id_counter: Iterator[int] = field(init=False)
+    _session_id: str | None = field(init=False, default=None)
+    _initialized: bool = field(init=False, default=False)
+    _server_info: JsonObject | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         import httpx
 
         self._http = httpx.Client(timeout=self.timeout_seconds)
         self._id_counter = itertools.count(1)
-        self._session_id: str | None = None
-        self._initialized = False
-        self._server_info: JsonObject | None = None
 
     def initialize(self) -> JsonObject:
         if self._initialized and self._server_info is not None:
@@ -68,17 +70,19 @@ class StreamableHttpMcpClient:
         result = self._request("initialize", params)
         if not isinstance(result, dict):
             raise McpProtocolError("initialize returned non-object result")
-        self._server_info = result
+        result_obj = cast(JsonObject, result)
+        self._server_info = result_obj
         self._initialized = True
         self._notify_initialized()
-        return result
+        return result_obj
 
     def list_tools(self) -> list[JsonObject]:
         self._ensure_initialized()
         result = self._request("tools/list", {})
         if not isinstance(result, dict):
             raise McpProtocolError("tools/list returned non-object result")
-        tools = result.get("tools", [])
+        result_obj = cast(JsonObject, result)
+        tools = result_obj.get("tools", [])
         if not isinstance(tools, list):
             raise McpProtocolError("tools/list returned invalid tools list")
         return [tool for tool in tools if isinstance(tool, dict)]
@@ -88,7 +92,8 @@ class StreamableHttpMcpClient:
         result = self._request("prompts/list", {})
         if not isinstance(result, dict):
             raise McpProtocolError("prompts/list returned non-object result")
-        prompts = result.get("prompts", [])
+        result_obj = cast(JsonObject, result)
+        prompts = result_obj.get("prompts", [])
         if not isinstance(prompts, list):
             raise McpProtocolError("prompts/list returned invalid prompts list")
         return [prompt for prompt in prompts if isinstance(prompt, dict)]
@@ -101,7 +106,7 @@ class StreamableHttpMcpClient:
         result = self._request("prompts/get", params)
         if not isinstance(result, dict):
             raise McpProtocolError("prompts/get returned non-object result")
-        return result
+        return cast(JsonObject, result)
 
     def call_tool(self, name: str, arguments: JsonObject | None = None) -> JsonObject:
         self._ensure_initialized()
@@ -111,7 +116,7 @@ class StreamableHttpMcpClient:
         result = self._request("tools/call", params)
         if not isinstance(result, dict):
             raise McpProtocolError("tools/call returned non-object result")
-        return result
+        return cast(JsonObject, result)
 
     def close(self) -> None:
         self._http.close()
@@ -136,7 +141,7 @@ class StreamableHttpMcpClient:
         if "error" in response:
             error = response.get("error")
             if isinstance(error, dict):
-                raise JsonRpcError(error)
+                raise JsonRpcError(cast(JsonObject, error))
             raise McpProtocolError("json-rpc error returned without error object")
         if "result" not in response:
             raise McpProtocolError("json-rpc response missing result")

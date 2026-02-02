@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 
 from .mcp_client import McpClient, extract_json_content
@@ -12,6 +12,7 @@ from .translate import CypherTranslator
 @dataclass
 class GraphMcpClient:
     mcp: McpClient
+    _logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class GraphAgent:
     graph: GraphMcpClient
     translator: CypherTranslator
     synthesizer: ResponseSynthesizer
+    _logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(__name__)

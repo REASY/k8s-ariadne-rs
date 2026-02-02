@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, cast
 
-from .models import JsonObject
+from .models import JsonObject, JsonValue
 
 
 def extract_prompt_text(prompt_result: JsonObject) -> str | None:
@@ -24,15 +24,16 @@ def extract_prompt_text(prompt_result: JsonObject) -> str | None:
 
 def _extract_text_from_content(content: object) -> str | None:
     if isinstance(content, dict):
-        content_type = content.get("type")
+        content_dict = cast(dict[str, JsonValue], content)
+        content_type = content_dict.get("type")
         if content_type == "text":
-            text = content.get("text")
+            text = content_dict.get("text")
             if isinstance(text, str):
                 return text
-        text = content.get("text")
+        text = content_dict.get("text")
         if isinstance(text, str):
             return text
-        parts = content.get("parts")
+        parts = content_dict.get("parts")
         if isinstance(parts, list):
             return _join_parts(parts)
     return None
@@ -43,7 +44,8 @@ def _join_parts(parts: Iterable[object]) -> str | None:
     for part in parts:
         if not isinstance(part, dict):
             continue
-        text = part.get("text")
+        part_dict = cast(dict[str, JsonValue], part)
+        text = part_dict.get("text")
         if isinstance(text, str):
             collected.append(text)
     if not collected:

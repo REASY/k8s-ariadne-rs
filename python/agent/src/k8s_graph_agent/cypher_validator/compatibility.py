@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from .ast_utils import _is_function_context, _iter_rule_contexts
 from .text_utils import _looks_like_pattern_expression, _strip_string_literals
@@ -34,7 +35,7 @@ _UNSUPPORTED_FUNCTIONS = {
 
 
 def _find_compatibility_issues(
-    text: str, tree: object | None, parser: object | None
+    text: str, tree: Any | None, parser: Any | None
 ) -> list[str]:
     stripped = _strip_string_literals(text)
     issues: list[str] = []
