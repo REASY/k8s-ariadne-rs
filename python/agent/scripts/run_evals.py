@@ -9,11 +9,20 @@ import os
 from pathlib import Path
 import re
 from typing import Iterator
+import sys
+import time
+from multiprocessing import get_context
+from multiprocessing.process import BaseProcess
 
 from k8s_graph_agent.eval.runner import run_evaluation
 
 
 DEFAULT_MODELS = [
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+    "claude-opus-4-5-20251101",
+    "deepseek-r1",
     "openai/gpt-5-mini-2025-08-07",
     "openai/gpt-5-nano-2025-08-07",
     "openai/gpt-5.2-2025-12-11",
@@ -21,11 +30,6 @@ DEFAULT_MODELS = [
     "gemini-2.5-flash",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
-    "claude-sonnet-4-20250514",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
-    "claude-opus-4-5-20251101",
-    "deepseek-r1",
 ]
 
 
@@ -69,11 +73,21 @@ def main() -> None:
         default=Path("eval/runs"),
         help="Directory to store run folders (default: eval/runs).",
     )
+    parser.add_argument(
+        "--model-parallelism",
+        type=int,
+        help=(
+            "Run multiple models in parallel using separate processes. "
+            "Defaults to K8S_GRAPH_EVAL_MODEL_PARALLELISM/EVAL_MODEL_PARALLELISM "
+            "or 1."
+        ),
+    )
     args = parser.parse_args()
 
     models = _resolve_models(args.models, args.preset)
     if not models:
         raise SystemExit("No models provided. Use --models or set EVAL_MODELS.")
+    model_parallelism = _model_parallelism(args.model_parallelism)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = args.output_dir / timestamp
@@ -85,12 +99,24 @@ def main() -> None:
         "mode": args.mode,
         "runs": args.runs,
         "models": models,
+        "model_parallelism": model_parallelism,
         "parallelism": os.environ.get("K8S_GRAPH_EVAL_PARALLELISM")
         or os.environ.get("EVAL_PARALLELISM"),
     }
     (run_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
+
+    if model_parallelism > 1 and len(models) > 1:
+        _run_models_in_parallel(
+            models=models,
+            run_dir=run_dir,
+            dataset=args.dataset,
+            mode=args.mode,
+            runs=args.runs,
+            model_parallelism=model_parallelism,
+        )
+        return
 
     for model in models:
         provider = _provider_override(model, _detect_provider(model))
@@ -210,6 +236,112 @@ def _model_env(provider: str | None, model: str) -> tuple[dict[str, str], list[s
         if base_url:
             updates["LLM_BASE_URL"] = base_url
     return updates, clears
+
+
+def _model_parallelism(cli_value: int | None) -> int:
+    if cli_value is not None:
+        return max(1, cli_value)
+    raw = os.environ.get("K8S_GRAPH_EVAL_MODEL_PARALLELISM") or os.environ.get(
+        "EVAL_MODEL_PARALLELISM", "1"
+    )
+    try:
+        value = int(raw)
+    except ValueError:
+        return 1
+    return max(1, value)
+
+
+def _run_models_in_parallel(
+    *,
+    models: list[str],
+    run_dir: Path,
+    dataset: Path,
+    mode: str,
+    runs: int,
+    model_parallelism: int,
+) -> None:
+    ctx = get_context("spawn")
+    pending = []
+    failures: list[tuple[str, int]] = []
+
+    for model in models:
+        provider = _provider_override(model, _detect_provider(model))
+        output_path = run_dir / f"results_{_sanitize_model(model)}.jsonl"
+        process = ctx.Process(
+            target=_run_model_process,
+            kwargs={
+                "model": model,
+                "provider": provider,
+                "dataset": dataset,
+                "mode": mode,
+                "runs": runs,
+                "output_path": output_path,
+                "run_dir": run_dir,
+            },
+        )
+        process.start()
+        pending.append((process, model))
+        while len(pending) >= model_parallelism:
+            _drain_finished(pending, failures)
+            if len(pending) >= model_parallelism:
+                time.sleep(0.05)
+
+    while pending:
+        _drain_finished(pending, failures)
+        if pending:
+            time.sleep(0.05)
+
+    if failures:
+        failed = ", ".join(f"{model} (exit {code})" for model, code in failures)
+        raise SystemExit(f"Model evals failed: {failed}")
+
+
+def _drain_finished(
+    pending: list[tuple[BaseProcess, str]],
+    failures: list[tuple[str, int]],
+) -> None:
+    for entry in list(pending):
+        process, model = entry
+        if process.is_alive():
+            continue
+        process.join()
+        pending.remove(entry)
+        if process.exitcode not in {0, None}:
+            failures.append((model, process.exitcode or 1))
+
+
+def _run_model_process(
+    *,
+    model: str,
+    provider: str | None,
+    dataset: Path,
+    mode: str,
+    runs: int,
+    output_path: Path,
+    run_dir: Path,
+) -> None:
+    env_updates, env_clears = _model_env(provider, model)
+    if not os.environ.get("K8S_GRAPH_LOG_FILE") and not os.environ.get(
+        "K8S_GRAPH_LOG_DIR"
+    ):
+        env_updates["K8S_GRAPH_LOG_FILE"] = str(
+            run_dir / f"eval_{_sanitize_model(model)}.log"
+        )
+    print(
+        f"[eval] model={model} provider={provider or 'auto'} output={output_path}",
+        flush=True,
+    )
+    try:
+        with _temp_env(env_updates, env_clears):
+            run_evaluation(
+                dataset_path=dataset,
+                mode=mode,
+                runs=runs,
+                output_path=output_path,
+            )
+    except Exception as exc:  # pragma: no cover - subprocess crash
+        print(f"[eval] model={model} failed: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc
 
 
 @contextmanager
