@@ -30,6 +30,18 @@ class CypherTranslation(BaseModel):
     )
 
 
+class CypherTranslationStrict(BaseModel):
+    cypher: str = Field(..., description="Cypher query to run against the graph")
+    notes: str | None = Field(
+        ...,
+        description="Clarifications or assumptions about the query (nullable).",
+    )
+    confidence: float | None = Field(
+        ...,
+        description="Confidence score from 0.0 to 1.0 (nullable).",
+    )
+
+
 @dataclass(frozen=True)
 class TranslationAttempt:
     attempt: int
@@ -243,14 +255,29 @@ class AdkCypherTranslator:
 
         litellm.set_verbose = False
 
-        instruction = (
-            "You translate questions about a Kubernetes graph into a single Cypher query. "
-            "Always respect the schema and query rules included in the prompt. "
-            "Return only JSON with keys: cypher (string), optional notes (string), "
-            "optional confidence (number between 0 and 1)."
+        enforce_json = use_native_gemini or (
+            _is_openai_provider(self.config.provider, self.config.model)
+            and _supports_openai_json_schema(self.config.provider, self.config.model)
         )
+        if enforce_json and _is_openai_provider(
+            self.config.provider, self.config.model
+        ):
+            instruction = (
+                "You translate questions about a Kubernetes graph into a single Cypher query. "
+                "Always respect the schema and query rules included in the prompt. "
+                "Return only JSON with keys: cypher, notes, confidence. "
+                "If notes or confidence are unknown, set them to null."
+            )
+            output_schema = CypherTranslationStrict
+        else:
+            instruction = (
+                "You translate questions about a Kubernetes graph into a single Cypher query. "
+                "Always respect the schema and query rules included in the prompt. "
+                "Return only JSON with keys: cypher (string), optional notes (string), "
+                "optional confidence (number between 0 and 1)."
+            )
+            output_schema = CypherTranslation if enforce_json else None
         generate_config = _build_generate_content_config(self.config, types)
-        output_schema = CypherTranslation if use_native_gemini else None
         if use_native_gemini:
             model = Gemini(model=model_name)
         elif use_native_anthropic:
@@ -326,6 +353,25 @@ def _is_anthropic_provider(provider: str | None, model: str) -> bool:
     return normalized.startswith(
         ("anthropic/claude", "claude/")
     ) or normalized.startswith("claude")
+
+
+def _is_openai_provider(provider: str | None, model: str) -> bool:
+    if provider and provider.strip().lower() in {"openai", "openai-compatible"}:
+        return True
+    normalized = model.strip().lower()
+    return normalized.startswith(("openai/", "gpt-", "o1", "o3", "o4", "chatgpt"))
+
+
+def _supports_openai_json_schema(provider: str | None, model: str) -> bool:
+    raw = os.environ.get("K8S_GRAPH_DISABLE_OPENAI_JSON_SCHEMA") or os.environ.get(
+        "ADK_DISABLE_OPENAI_JSON_SCHEMA"
+    )
+    if raw and raw.strip().lower() in {"1", "true", "yes"}:
+        return False
+    normalized = model.strip().lower()
+    if "deepseek" in normalized:
+        return False
+    return _is_openai_provider(provider, model)
 
 
 def _build_generate_content_config(config: AdkConfig, types: Any) -> Any:

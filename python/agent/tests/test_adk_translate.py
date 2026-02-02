@@ -3,6 +3,8 @@ import unittest
 from k8s_graph_agent.adk_translate import (
     _is_anthropic_provider,
     _is_gemini_provider,
+    _is_openai_provider,
+    _supports_openai_json_schema,
     _normalize_gemini_base_url,
     _strip_code_fences,
     _strip_provider_prefix,
@@ -72,6 +74,22 @@ class TestAnthropicHelpers(unittest.TestCase):
         )
         self.assertFalse(
             _is_anthropic_provider(None, "openai/claude-sonnet-4-20250514")
+        )
+
+
+class TestOpenaiHelpers(unittest.TestCase):
+    def test_is_openai_provider(self) -> None:
+        self.assertTrue(_is_openai_provider("openai", "claude-sonnet-4-20250514"))
+        self.assertTrue(_is_openai_provider("openai-compatible", "deepseek-r1"))
+        self.assertTrue(_is_openai_provider(None, "openai/gpt-5.2"))
+        self.assertTrue(_is_openai_provider(None, "gpt-5.2-2025-12-11"))
+        self.assertTrue(_is_openai_provider("anthropic", "gpt-5.2"))
+
+    def test_supports_openai_json_schema(self) -> None:
+        self.assertTrue(_supports_openai_json_schema("openai", "gpt-5.2-2025-12-11"))
+        self.assertFalse(_supports_openai_json_schema("openai", "deepseek-r1"))
+        self.assertFalse(
+            _supports_openai_json_schema("openai-compatible", "openai/deepseek-r1")
         )
 
 
