@@ -4,20 +4,13 @@ import logging
 
 from ..cypher_ast import CypherAst, CypherParseError, parse_cypher
 from ..graph_schema import GraphSchema
-from .ast_utils import _is_pattern_context, _iter_rule_contexts
 from .compatibility import _find_compatibility_issues
 from .errors import (
     CypherCompatibilityError,
     CypherValidationError,
     SchemaValidationError,
 )
-from .extract import (
-    _collect_variable_labels,
-    _extract_rel_types,
-    _format_snippet,
-    _iter_relationships,
-    _resolve_labels,
-)
+from .visitor import SchemaValidationVisitor, _resolve_labels
 from .model import SchemaViolation
 from .normalize import _normalize_exists_subqueries, _parse_with_fallback
 from .schema_rules import _allowed_pairs, _direction_from_match, _is_allowed
@@ -63,45 +56,50 @@ class CypherSchemaValidator:
         if compatibility_issues:
             raise CypherCompatibilityError(compatibility_issues)
 
-        pattern_parts: list[tuple[str, str]] = []
+        variable_labels: dict[str, set[str]] = {}
+        relationships = []
         for ast in asts:
-            for rule_name, ctx, rule_path in _iter_rule_contexts(ast.tree, ast.parser):
-                if _is_pattern_context(rule_name):
-                    pattern_parts.append(("/".join(rule_path), ctx.getText()))
+            visitor = SchemaValidationVisitor(ast.parser)
+            visitor.visit(ast.tree)
+            for var, labels in visitor.variable_labels.items():
+                variable_labels.setdefault(var, set()).update(labels)
+            relationships.extend(visitor.relationships)
 
-        variable_labels = _collect_variable_labels(
-            [pattern_text for _, pattern_text in pattern_parts]
-        )
+        resolved_labels = {
+            var: frozenset(labels) for var, labels in variable_labels.items()
+        }
 
         violations: list[SchemaViolation] = []
-        for rule_path, pattern_text in pattern_parts:
-            for rel_use in _iter_relationships(pattern_text):
-                rel_types = _extract_rel_types(rel_use.rel_text)
-                if not rel_types:
-                    continue
-                left_labels = _resolve_labels(
-                    rel_use.left_labels, rel_use.left_var, variable_labels
+        for rel_use in relationships:
+            if not rel_use.rel_types:
+                continue
+            left_labels = _resolve_labels(
+                rel_use.left_node.labels, rel_use.left_node.var, resolved_labels
+            )
+            right_labels = _resolve_labels(
+                rel_use.right_node.labels, rel_use.right_node.var, resolved_labels
+            )
+            if not left_labels or not right_labels:
+                continue
+            direction = _direction_from_match(rel_use.left_dir, rel_use.right_dir)
+            if _is_allowed(
+                self._schema,
+                list(rel_use.rel_types),
+                left_labels,
+                right_labels,
+                direction,
+            ):
+                continue
+            violations.append(
+                SchemaViolation(
+                    rel_type="|".join(rel_use.rel_types),
+                    left_labels=left_labels,
+                    right_labels=right_labels,
+                    direction=direction,
+                    snippet=rel_use.snippet,
+                    rule_path=rel_use.rule_path,
+                    allowed_pairs=_allowed_pairs(self._schema, list(rel_use.rel_types)),
                 )
-                right_labels = _resolve_labels(
-                    rel_use.right_labels, rel_use.right_var, variable_labels
-                )
-                if not left_labels or not right_labels:
-                    continue
-                direction = _direction_from_match(rel_use.left_dir, rel_use.right_dir)
-                if _is_allowed(
-                    self._schema, rel_types, left_labels, right_labels, direction
-                ):
-                    continue
-                violations.append(
-                    SchemaViolation(
-                        rel_type="|".join(rel_types),
-                        left_labels=left_labels,
-                        right_labels=right_labels,
-                        direction=direction,
-                        snippet=_format_snippet(rel_use),
-                        rule_path=rule_path,
-                        allowed_pairs=_allowed_pairs(self._schema, rel_types),
-                    )
-                )
+            )
         if violations:
             raise SchemaValidationError(violations)

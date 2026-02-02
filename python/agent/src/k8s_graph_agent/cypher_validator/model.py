@@ -4,23 +4,22 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class _RelationshipUse:
-    left_node: str
-    right_node: str
-    rel_text: str
-    left_dir: str
-    right_dir: str
-    left_var: str | None
-    right_var: str | None
-    left_labels: tuple[str, ...]
-    right_labels: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class _NodeUse:
     text: str
     var: str | None
     labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _RelationshipUse:
+    left_node: _NodeUse
+    right_node: _NodeUse
+    rel_text: str
+    rel_types: tuple[str, ...]
+    left_dir: str
+    right_dir: str
+    snippet: str
+    rule_path: str
 
 
 @dataclass(frozen=True)

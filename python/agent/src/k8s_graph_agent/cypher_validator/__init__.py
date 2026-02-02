@@ -3,7 +3,7 @@
 Validation pipeline:
 1) Parse Cypher (ANTLR) with fallback normalization for EXISTS subqueries.
 2) Check Memgraph compatibility constraints (unsupported functions/constructs).
-3) Extract node/relationship patterns from parsed query text.
+3) Visit the parsed AST to extract node/relationship patterns.
 4) Resolve labels/variables across patterns.
 5) Validate relationship directions and labels against GraphSchema.
 6) Raise structured errors with actionable hints.
