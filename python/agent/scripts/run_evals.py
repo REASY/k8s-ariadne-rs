@@ -18,7 +18,6 @@ from k8s_graph_agent.eval.runner import run_evaluation
 
 
 DEFAULT_MODELS = [
-    "claude-sonnet-4-20250514",
     "claude-sonnet-4-5-20250929",
     "claude-haiku-4-5-20251001",
     "claude-opus-4-5-20251101",
