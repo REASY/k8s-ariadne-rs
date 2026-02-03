@@ -28,5 +28,6 @@ tracing = { workspace = true }
 schemars = { workspace = true }
 
 [dev-dependencies]
-http = "1"
-tower = "0.5"
+http = {  workspace = true }
+testcontainers = { workspace = true}
+tower = { workspace = true }
