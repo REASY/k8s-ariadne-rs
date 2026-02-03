@@ -364,6 +364,7 @@ impl ClusterStateResolver {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn get_logs(
         client: &Arc<Box<dyn KubeClient>>,
         containers: &[Arc<Container>],

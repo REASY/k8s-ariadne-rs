@@ -88,6 +88,7 @@ impl MemgraphAsync {
         F: FnOnce() -> Result<Memgraph> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel::<Command>();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
 
         // Spawn a dedicated OS thread that owns the Memgraph connection
         // and handles all requests synchronously and exclusively.
@@ -99,23 +100,25 @@ impl MemgraphAsync {
                 let mut mg = match connect_fn() {
                     Ok(mg) => mg,
                     Err(err) => {
-                        // If we fail to connect up front, we still need to drain incoming
-                        // messages and reply with the same error, so callers aren't left hanging.
-                        // However, since no sender is available to create requests yet, this
-                        // scenario mainly affects construction time; best we can do is exit.
-                        // Returning here drops rx and causes senders to fail immediately.
                         error!("MemgraphAsync: failed to connect: {err:?}");
+                        let _ = ready_tx.send(Err(err));
                         return;
                     }
                 };
+                let _ = ready_tx.send(Ok(()));
 
                 // Process requests until Shutdown is received or all senders are dropped
                 while let Ok(cmd) = rx.recv() {
                     match cmd {
                         Command::Create { lock, resp } => {
                             info!("memgraph: create");
-                            let state = lock.lock().expect("Failed to lock cluster state");
-                            let res = mg.create(&state);
+                            let (nodes, edges) = {
+                                let state = lock.lock().expect("Failed to lock cluster state");
+                                let nodes = state.get_nodes().cloned().collect::<Vec<_>>();
+                                let edges = state.get_edges().collect::<Vec<_>>();
+                                (nodes, edges)
+                            };
+                            let res = mg.create_from_snapshot(&nodes, &edges);
                             if let Err(err) = &res {
                                 error!("memgraph: create failed: {err}");
                             }
@@ -158,7 +161,14 @@ impl MemgraphAsync {
                 ))
             })?;
 
-        Ok(Self { tx })
+        match ready_rx.recv() {
+            Ok(Ok(())) => Ok(Self { tx }),
+            Ok(Err(err)) => Err(err),
+            Err(err) => Err(memgraph::MemgraphError::ConnectionError(format!(
+                "Memgraph actor failed to signal readiness: {err}"
+            ))
+            .into()),
+        }
     }
 
     /// Asynchronously create the graph from the provided ClusterState.

@@ -168,6 +168,7 @@ impl KubeClientImpl {
 }
 
 const LAST_N_LOG_LINES: i64 = 50;
+const STORE_READY_TIMEOUT_SECONDS: u64 = 10;
 
 #[async_trait]
 impl KubeClient for KubeClientImpl {
@@ -481,14 +482,38 @@ where
 {
     match store {
         Some(store) => {
-            store
-                .wait_until_ready()
-                .await
-                .expect(&format!("{kind} store is not ready"));
-            Ok(store.state())
+            let timeout_duration = store_ready_timeout();
+            match timeout(timeout_duration, store.wait_until_ready()).await {
+                Ok(wait_result) => {
+                    if let Err(err) = wait_result {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("{kind} store is not ready: {err}"),
+                        )
+                        .into());
+                    }
+                    Ok(store.state())
+                }
+                Err(_elapsed) => {
+                    warn!("Timed out waiting for {kind} store after {timeout_duration:?}",);
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("Timed out waiting for {kind} store readiness"),
+                    )
+                    .into())
+                }
+            }
         }
         None => Ok(Vec::new()),
     }
+}
+
+fn store_ready_timeout() -> Duration {
+    std::env::var("KUBE_STORE_READY_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(STORE_READY_TIMEOUT_SECONDS))
 }
 
 impl CachedKubeClient {

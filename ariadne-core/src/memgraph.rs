@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
+use crate::state::{ClusterStateDiff, GraphEdge};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
 use k8s_openapi::Metadata;
 use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record, SSLMode, TrustCallback};
@@ -155,7 +155,11 @@ impl Memgraph {
         }
     }
 
-    pub fn create(&mut self, cluster_state: &ClusterState) -> Result<()> {
+    pub fn create_from_snapshot(
+        &mut self,
+        nodes: &[GenericObject],
+        edges: &[GraphEdge],
+    ) -> Result<()> {
         self.ensure_connected()?;
         let s = Instant::now();
 
@@ -166,7 +170,7 @@ impl Memgraph {
 
         // Create nodes
         let mut unique_types: HashSet<ResourceType> = HashSet::new();
-        for node in cluster_state.get_nodes() {
+        for node in nodes {
             let create_query = Self::get_create_query(node)?;
             trace!("{}", create_query);
             self.connection
@@ -187,10 +191,14 @@ impl Memgraph {
         }
         // Create edges
         let mut unique_edges: HashSet<(ResourceType, ResourceType, Edge)> = HashSet::new();
-        for edge in cluster_state.get_edges() {
+        for edge in edges {
             let create_edge_query = format!("MATCH (u:{:?}), (v:{:?}) WHERE u.metadata.uid = '{}' AND v.metadata.uid = '{}' CREATE (u)-[:{:?}]->(v);", edge.source_type, edge.target_type, edge.source, edge.target, edge.edge_type);
             trace!("{}", create_edge_query);
-            unique_edges.insert((edge.source_type, edge.target_type, edge.edge_type));
+            unique_edges.insert((
+                edge.source_type.clone(),
+                edge.target_type.clone(),
+                edge.edge_type.clone(),
+            ));
             self.connection
                 .execute_without_results(&create_edge_query)
                 .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
@@ -200,8 +208,8 @@ impl Memgraph {
             .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
         info!(
             "Created a memgraph with {} nodes and {} edges in {}ms",
-            cluster_state.get_node_count(),
-            cluster_state.get_edge_count(),
+            nodes.len(),
+            edges.len(),
             s.elapsed().as_millis()
         );
 

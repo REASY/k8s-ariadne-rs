@@ -1,3 +1,4 @@
+use ariadne_core::errors::AriadneError;
 use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
@@ -70,8 +71,14 @@ pub const APP_VERSION: &str = shadow_rs::formatcp!(
 );
 
 async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
-    res.headers_mut()
-        .insert("x-version-id", APP_VERSION.parse().unwrap());
+    match APP_VERSION.parse() {
+        Ok(value) => {
+            res.headers_mut().insert("x-version-id", value);
+        }
+        Err(err) => {
+            warn!("Failed to parse x-version-id header value: {err}");
+        }
+    }
     res
 }
 
@@ -204,16 +211,25 @@ async fn main() -> errors::Result<()> {
 
     let http_host = std::env::var("HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
-    let http_addr: SocketAddr = format!("{}:{}", http_host, http_port).parse().unwrap();
+    let http_addr: SocketAddr = format!("{}:{}", http_host, http_port)
+        .parse()
+        .map_err(|err| {
+            AriadneError::from(std::io::Error::new(std::io::ErrorKind::InvalidInput, err))
+        })?;
     let svc = route.into_make_service_with_connect_info::<SocketAddr>();
-    let http_listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+    let http_listener = tokio::net::TcpListener::bind(http_addr)
+        .await
+        .map_err(AriadneError::from)?;
     let shutdown_token = token.clone();
     let svc_clone = svc.clone();
-    let f = tokio::spawn(async move {
+    let f: tokio::task::JoinHandle<errors::Result<()>> = tokio::spawn(async move {
         axum::serve(http_listener, svc_clone)
             .with_graceful_shutdown(shutdown_signal(shutdown_token))
             .await
-            .expect("Failed to start server")
+            .map_err(|err| {
+                AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+            })?;
+        Ok(())
     });
 
     info!(
@@ -246,7 +262,6 @@ async fn main() -> errors::Result<()> {
                 poll_interval,
             )
             .await
-            .unwrap()
         }))
     } else {
         info!("Full rebuild fallback loop disabled");
@@ -255,10 +270,16 @@ async fn main() -> errors::Result<()> {
 
     if let Some(fetch_state_handle) = fetch_state_handle {
         let (server_result, fallback_result) = tokio::join!(f, fetch_state_handle);
-        server_result.unwrap();
-        fallback_result.unwrap();
+        server_result.map_err(|err| {
+            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+        })??;
+        fallback_result.map_err(|err| {
+            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+        })??;
     } else {
-        f.await.unwrap();
+        f.await.map_err(|err| {
+            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+        })??;
     }
     info!("Server shutdown");
 
@@ -273,17 +294,21 @@ fn matches_ignore_ascii_case(value: &str, truthy: &[&str]) -> bool {
 
 async fn shutdown_signal(token: CancellationToken) {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(err) = signal::ctrl_c().await {
+            warn!("failed to install Ctrl+C handler: {err}");
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(err) => {
+                warn!("failed to install signal handler: {err}");
+            }
+        }
     };
 
     #[cfg(not(unix))]
