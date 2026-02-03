@@ -1266,6 +1266,7 @@ dependencies = [
     { name = "litellm" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "tenacity" },
     { name = "uv" },
     { name = "uvicorn" },
 ]
@@ -1286,6 +1287,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.45.0" },
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "tenacity", specifier = ">=9.1.2" },
     { name = "uv", specifier = ">=0.9.28" },
     { name = "uvicorn", specifier = ">=0.30.0" },
 ]

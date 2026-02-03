@@ -17,6 +17,7 @@ from ..agent import GraphMcpClient
 from ..config import AdkConfig, AgentConfig
 from ..mcp_client import StreamableHttpMcpClient
 from ..models import JsonValue
+from ..logging_utils import format_java_like
 from .loader import load_dataset
 from .models import EvalQuestion, ExpectedResult
 
@@ -108,8 +109,10 @@ def run_evaluation(
                     try:
                         record = future.result()
                     except Exception as exc:  # pragma: no cover
-                        logger.exception(
-                            "evaluation failed for question %s", question.id
+                        logger.error(
+                            "evaluation failed for question %s\n%s",
+                            question.id,
+                            format_java_like(exc),
                         )
                         record = _error_record(
                             model=adk_config.model,
@@ -155,7 +158,11 @@ def _run_question(
         )
     except Exception as exc:
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        logger.exception("evaluation failed for question %s", question.id)
+        logger.error(
+            "evaluation failed for question %s\n%s",
+            question.id,
+            format_java_like(exc),
+        )
         return _error_record(
             model=model,
             question_id=question.id,
@@ -260,8 +267,8 @@ def _build_clients(
 def _close_mcp(mcp: StreamableHttpMcpClient) -> None:
     try:
         mcp.close()
-    except Exception:
-        logger.debug("failed to close MCP client", exc_info=True)
+    except Exception as exc:
+        logger.debug("failed to close MCP client\n%s", format_java_like(exc))
 
 
 def _emit_record(output_handle: Any, record: EvalRecord) -> None:
@@ -347,11 +354,8 @@ def _install_thread_excepthook() -> None:
         thread_name = args.thread.name if args.thread is not None else "<unknown>"
         exc_type = args.exc_type or RuntimeError
         exc_value = args.exc_value or RuntimeError("thread exception without value")
-        logger.error(
-            "unhandled exception in thread %s",
-            thread_name,
-            exc_info=(exc_type, exc_value, args.exc_traceback),
-        )
+        message = format_java_like(exc_value, thread_name=thread_name)
+        logger.error(message)
 
     threading.excepthook = _hook
 

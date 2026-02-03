@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Coroutine
 
 from pydantic import BaseModel, Field, ValidationError
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import AdkConfig
 from .cypher_validator import CypherSchemaValidator, CypherValidationError
@@ -415,38 +416,128 @@ def _normalize_gemini_base_url(base_url: str) -> tuple[str, str | None]:
     return normalized, None
 
 
+def _gemini_request_retries(config: AdkConfig) -> int:
+    if not _is_gemini_provider(config.provider, config.model):
+        return 0
+    raw = os.environ.get("K8S_GRAPH_GEMINI_REQUEST_RETRIES") or os.environ.get(
+        "ADK_GEMINI_REQUEST_RETRIES"
+    )
+    if raw is None:
+        return 2
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 2
+
+
+def _gemini_request_retry_base_seconds() -> float:
+    raw = os.environ.get(
+        "K8S_GRAPH_GEMINI_REQUEST_RETRY_BASE_SECONDS"
+    ) or os.environ.get("ADK_GEMINI_REQUEST_RETRY_BASE_SECONDS")
+    if raw is None:
+        return 1.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 1.0
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _should_retry_gemini_error(config: AdkConfig, exc: Exception) -> bool:
+    if not _is_gemini_provider(config.provider, config.model):
+        return False
+    for err in _iter_exception_chain(exc):
+        status = getattr(err, "status_code", None) or getattr(err, "status", None)
+        if status == 502:
+            return True
+        message = str(err).lower()
+        if "bad gateway" in message and "502" in message:
+            return True
+        if (
+            "unexpected end of stream" in message
+            and "generativelanguage.googleapis.com" in message
+        ):
+            return True
+    return False
+
+
 def _run_agent(
     runner: Any, config: AdkConfig, content: Any, session_id: str
 ) -> tuple[str, "TokenUsage"]:
-    response_text = ""
-    usage = TokenUsage()
-    last_event_summary: str | None = None
-    for event in runner.run(
-        user_id=config.user_id,
-        session_id=session_id,
-        new_message=content,
-    ):
-        usage.update_from_event(event)
-        last_event_summary = _summarize_event(event)
-        if getattr(event, "is_final_response")() and getattr(event, "content", None):
-            parts = getattr(event.content, "parts", [])
-            if parts:
-                text_parts: list[str] = []
-                for part in parts:
-                    text = getattr(part, "text", None)
-                    thought = getattr(part, "thought", False)
-                    if isinstance(text, str) and not thought:
-                        text_parts.append(text)
-                if text_parts:
-                    response_text = "".join(text_parts)
-    if not response_text:
-        if last_event_summary:
-            raise ValueError(
-                f"ADK returned no response content; last_event={last_event_summary}"
-            )
-        raise ValueError("ADK returned no response content")
-    usage.log_if_present()
-    return response_text, usage
+    def _run_once() -> tuple[str, TokenUsage]:
+        response_text = ""
+        usage = TokenUsage()
+        last_event_summary: str | None = None
+        for event in runner.run(
+            user_id=config.user_id,
+            session_id=session_id,
+            new_message=content,
+        ):
+            usage.update_from_event(event)
+            last_event_summary = _summarize_event(event)
+            if getattr(event, "is_final_response")() and getattr(
+                event, "content", None
+            ):
+                parts = getattr(event.content, "parts", [])
+                if parts:
+                    text_parts: list[str] = []
+                    for part in parts:
+                        text = getattr(part, "text", None)
+                        thought = getattr(part, "thought", False)
+                        if isinstance(text, str) and not thought:
+                            text_parts.append(text)
+                    if text_parts:
+                        response_text = "".join(text_parts)
+        if not response_text:
+            if last_event_summary:
+                raise ValueError(
+                    f"ADK returned no response content; last_event={last_event_summary}"
+                )
+            raise ValueError("ADK returned no response content")
+        usage.log_if_present()
+        return response_text, usage
+
+    max_retries = _gemini_request_retries(config)
+    if max_retries <= 0 or not _is_gemini_provider(config.provider, config.model):
+        return _run_once()
+
+    base_delay = _gemini_request_retry_base_seconds()
+    total_attempts = max_retries + 1
+
+    def _log_retry(retry_state) -> None:
+        exc = None
+        if retry_state.outcome is not None:
+            exc = retry_state.outcome.exception()
+        delay = 0.0
+        if retry_state.next_action is not None:
+            delay = retry_state.next_action.sleep
+        logging.getLogger(__name__).warning(
+            "Gemini request failed; retrying in %.1fs (%d/%d): %s",
+            delay,
+            retry_state.attempt_number,
+            total_attempts,
+            exc,
+        )
+
+    retrying = Retrying(
+        stop=stop_after_attempt(total_attempts),
+        wait=wait_exponential(multiplier=base_delay, min=base_delay),
+        retry=retry_if_exception(lambda exc: _should_retry_gemini_error(config, exc)),
+        reraise=True,
+        before_sleep=_log_retry,
+    )
+    for attempt in retrying:
+        with attempt:
+            return _run_once()
+    raise RuntimeError("Retry loop exited without a response")
 
 
 def _build_retry_prompt(base_prompt: str, cypher: str, error: str) -> str:

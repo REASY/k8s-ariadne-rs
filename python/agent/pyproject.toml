@@ -20,6 +20,7 @@ dependencies = [
   "uvicorn>=0.30.0",
   "uv>=0.9.28",
   "anthropic>=0.77.0",
+  "tenacity>=9.1.2",
 ]
 
 [project.scripts]
