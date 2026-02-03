@@ -32,7 +32,7 @@ class SreResponseSynthesizer:
         lines = [
             "Facts:",
             f"- Question: {question}",
-            f"- Cypher: {cypher}",
+            f"- Cypher: \n{cypher}",
             f"- Rows returned: {row_count}",
         ]
         if sample_keys:
