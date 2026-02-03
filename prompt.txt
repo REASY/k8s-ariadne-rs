@@ -7,19 +7,27 @@ When generating Cypher queries, you MUST follow these rules:
 0. UNWIND + WHERE: Memgraph requires WHERE to follow a WITH or MATCH clause. If you UNWIND, you MUST add a WITH before any WHERE that filters the unwound variable.
 1. Relationship Direction: All relationships are directed. Use the exact arrow direction shown in the Node Connectivity section. If you need the reverse direction, swap the node order; do not reverse the arrow unless the schema explicitly lists it.
 2. Hostname/DNS Resolution: If a question includes a DNS name/hostname, first try the Host → Ingress → IngressServiceBackend → Service → EndpointSlice → EndpointAddress → Pod path from the schema. Do not guess Service names/namespaces or annotations.
-3. Variable Usage: Always reference variables directly, without square brackets.
+3. Query Efficiency: Avoid multiple OPTIONAL MATCH clauses in a single row when counting or aggregating across many labels; this creates cartesian explosions. Prefer a single OPTIONAL MATCH with label filters, or use CALL subqueries to aggregate per label and sum the counts.
+   Example (good):
+   MATCH (ns:Namespace)
+   OPTIONAL MATCH (n)-[:BelongsTo]->(ns)
+   WHERE n:Pod OR n:Service OR n:Ingress
+   WITH ns, count(DISTINCT n) AS total_objects
+   RETURN ns['metadata']['name'] AS namespace, total_objects
+   ORDER BY total_objects DESC
+4. Variable Usage: Always reference variables directly, without square brackets.
    - Correct: `p['status']['phase']`
    - Incorrect: `[p]['status']['phase']`
-4. Filtering Mandate: ALL filtering of properties MUST be done using the WHERE clause.
+5. Filtering Mandate: ALL filtering of properties MUST be done using the WHERE clause.
    Reasoning: The graph database does not support inline property filtering using curly braces {...} in a MATCH clause for map properties. Using WHERE is the only way to guarantee a valid query.
    Forbidden Pattern: NEVER use curly braces {...} to filter on properties directly inside a MATCH clause. This will generate an invalid query.
    Correct: `MATCH (p:Pod)-[:HasLogs]->(l:Logs) WHERE p.metadata.name = 'pyroscope-compactor-2' RETURN l.content AS logs LIMIT 1`
    Incorrect: `MATCH (p:Pod {metadata: {name: 'pyroscope-compactor-2'}})-[:HasLogs]->(l:Logs) RETURN l.content AS logs LIMIT 1`
-5. `EXISTS` Function: The `EXISTS` function is designed to check for a single pattern. For multiple conditions, you should use separate `EXISTS` calls.
-6. Property Names: Always use single quotes (') for property names when accessing them.
+6. `EXISTS` Function: The `EXISTS` function is designed to check for a single pattern. For multiple conditions, you should use separate `EXISTS` calls.
+7. Property Names: Always use single quotes (') for property names when accessing them.
    - Correct: `p['status']['phase']`
    - Incorrect: `p[status][phase]` or `p["status"]["phase"]`
-7. Resource Quantity Calculation: When dealing with resource requests or limits (CPU/memory), you MUST use the following CASE statement pattern to correctly parse the quantity suffixes (M, Mi, G, Gi, etc.) into a common unit like MiB. When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Limits and requests for memory are measured in bytes. It can be expresses memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. Or the power-of-two equivalents can be used: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: 128974848, 129e6, 129M, 128974848000m, 123Mi. Pay attention to the case of the suffixes.
+8. Resource Quantity Calculation: When dealing with resource requests or limits (CPU/memory), you MUST use the following CASE statement pattern to correctly parse the quantity suffixes (M, Mi, G, Gi, etc.) into a common unit like MiB. When dealing with pods and their resources (type `io.k8s.api.core.v1.ResourceRequirements`), make sure to parse the quantity correctly. Limits and requests for memory are measured in bytes. It can be expresses memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. Or the power-of-two equivalents can be used: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: 128974848, 129e6, 129M, 128974848000m, 123Mi. Pay attention to the case of the suffixes.
 ```cypher
 MATCH (p:Pod)
 UNWIND p['spec']['containers'] AS container
