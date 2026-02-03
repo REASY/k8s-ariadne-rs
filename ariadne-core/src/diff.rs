@@ -86,7 +86,7 @@ fn write_diff_section<T: fmt::Debug>(
             writeln!(f)?;
         }
         *first = false;
-        writeln!(f, "{}:", name)?;
+        writeln!(f, "{name}:")?;
         if !diff.added.is_empty() {
             writeln!(f, "  Added: {}", diff.added.len())?;
         }

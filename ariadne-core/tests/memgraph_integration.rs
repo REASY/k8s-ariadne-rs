@@ -86,7 +86,7 @@ fn build_cluster(uid: &str, name: &str) -> (Cluster, GenericObject) {
         id,
         resource_type: ResourceType::Cluster,
         attributes: Some(Box::new(ResourceAttributes::Cluster {
-            cluster: cluster.clone(),
+            cluster: Box::new(cluster.clone()),
         })),
     };
     (cluster, obj)

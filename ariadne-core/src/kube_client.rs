@@ -486,10 +486,9 @@ where
             match timeout(timeout_duration, store.wait_until_ready()).await {
                 Ok(wait_result) => {
                     if let Err(err) = wait_result {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("{kind} store is not ready: {err}"),
-                        )
+                        return Err(std::io::Error::other(format!(
+                            "{kind} store is not ready: {err}"
+                        ))
                         .into());
                     }
                     Ok(store.state())

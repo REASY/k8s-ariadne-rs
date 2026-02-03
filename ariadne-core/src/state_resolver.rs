@@ -40,6 +40,9 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace, warn};
 
+type IngressDerived = (Vec<Arc<Host>>, Vec<Arc<IngressServiceBackend>>);
+type EndpointSliceDerived = (Vec<Arc<Endpoint>>, Vec<Arc<EndpointAddress>>);
+
 pub struct ClusterStateResolver {
     cluster: Cluster,
     kube_client: Arc<Box<dyn KubeClient>>,
@@ -146,7 +149,7 @@ impl ClusterStateResolver {
         let info = kube_client.apiserver_version().await?;
         let cluster: Cluster = Cluster::new(
             ObjectIdentifier {
-                uid: format!("Cluster:{}", cluster_name),
+                uid: format!("Cluster:{cluster_name}"),
                 name: cluster_name.to_string(),
                 namespace: None,
                 resource_version: None,
@@ -178,7 +181,7 @@ impl ClusterStateResolver {
         let augmented = AugmentedClusterSnapshot {
             observed: last_snapshot,
             derived: derived_snapshot,
-            container_logs: container_logs,
+            container_logs,
         };
         Ok(augmented)
     }
@@ -249,17 +252,17 @@ impl ClusterStateResolver {
     fn get_derived_snapshot(snapshot: &ObservedClusterSnapshot) -> Result<DerivedClusterSnapshot> {
         let containers: Vec<Arc<Container>> = Self::get_containers(&snapshot.pods)?;
         let (hosts, ingress_service_backends) =
-            Self::get_derived_from_ingress(&snapshot.ingresses.as_slice())?;
+            Self::get_derived_from_ingress(snapshot.ingresses.as_slice())?;
 
         let (endpoints, endpoint_addresses) =
             Self::get_derived_from_endpoints_slices(&snapshot.endpoint_slices)?;
 
         Ok(DerivedClusterSnapshot {
-            containers: containers,
-            hosts: hosts,
-            ingress_service_backends: ingress_service_backends,
-            endpoints: endpoints,
-            endpoint_addresses: endpoint_addresses,
+            containers,
+            hosts,
+            ingress_service_backends,
+            endpoints,
+            endpoint_addresses,
         })
     }
 
@@ -476,7 +479,7 @@ impl ClusterStateResolver {
                 id: obj_id.clone(),
                 resource_type: ResourceType::Cluster,
                 attributes: Some(Box::new(ResourceAttributes::Cluster {
-                    cluster: snapshot.cluster.clone(),
+                    cluster: Box::new(snapshot.cluster.clone()),
                 })),
             };
             state.add_node(cluster_node);
@@ -557,7 +560,9 @@ impl ClusterStateResolver {
             state.add_node(GenericObject {
                 id: obj_id.clone(),
                 resource_type: ResourceType::Logs,
-                attributes: Some(Box::new(ResourceAttributes::Logs { logs: logs.clone() })),
+                attributes: Some(Box::new(ResourceAttributes::Logs {
+                    logs: Box::new(logs.clone()),
+                })),
             });
 
             Self::connect_part_of_and_belongs_to(
@@ -730,7 +735,7 @@ impl ClusterStateResolver {
                     id: obj_id.clone(),
                     resource_type: ResourceType::Provisioner,
                     attributes: Some(Box::new(ResourceAttributes::Provisioner {
-                        provisioner: Provisioner::new(&obj_id, provisoner.as_str()),
+                        provisioner: Box::new(Provisioner::new(&obj_id, provisoner.as_str())),
                     })),
                 });
 
@@ -1089,7 +1094,7 @@ impl ClusterStateResolver {
                 .get(ingress_service_backend.name.as_str())
                 .inspect(|svc_id| {
                     state.add_edge(
-                        &&obj_id.uid,
+                        &obj_id.uid,
                         ResourceType::IngressServiceBackend,
                         svc_id,
                         ResourceType::Service,
@@ -1294,9 +1299,7 @@ impl ClusterStateResolver {
             .collect()
     }
 
-    fn get_derived_from_ingress(
-        ingresses: &[Arc<Ingress>],
-    ) -> Result<(Vec<Arc<Host>>, Vec<Arc<IngressServiceBackend>>)> {
+    fn get_derived_from_ingress(ingresses: &[Arc<Ingress>]) -> Result<IngressDerived> {
         let mut hosts: Vec<Arc<Host>> = Vec::new();
         let mut ingress_service_backends: Vec<Arc<IngressServiceBackend>> = Vec::new();
 
@@ -1354,7 +1357,7 @@ impl ClusterStateResolver {
 
     fn get_derived_from_endpoints_slices(
         endpoints_slices: &[Arc<EndpointSlice>],
-    ) -> Result<(Vec<Arc<Endpoint>>, Vec<Arc<EndpointAddress>>)> {
+    ) -> Result<EndpointSliceDerived> {
         let mut endpoints: Vec<Arc<Endpoint>> = Vec::new();
         let mut endpoint_addresss: Vec<Arc<EndpointAddress>> = Vec::new();
 
@@ -1378,7 +1381,7 @@ impl ClusterStateResolver {
                         endpoint_slice_id.as_str(),
                     )));
 
-                    let pod_uid = endpoint.target_ref.as_ref().map(|target_ref| {
+                    let pod_uid = endpoint.target_ref.as_ref().and_then(|target_ref| {
                         if let (Some(kind), Some(uid)) = (target_ref.kind.as_ref(), target_ref.uid.as_ref()) {
                             match ResourceType::try_new(kind) {
                                 Ok(resource_type) => {
@@ -1408,7 +1411,7 @@ impl ClusterStateResolver {
                         else {
                             None
                         }
-                    }).flatten();
+                    });
 
                     endpoint.addresses.iter().for_each(|address| {
                         let endpoint_address_uid =

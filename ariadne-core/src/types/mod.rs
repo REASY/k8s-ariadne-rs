@@ -188,7 +188,7 @@ pub enum ResourceAttributes {
         config_map: Arc<ConfigMap>,
     },
     Provisioner {
-        provisioner: Provisioner,
+        provisioner: Box<Provisioner>,
     },
     StorageClass {
         storage_class: Arc<StorageClass>,
@@ -215,10 +215,10 @@ pub enum ResourceAttributes {
         host: Arc<Host>,
     },
     Cluster {
-        cluster: Cluster,
+        cluster: Box<Cluster>,
     },
     Logs {
-        logs: Logs,
+        logs: Box<Logs>,
     },
     Container {
         container: Arc<Container>,
@@ -384,7 +384,7 @@ impl EndpointAddress {
             address,
             endpoint_uid: endpoint_uid.to_string(),
             endpoint_slice_uid: endpoint_slice_uid.to_string(),
-            pod_uid: pod_uid,
+            pod_uid,
         }
     }
 }

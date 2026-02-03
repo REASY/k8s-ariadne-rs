@@ -227,7 +227,7 @@ async fn main() -> errors::Result<()> {
             .with_graceful_shutdown(shutdown_signal(shutdown_token))
             .await
             .map_err(|err| {
-                AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+                AriadneError::from(std::io::Error::other(err))
             })?;
         Ok(())
     });
@@ -271,14 +271,14 @@ async fn main() -> errors::Result<()> {
     if let Some(fetch_state_handle) = fetch_state_handle {
         let (server_result, fallback_result) = tokio::join!(f, fetch_state_handle);
         server_result.map_err(|err| {
-            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+            AriadneError::from(std::io::Error::other(err))
         })??;
         fallback_result.map_err(|err| {
-            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+            AriadneError::from(std::io::Error::other(err))
         })??;
     } else {
         f.await.map_err(|err| {
-            AriadneError::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+            AriadneError::from(std::io::Error::other(err))
         })??;
     }
     info!("Server shutdown");

@@ -83,7 +83,6 @@ impl ConnectParamsSnapshot {
             trust_callback: self.trust_callback,
             lazy: self.lazy,
             autocommit: self.autocommit,
-            ..Default::default()
         }
     }
 }
@@ -304,7 +303,7 @@ impl Memgraph {
         for edge in &diff.removed_edges {
             let query = Self::get_delete_edge_query(edge);
             self.execute_query_spec(&query).map_err(|e| {
-                MemgraphError::QueryError(format!("Failed to delete {:?}: {}", edge, e))
+                MemgraphError::QueryError(format!("Failed to delete {edge:?}: {e}"))
             })?;
             changed = true;
         }
@@ -344,9 +343,8 @@ impl Memgraph {
 
         for edge in &diff.added_edges {
             let query = Self::get_merge_edge_query(edge);
-            self.execute_query_spec(&query).map_err(|e| {
-                MemgraphError::QueryError(format!("Failed to merge {:?}: {}", edge, e))
-            })?;
+            self.execute_query_spec(&query)
+                .map_err(|e| MemgraphError::QueryError(format!("Failed to merge {edge:?}: {e}")))?;
             changed = true;
         }
 
@@ -504,7 +502,9 @@ impl Memgraph {
                 fixed.binary_data = None;
                 serde_json::to_value(fixed)?
             }
-            ResourceAttributes::Provisioner { provisioner } => serde_json::to_value(provisioner)?,
+            ResourceAttributes::Provisioner { provisioner } => {
+                serde_json::to_value(provisioner.as_ref())?
+            }
             ResourceAttributes::StorageClass {
                 storage_class: value,
             } => {
@@ -529,7 +529,7 @@ impl Memgraph {
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
-            ResourceAttributes::Logs { logs: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Logs { logs: context } => serde_json::to_value(context.as_ref())?,
             ResourceAttributes::Event { event: context } => serde_json::to_value(context.as_ref())?,
             ResourceAttributes::IngressServiceBackend {
                 ingress_service_backend,
@@ -538,7 +538,9 @@ impl Memgraph {
                 serde_json::to_value(endpoint_address)?
             }
             ResourceAttributes::Host { host } => serde_json::to_value(host)?,
-            ResourceAttributes::Cluster { cluster: context } => serde_json::to_value(context)?,
+            ResourceAttributes::Cluster { cluster: context } => {
+                serde_json::to_value(context.as_ref())?
+            }
             ResourceAttributes::Container { container: context } => serde_json::to_value(context)?,
             ResourceAttributes::Endpoint { endpoint: context } => serde_json::to_value(context)?,
         };
