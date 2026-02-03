@@ -1,8 +1,10 @@
 use crate::prelude::*;
-use crate::state::{ClusterStateDiff, GraphEdge};
+use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
 use k8s_openapi::Metadata;
-use rsmgclient::{ConnectParams, Connection, ConnectionStatus, Record, SSLMode, TrustCallback};
+use rsmgclient::{
+    ConnectParams, Connection, ConnectionStatus, QueryParam, Record, SSLMode, TrustCallback,
+};
 use serde::Serialize;
 use serde_json::{Number, Value};
 use std::collections::{HashMap, HashSet};
@@ -86,6 +88,32 @@ impl ConnectParamsSnapshot {
     }
 }
 
+struct QuerySpec {
+    query: String,
+    params: HashMap<String, QueryParam>,
+}
+
+impl QuerySpec {
+    fn new(query: String) -> Self {
+        Self {
+            query,
+            params: HashMap::new(),
+        }
+    }
+
+    fn with_params(query: String, params: HashMap<String, QueryParam>) -> Self {
+        Self { query, params }
+    }
+
+    fn params(&self) -> Option<&HashMap<String, QueryParam>> {
+        if self.params.is_empty() {
+            None
+        } else {
+            Some(&self.params)
+        }
+    }
+}
+
 impl Memgraph {
     pub fn try_new_from_url(url: &str) -> Result<Self> {
         let binding = url.replace("bolt://", "");
@@ -155,6 +183,22 @@ impl Memgraph {
         }
     }
 
+    fn execute_query_spec(&mut self, spec: &QuerySpec) -> Result<()> {
+        self.connection
+            .execute(&spec.query, spec.params())
+            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+        self.connection
+            .fetchall()
+            .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn create(&mut self, cluster_state: &ClusterState) -> Result<()> {
+        let nodes = cluster_state.get_nodes().cloned().collect::<Vec<_>>();
+        let edges = cluster_state.get_edges().collect::<Vec<_>>();
+        self.create_from_snapshot(&nodes, &edges)
+    }
+
     pub fn create_from_snapshot(
         &mut self,
         nodes: &[GenericObject],
@@ -168,21 +212,24 @@ impl Memgraph {
             .execute_without_results("MATCH (n) DETACH DELETE n;")
             .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
 
-        // Create nodes
+        // Create nodes first (faster bulk load), then build indices.
         let mut unique_types: HashSet<ResourceType> = HashSet::new();
         for node in nodes {
-            let create_query = Self::get_create_query(node)?;
-            trace!("{}", create_query);
-            self.connection
-                .execute_without_results(&create_query)
-                .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
-
+            let create_spec = Self::get_create_query(node)?;
+            trace!("{}", create_spec.query);
+            self.execute_query_spec(&create_spec)?;
             unique_types.insert(node.resource_type.clone());
         }
 
-        // Create indices
-        for resource_type in unique_types {
-            for create_index_query in Self::get_create_indices_query(&resource_type) {
+        if !nodes.is_empty() {
+            self.connection
+                .commit()
+                .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
+        }
+
+        // Create indices after nodes to keep index build efficient.
+        for resource_type in &unique_types {
+            for create_index_query in Self::get_create_indices_query(resource_type) {
                 trace!("{}", create_index_query);
                 self.connection
                     .execute_without_results(&create_index_query)
@@ -192,20 +239,20 @@ impl Memgraph {
         // Create edges
         let mut unique_edges: HashSet<(ResourceType, ResourceType, Edge)> = HashSet::new();
         for edge in edges {
-            let create_edge_query = format!("MATCH (u:{:?}), (v:{:?}) WHERE u.metadata.uid = '{}' AND v.metadata.uid = '{}' CREATE (u)-[:{:?}]->(v);", edge.source_type, edge.target_type, edge.source, edge.target, edge.edge_type);
-            trace!("{}", create_edge_query);
+            let create_edge_spec = Self::get_create_edge_query(edge);
+            trace!("{}", create_edge_spec.query);
             unique_edges.insert((
                 edge.source_type.clone(),
                 edge.target_type.clone(),
                 edge.edge_type.clone(),
             ));
-            self.connection
-                .execute_without_results(&create_edge_query)
-                .map_err(|e| MemgraphError::QueryError(e.to_string()))?;
+            self.execute_query_spec(&create_edge_spec)?;
         }
-        self.connection
-            .commit()
-            .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
+        if !edges.is_empty() {
+            self.connection
+                .commit()
+                .map_err(|e| MemgraphError::CommitError(e.to_string()))?;
+        }
         info!(
             "Created a memgraph with {} nodes and {} edges in {}ms",
             nodes.len(),
@@ -256,74 +303,50 @@ impl Memgraph {
 
         for edge in &diff.removed_edges {
             let query = Self::get_delete_edge_query(edge);
-            self.connection
-                .execute_without_results(&query)
-                .map_err(|e| {
-                    MemgraphError::QueryError(format!(
-                        "Failed to delete {:?}: {}",
-                        edge,
-                        e.to_string()
-                    ))
-                })?;
+            self.execute_query_spec(&query).map_err(|e| {
+                MemgraphError::QueryError(format!("Failed to delete {:?}: {}", edge, e))
+            })?;
             changed = true;
         }
 
         for node in &diff.removed_nodes {
             let query = Self::get_delete_node_query(node);
-            self.connection
-                .execute_without_results(&query)
-                .map_err(|e| {
-                    MemgraphError::QueryError(format!(
-                        "Failed to delete the node with id {:?} and type {}: {}",
-                        node.id,
-                        node.resource_type,
-                        e.to_string()
-                    ))
-                })?;
+            self.execute_query_spec(&query).map_err(|e| {
+                MemgraphError::QueryError(format!(
+                    "Failed to delete the node with id {:?} and type {}: {}",
+                    node.id, node.resource_type, e
+                ))
+            })?;
             changed = true;
         }
 
         for node in &diff.added_nodes {
             let create_query = Self::get_create_query(node)?;
-            self.connection
-                .execute_without_results(&create_query)
-                .map_err(|e| {
-                    MemgraphError::QueryError(format!(
-                        "Failed to create the node with id {:?} and type {}: {}",
-                        node.id,
-                        node.resource_type,
-                        e.to_string()
-                    ))
-                })?;
+            self.execute_query_spec(&create_query).map_err(|e| {
+                MemgraphError::QueryError(format!(
+                    "Failed to create the node with id {:?} and type {}: {}",
+                    node.id, node.resource_type, e
+                ))
+            })?;
             changed = true;
         }
 
         for node in &diff.modified_nodes {
             let update_query = Self::get_update_query(node)?;
-            self.connection
-                .execute_without_results(&update_query)
-                .map_err(|e| {
-                    MemgraphError::QueryError(format!(
-                        "Failed to update the node with id {:?} and type {}: {}",
-                        node.id,
-                        node.resource_type,
-                        e.to_string()
-                    ))
-                })?;
+            self.execute_query_spec(&update_query).map_err(|e| {
+                MemgraphError::QueryError(format!(
+                    "Failed to update the node with id {:?} and type {}: {}",
+                    node.id, node.resource_type, e
+                ))
+            })?;
             changed = true;
         }
 
         for edge in &diff.added_edges {
             let query = Self::get_merge_edge_query(edge);
-            self.connection
-                .execute_without_results(&query)
-                .map_err(|e| {
-                    MemgraphError::QueryError(format!(
-                        "Failed to merge {:?}: {}",
-                        edge,
-                        e.to_string()
-                    ))
-                })?;
+            self.execute_query_spec(&query).map_err(|e| {
+                MemgraphError::QueryError(format!("Failed to merge {:?}: {}", edge, e))
+            })?;
             changed = true;
         }
 
@@ -373,176 +396,33 @@ impl Memgraph {
         Ok(result)
     }
 
-    fn get_create_query(obj: &GenericObject) -> Result<String> {
-        let r = match obj.resource_type {
-            ResourceType::Pod => {
-                format!(
-                    r#"CREATE (n:Pod {});"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
+    fn get_create_query(obj: &GenericObject) -> Result<QuerySpec> {
+        let properties = Self::get_properties_param(obj)?;
+        let label = &obj.resource_type;
+        match properties {
+            Some(props) => {
+                let mut params = HashMap::new();
+                params.insert("props".to_string(), props);
+                Ok(QuerySpec::with_params(
+                    format!("CREATE (n:{label:?} $props)"),
+                    params,
+                ))
             }
-            ResourceType::Deployment => {
-                format!(
-                    r#"CREATE (n:Deployment {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::StatefulSet => {
-                format!(
-                    r#"CREATE (n:StatefulSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::ReplicaSet => {
-                format!(
-                    r#"CREATE (n:ReplicaSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::DaemonSet => {
-                format!(
-                    r#"CREATE (n:DaemonSet {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Job => {
-                format!(
-                    r#"CREATE (n:Job {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Ingress => {
-                format!(
-                    r#"CREATE (n:Ingress {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Service => {
-                format!(
-                    r#"CREATE (n:Service {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::EndpointSlice => {
-                format!(
-                    r#"CREATE (n:EndpointSlice {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::NetworkPolicy => {
-                format!(
-                    r#"CREATE (n:NetworkPolicy {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::ConfigMap => {
-                format!(
-                    r#"CREATE (n:ConfigMap {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Provisioner => {
-                format!(
-                    r#"CREATE (n:Provisioner {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::StorageClass => {
-                format!(
-                    r#"CREATE (n:StorageClass {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::PersistentVolumeClaim => {
-                format!(
-                    r#"CREATE (n:PersistentVolumeClaim {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::PersistentVolume => {
-                format!(
-                    r#"CREATE (n:PersistentVolume {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Node => {
-                format!(
-                    r#"CREATE (n:Node {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-
-            ResourceType::Namespace => {
-                format!(
-                    r#"CREATE (n:Namespace {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::ServiceAccount => {
-                format!(
-                    r#"CREATE (n:ServiceAccount {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Event => {
-                format!(
-                    r#"CREATE (n:Event {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::IngressServiceBackend => {
-                format!(
-                    r#"CREATE (n:IngressServiceBackend {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::EndpointAddress => {
-                format!(
-                    r#"CREATE (n:EndpointAddress {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Endpoint => {
-                format!(
-                    r#"CREATE (n:Endpoint {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Host => {
-                format!(
-                    r#"CREATE (n:Host {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Cluster => {
-                format!(
-                    r#"CREATE (n:Cluster {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Container => {
-                format!(
-                    r#"CREATE (n:Container {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-            ResourceType::Logs => {
-                format!(
-                    r#"CREATE (n:Logs {})"#,
-                    Self::json_to_cypher(&Self::get_as_json(obj)?)
-                )
-            }
-        };
-        Ok(r)
+            None => Ok(QuerySpec::new(format!("CREATE (n:{label:?})"))),
+        }
     }
 
-    fn get_update_query(obj: &GenericObject) -> Result<String> {
-        let properties = Self::json_to_cypher(&Self::get_as_json(obj)?);
-        Ok(format!(
-            "MATCH (n:{label:?}) WHERE n.metadata.uid = '{uid}' SET n = {properties} ",
-            label = obj.resource_type,
-            uid = Self::escape_identifier(&obj.id.uid),
-            properties = properties
+    fn get_update_query(obj: &GenericObject) -> Result<QuerySpec> {
+        let properties = Self::get_properties_param(obj)?.unwrap_or(QueryParam::Null);
+        let mut params = HashMap::new();
+        params.insert("uid".to_string(), QueryParam::String(obj.id.uid.clone()));
+        params.insert("props".to_string(), properties);
+        Ok(QuerySpec::with_params(
+            format!(
+                "MATCH (n:{:?}) WHERE n.metadata.uid = $uid SET n = $props",
+                obj.resource_type
+            ),
+            params,
         ))
     }
 
@@ -666,6 +546,45 @@ impl Memgraph {
         Ok(v)
     }
 
+    fn get_properties_param(obj: &GenericObject) -> Result<Option<QueryParam>> {
+        let json = Self::get_as_json(obj)?;
+        if json.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(Self::json_to_query_param(&json)))
+    }
+
+    fn json_to_query_param(value: &Value) -> QueryParam {
+        match value {
+            Value::Null => QueryParam::Null,
+            Value::Bool(v) => QueryParam::Bool(*v),
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    QueryParam::Int(i)
+                } else if let Some(u) = n.as_u64() {
+                    if u <= i64::MAX as u64 {
+                        QueryParam::Int(u as i64)
+                    } else {
+                        QueryParam::Float(u as f64)
+                    }
+                } else if let Some(f) = n.as_f64() {
+                    QueryParam::Float(f)
+                } else {
+                    QueryParam::Null
+                }
+            }
+            Value::String(s) => QueryParam::String(s.clone()),
+            Value::Array(xs) => {
+                QueryParam::List(xs.iter().map(Self::json_to_query_param).collect())
+            }
+            Value::Object(map) => QueryParam::Map(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), Self::json_to_query_param(v)))
+                    .collect(),
+            ),
+        }
+    }
+
     fn cleanup_metadata<T>(fixed: &mut T)
     where
         T: Metadata<Ty = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta>,
@@ -689,103 +608,79 @@ impl Memgraph {
         ]
     }
 
-    fn get_delete_node_query(obj: &GenericObject) -> String {
-        format!(
-            "MATCH (n:{label:?}) WHERE n.metadata.uid = '{uid}' DETACH DELETE n ",
-            label = obj.resource_type,
-            uid = Self::escape_identifier(&obj.id.uid)
+    fn get_delete_node_query(obj: &GenericObject) -> QuerySpec {
+        let mut params = HashMap::new();
+        params.insert("uid".to_string(), QueryParam::String(obj.id.uid.clone()));
+        QuerySpec::with_params(
+            format!(
+                "MATCH (n:{label:?}) WHERE n.metadata.uid = $uid DETACH DELETE n ",
+                label = obj.resource_type
+            ),
+            params,
         )
     }
 
-    fn get_delete_edge_query(edge: &GraphEdge) -> String {
-        format!(
-            "MATCH (u:{source_type:?})-[r:{edge_type:?}]->(v:{target_type:?}) WHERE u.metadata.uid = '{source}' AND v.metadata.uid = '{target}' DELETE r",
-            source_type = edge.source_type,
-            source = Self::escape_identifier(&edge.source),
-            edge_type = edge.edge_type,
-            target_type = edge.target_type,
-            target = Self::escape_identifier(&edge.target),
+    fn get_delete_edge_query(edge: &GraphEdge) -> QuerySpec {
+        let mut params = HashMap::new();
+        params.insert(
+            "source".to_string(),
+            QueryParam::String(edge.source.clone()),
+        );
+        params.insert(
+            "target".to_string(),
+            QueryParam::String(edge.target.clone()),
+        );
+        QuerySpec::with_params(
+            format!(
+                "MATCH (u:{source_type:?})-[r:{edge_type:?}]->(v:{target_type:?}) WHERE u.metadata.uid = $source AND v.metadata.uid = $target DELETE r",
+                source_type = edge.source_type,
+                edge_type = edge.edge_type,
+                target_type = edge.target_type,
+            ),
+            params,
         )
     }
 
-    fn get_merge_edge_query(edge: &GraphEdge) -> String {
-        format!(
-            "MATCH (u:{source_type:?} ), (v:{target_type:?}) WHERE u.metadata.uid = '{source}' AND v.metadata.uid = '{target}' MERGE (u)-[:{edge_type:?}]->(v)",
-            source_type = edge.source_type,
-            source = Self::escape_identifier(&edge.source),
-            target_type = edge.target_type,
-            target = Self::escape_identifier(&edge.target),
-            edge_type = edge.edge_type,
+    fn get_create_edge_query(edge: &GraphEdge) -> QuerySpec {
+        let mut params = HashMap::new();
+        params.insert(
+            "source".to_string(),
+            QueryParam::String(edge.source.clone()),
+        );
+        params.insert(
+            "target".to_string(),
+            QueryParam::String(edge.target.clone()),
+        );
+        QuerySpec::with_params(
+            format!(
+                "MATCH (u:{source_type:?}), (v:{target_type:?}) WHERE u.metadata.uid = $source AND v.metadata.uid = $target CREATE (u)-[:{edge_type:?}]->(v)",
+                source_type = edge.source_type,
+                target_type = edge.target_type,
+                edge_type = edge.edge_type,
+            ),
+            params,
         )
     }
 
-    fn escape_identifier(value: &str) -> String {
-        value.replace('\\', "\\\\").replace('\'', "\\'")
-    }
-
-    fn json_to_cypher(value: &Value) -> String {
-        let mut cypher_data = String::new();
-        fn to_cypher_data0(value: &Value, cypher_data: &mut String) {
-            match value {
-                Value::Null => {
-                    cypher_data.push_str("NULL");
-                }
-                Value::Bool(v) => {
-                    if *v {
-                        cypher_data.push_str("true");
-                    } else {
-                        cypher_data.push_str("false");
-                    }
-                }
-                Value::Number(n) => {
-                    cypher_data.push_str(&n.to_string());
-                }
-                Value::String(s) => {
-                    cypher_data.push('"');
-                    let escaped = s
-                        .replace("\\", "\\\\")
-                        .replace("\"", "\\\"")
-                        .replace("\n", "\\n");
-                    cypher_data.push_str(escaped.as_str());
-                    cypher_data.push('"');
-                }
-                Value::Array(xs) => {
-                    cypher_data.push('[');
-                    for (idx, x) in xs.iter().enumerate() {
-                        to_cypher_data0(x, cypher_data);
-                        if idx != xs.len() - 1 {
-                            cypher_data.push_str(", ");
-                        }
-                    }
-                    cypher_data.push(']');
-                }
-                Value::Object(obj) => {
-                    cypher_data.push('{');
-                    for (idx, (k, v)) in obj.iter().enumerate() {
-                        let must_escape = k.contains(".")
-                            || k.contains("-")
-                            || k.contains(":")
-                            || k.contains("/");
-                        if must_escape {
-                            cypher_data.push('`');
-                        }
-                        cypher_data.push_str(k);
-                        if must_escape {
-                            cypher_data.push('`');
-                        }
-
-                        cypher_data.push_str(": ");
-                        to_cypher_data0(v, cypher_data);
-                        if idx != obj.len() - 1 {
-                            cypher_data.push_str(", ");
-                        }
-                    }
-                    cypher_data.push('}');
-                }
-            }
-        }
-        to_cypher_data0(value, &mut cypher_data);
-        cypher_data
+    fn get_merge_edge_query(edge: &GraphEdge) -> QuerySpec {
+        let mut params = HashMap::new();
+        params.insert(
+            "source".to_string(),
+            QueryParam::String(edge.source.clone()),
+        );
+        params.insert(
+            "target".to_string(),
+            QueryParam::String(edge.target.clone()),
+        );
+        QuerySpec::with_params(
+            format!(
+                "MATCH (u:{source_type:?} ), (v:{target_type:?}) WHERE u.metadata.uid = $source AND v.metadata.uid = $target MERGE (u)-[:{edge_type:?}]->(v)",
+                source_type = edge.source_type,
+                target_type = edge.target_type,
+                edge_type = edge.edge_type,
+            ),
+            params,
+        )
     }
 
     fn record_to_json(columns: &[String], value: &Record) -> Result<Value> {
