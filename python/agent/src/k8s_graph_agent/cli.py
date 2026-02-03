@@ -102,14 +102,21 @@ if __name__ == "__main__":
 
 def _configure_logging() -> None:
     root_logger = logging.getLogger()
-    if root_logger.handlers:
-        return
-    level_name = os.environ.get("K8S_GRAPH_AGENT_LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    if not root_logger.handlers:
+        level_name = os.environ.get("K8S_GRAPH_AGENT_LOG_LEVEL", "INFO").upper()
+        level = getattr(logging, level_name, logging.INFO)
+        logging.basicConfig(
+            level=level,
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+    _configure_third_party_loggers("K8S_GRAPH_AGENT")
+
+
+def _configure_third_party_loggers(env_prefix: str) -> None:
+    level_name = os.environ.get(f"{env_prefix}_THIRD_PARTY_LOG_LEVEL", "WARNING").upper()
+    level = getattr(logging, level_name, logging.WARNING)
+    for logger_name in ("httpx", "httpcore", "LiteLLM", "litellm"):
+        logging.getLogger(logger_name).setLevel(level)
 
 
 def _print_rows(result: object, limit: int) -> None:

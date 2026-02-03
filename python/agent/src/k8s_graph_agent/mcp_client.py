@@ -3,9 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import itertools
 import json
-from typing import Any, Iterable, Iterator, Protocol, cast
+import logging
+from typing import Any, Iterable, Iterator, Literal, Protocol, cast
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .models import JsonObject, JsonValue
+
+logger = logging.getLogger(__name__)
 
 
 class McpError(Exception):
@@ -68,9 +73,7 @@ class StreamableHttpMcpClient:
             "clientInfo": {"name": self.client_name, "version": self.client_version},
         }
         result = self._request("initialize", params)
-        if not isinstance(result, dict):
-            raise McpProtocolError("initialize returned non-object result")
-        result_obj = cast(JsonObject, result)
+        result_obj = _ensure_json_object(result, "initialize")
         self._server_info = result_obj
         self._initialized = True
         self._notify_initialized()
@@ -79,9 +82,7 @@ class StreamableHttpMcpClient:
     def list_tools(self) -> list[JsonObject]:
         self._ensure_initialized()
         result = self._request("tools/list", {})
-        if not isinstance(result, dict):
-            raise McpProtocolError("tools/list returned non-object result")
-        result_obj = cast(JsonObject, result)
+        result_obj = _ensure_json_object(result, "tools/list")
         tools = result_obj.get("tools", [])
         if not isinstance(tools, list):
             raise McpProtocolError("tools/list returned invalid tools list")
@@ -90,9 +91,7 @@ class StreamableHttpMcpClient:
     def list_prompts(self) -> list[JsonObject]:
         self._ensure_initialized()
         result = self._request("prompts/list", {})
-        if not isinstance(result, dict):
-            raise McpProtocolError("prompts/list returned non-object result")
-        result_obj = cast(JsonObject, result)
+        result_obj = _ensure_json_object(result, "prompts/list")
         prompts = result_obj.get("prompts", [])
         if not isinstance(prompts, list):
             raise McpProtocolError("prompts/list returned invalid prompts list")
@@ -104,9 +103,7 @@ class StreamableHttpMcpClient:
         if arguments is not None:
             params["arguments"] = arguments
         result = self._request("prompts/get", params)
-        if not isinstance(result, dict):
-            raise McpProtocolError("prompts/get returned non-object result")
-        return cast(JsonObject, result)
+        return _ensure_json_object(result, "prompts/get")
 
     def call_tool(self, name: str, arguments: JsonObject | None = None) -> JsonObject:
         self._ensure_initialized()
@@ -114,9 +111,7 @@ class StreamableHttpMcpClient:
         if arguments is not None:
             params["arguments"] = arguments
         result = self._request("tools/call", params)
-        if not isinstance(result, dict):
-            raise McpProtocolError("tools/call returned non-object result")
-        return cast(JsonObject, result)
+        return _ensure_json_object(result, "tools/call")
 
     def close(self) -> None:
         self._http.close()
@@ -138,14 +133,15 @@ class StreamableHttpMcpClient:
         response = _pick_response(responses, request_id)
         if response is None:
             raise McpProtocolError(f"no response for request id {request_id}")
-        if "error" in response:
-            error = response.get("error")
-            if isinstance(error, dict):
-                raise JsonRpcError(cast(JsonObject, error))
-            raise McpProtocolError("json-rpc error returned without error object")
+        try:
+            parsed = JsonRpcResponse.model_validate(response)
+        except ValidationError as exc:
+            raise McpProtocolError(f"invalid json-rpc response: {exc}") from exc
+        if parsed.error is not None:
+            raise JsonRpcError(parsed.error.model_dump())
         if "result" not in response:
             raise McpProtocolError("json-rpc response missing result")
-        return response["result"]
+        return parsed.result
 
     def _post_message(self, message: JsonObject) -> list[JsonObject]:
         headers = {"Accept": "application/json, text/event-stream"}
@@ -208,10 +204,20 @@ def _parse_sse_messages(body: str) -> list[JsonObject]:
             return
         try:
             parsed = json.loads(data)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "discarding malformed SSE JSON payload: %s",
+                _truncate_for_log(data),
+                exc_info=exc,
+            )
             return
         if isinstance(parsed, dict):
             messages.append(parsed)
+        else:
+            logger.warning(
+                "discarding non-object SSE payload: %s",
+                type(parsed).__name__,
+            )
 
     for line in body.splitlines():
         if not line:
@@ -230,3 +236,32 @@ def _pick_response(
         if response.get("id") == request_id:
             return response
     return None
+
+
+def _truncate_for_log(value: str, limit: int = 200) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}...[truncated]"
+
+
+def _ensure_json_object(value: JsonValue, context: str) -> JsonObject:
+    if isinstance(value, dict):
+        return cast(JsonObject, value)
+    raise McpProtocolError(f"{context} returned non-object result")
+
+
+class JsonRpcErrorObject(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    message: str = Field(default="JSON-RPC error")
+    code: int | None = None
+    data: Any | None = None
+
+
+class JsonRpcResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    jsonrpc: Literal["2.0"]
+    id: int | str | None = None
+    result: Any | None = None
+    error: JsonRpcErrorObject | None = None
