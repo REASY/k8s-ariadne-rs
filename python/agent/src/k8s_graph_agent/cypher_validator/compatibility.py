@@ -5,6 +5,7 @@ from typing import Any
 
 from .ast_utils import _is_function_context, _iter_rule_contexts
 from .text_utils import _looks_like_pattern_expression, _strip_string_literals
+from antlr4_cypher import CypherParser
 
 
 _UNSUPPORTED_FUNCTIONS = {
@@ -72,7 +73,13 @@ def _find_compatibility_issues(
     if tree is None or parser is None:
         return issues
 
-    for rule_name, ctx, _ in _iter_rule_contexts(tree, parser):
+    for rule_name, ctx, rule_path in _iter_rule_contexts(tree, parser):
+        if isinstance(ctx, CypherParser.NodePatternContext) and ctx.properties():
+            if "matchSt" in rule_path:
+                issues.append(
+                    "Inline property maps in MATCH are not supported; move filters into WHERE "
+                    f"(found: {ctx.getText()})"
+                )
         if _is_function_context(rule_name):
             func_name, args_text = _split_function_invocation(ctx.getText())
             func_name = func_name.lower()

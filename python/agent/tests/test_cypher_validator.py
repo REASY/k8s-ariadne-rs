@@ -182,3 +182,16 @@ def test_rejects_exists_property_function(
         validator.validate(cypher)
     message = str(context.value)
     assert "exists" in message
+
+
+def test_rejects_inline_property_map_in_match(
+    validator: CypherSchemaValidator,
+) -> None:
+    cypher = (
+        "MATCH (p:Pod {metadata: {name: 'pyroscope-compactor-2'}})"
+        "-[:HasLogs]->(l:Logs) RETURN l"
+    )
+    with pytest.raises(CypherCompatibilityError) as context:
+        validator.validate(cypher)
+    message = str(context.value)
+    assert "Inline property maps in MATCH" in message
