@@ -1,6 +1,6 @@
 services:
   memgraph:
-    image: memgraph/memgraph-mage:latest
+    image: memgraph/memgraph-mage:3.7.2
     container_name: memgraph-mage
     ports:
       - "7687:7687"
@@ -8,7 +8,7 @@ services:
     command: ["--log-level=TRACE", "--schema-info-enabled"]
 
   lab:
-    image: memgraph/lab:latest
+    image: memgraph/lab:3.7.1
     container_name: memgraph-lab
     ports:
       - "3000:3000"
