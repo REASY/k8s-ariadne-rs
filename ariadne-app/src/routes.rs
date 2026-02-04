@@ -1,5 +1,5 @@
 use crate::kube_tool::KubeTool;
-use ariadne_core::memgraph_async::MemgraphAsync;
+use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::prelude::*;
 use ariadne_core::state::{DirectedGraph, SharedClusterState};
 use ariadne_core::types::{Cluster, Edge, ResourceType};
@@ -11,6 +11,7 @@ use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpService,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 #[derive(Debug, Clone)]
@@ -21,7 +22,7 @@ struct AppState {
 pub async fn create_route(
     cluster_name: String,
     cluster_state: SharedClusterState,
-    memgraph: MemgraphAsync,
+    memgraph: Arc<dyn GraphBackend>,
 ) -> Result<Router> {
     let service = StreamableHttpService::new(
         move || Ok(KubeTool::new_tool(cluster_name.clone(), memgraph.clone())),

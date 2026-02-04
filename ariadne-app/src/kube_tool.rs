@@ -12,10 +12,10 @@ use rmcp::{
 };
 use serde_json::json;
 
-use ariadne_core::memgraph_async::MemgraphAsync;
+use ariadne_core::graph_backend::GraphBackend;
 use ariadne_tools::{full_prompt, graph_relationships, schema_prompt};
 use rmcp::service::RequestContext;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteCypherQueryRequest {
@@ -28,13 +28,13 @@ pub struct GetGraphSchemaRequest {}
 #[derive(Debug, Clone)]
 pub struct KubeTool {
     cluster_name: String,
-    memgraph: MemgraphAsync,
+    memgraph: Arc<dyn GraphBackend>,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl KubeTool {
-    pub fn new_tool(cluster_name: String, memgraph: MemgraphAsync) -> Self {
+    pub fn new_tool(cluster_name: String, memgraph: Arc<dyn GraphBackend>) -> Self {
         Self {
             cluster_name,
             memgraph,
@@ -51,7 +51,7 @@ impl KubeTool {
         let records = {
             let records = self
                 .memgraph
-                .execute_query(query.as_str())
+                .execute_query(query.clone())
                 .await
                 .map_err(|e| {
                     tracing::error!(cypher = %query, error = %e, "execute_cypher_query failed");

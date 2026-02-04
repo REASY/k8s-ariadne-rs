@@ -7,7 +7,7 @@ use kube::ResourceExt;
 use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tracing::warn;
 
 pub type NodeId = u32;
@@ -93,6 +93,15 @@ pub struct ClusterState {
     id_to_node: HashMap<NodeId, GenericObject>,
 }
 
+type EdgeKey = (ResourceType, Edge, ResourceType);
+
+fn should_log_unknown_edge(source: &ResourceType, edge: &Edge, target: &ResourceType) -> bool {
+    static UNKNOWN_EDGES: OnceLock<Mutex<HashSet<EdgeKey>>> = OnceLock::new();
+    let set = UNKNOWN_EDGES.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut guard = set.lock().expect("Unknown edge log guard poisoned");
+    guard.insert((source.clone(), edge.clone(), target.clone()))
+}
+
 impl ClusterState {
     pub fn new(cluster: Cluster) -> Self {
         ClusterState {
@@ -123,10 +132,12 @@ impl ClusterState {
         target_type: ResourceType,
         edge: Edge,
     ) {
-        debug_assert!(
-            graph_schema::is_known_edge(&source_type, &edge, &target_type),
-            "Unknown edge: {source_type:?}-[:{edge:?}]->{target_type:?}"
-        );
+        if !graph_schema::is_known_edge(&source_type, &edge, &target_type) {
+            if should_log_unknown_edge(&source_type, &edge, &target_type) {
+                warn!("Unknown edge: {source_type:?}-[:{edge:?}]->{target_type:?} (skipping)");
+            }
+            return;
+        }
         let maybe_source = self.get_node(source);
         let maybe_target = self.get_node(target);
 

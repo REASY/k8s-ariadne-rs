@@ -87,29 +87,37 @@ impl ConnectParamsSnapshot {
     }
 }
 
-struct QuerySpec {
+pub(crate) struct QuerySpec {
     query: String,
     params: HashMap<String, QueryParam>,
 }
 
 impl QuerySpec {
-    fn new(query: String) -> Self {
+    pub(crate) fn new(query: String) -> Self {
         Self {
             query,
             params: HashMap::new(),
         }
     }
 
-    fn with_params(query: String, params: HashMap<String, QueryParam>) -> Self {
+    pub(crate) fn with_params(query: String, params: HashMap<String, QueryParam>) -> Self {
         Self { query, params }
     }
 
-    fn params(&self) -> Option<&HashMap<String, QueryParam>> {
+    pub(crate) fn params(&self) -> Option<&HashMap<String, QueryParam>> {
         if self.params.is_empty() {
             None
         } else {
             Some(&self.params)
         }
+    }
+
+    pub(crate) fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub(crate) fn params_map(&self) -> &HashMap<String, QueryParam> {
+        &self.params
     }
 }
 
@@ -394,7 +402,7 @@ impl Memgraph {
         Ok(result)
     }
 
-    fn get_create_query(obj: &GenericObject) -> Result<QuerySpec> {
+    pub(crate) fn get_create_query(obj: &GenericObject) -> Result<QuerySpec> {
         let properties = Self::get_properties_param(obj)?;
         let label = &obj.resource_type;
         match properties {
@@ -410,7 +418,7 @@ impl Memgraph {
         }
     }
 
-    fn get_update_query(obj: &GenericObject) -> Result<QuerySpec> {
+    pub(crate) fn get_update_query(obj: &GenericObject) -> Result<QuerySpec> {
         let properties = Self::get_properties_param(obj)?.unwrap_or(QueryParam::Null);
         let mut params = HashMap::new();
         params.insert("uid".to_string(), QueryParam::String(obj.id.uid.clone()));
@@ -548,7 +556,7 @@ impl Memgraph {
         Ok(v)
     }
 
-    fn get_properties_param(obj: &GenericObject) -> Result<Option<QueryParam>> {
+    pub(crate) fn get_properties_param(obj: &GenericObject) -> Result<Option<QueryParam>> {
         let json = Self::get_as_json(obj)?;
         if json.is_null() {
             return Ok(None);
@@ -602,7 +610,7 @@ impl Memgraph {
         }
     }
 
-    fn get_create_indices_query(rt: &ResourceType) -> Vec<String> {
+    pub(crate) fn get_create_indices_query(rt: &ResourceType) -> Vec<String> {
         vec![
             format!("CREATE INDEX ON :{rt:?}(metadata.name)"),
             format!("CREATE INDEX ON :{rt:?}(metadata.uid)"),
@@ -610,7 +618,7 @@ impl Memgraph {
         ]
     }
 
-    fn get_delete_node_query(obj: &GenericObject) -> QuerySpec {
+    pub(crate) fn get_delete_node_query(obj: &GenericObject) -> QuerySpec {
         let mut params = HashMap::new();
         params.insert("uid".to_string(), QueryParam::String(obj.id.uid.clone()));
         QuerySpec::with_params(
@@ -622,7 +630,7 @@ impl Memgraph {
         )
     }
 
-    fn get_delete_edge_query(edge: &GraphEdge) -> QuerySpec {
+    pub(crate) fn get_delete_edge_query(edge: &GraphEdge) -> QuerySpec {
         let mut params = HashMap::new();
         params.insert(
             "source".to_string(),
@@ -643,7 +651,7 @@ impl Memgraph {
         )
     }
 
-    fn get_create_edge_query(edge: &GraphEdge) -> QuerySpec {
+    pub(crate) fn get_create_edge_query(edge: &GraphEdge) -> QuerySpec {
         let mut params = HashMap::new();
         params.insert(
             "source".to_string(),
@@ -664,7 +672,7 @@ impl Memgraph {
         )
     }
 
-    fn get_merge_edge_query(edge: &GraphEdge) -> QuerySpec {
+    pub(crate) fn get_merge_edge_query(edge: &GraphEdge) -> QuerySpec {
         let mut params = HashMap::new();
         params.insert(
             "source".to_string(),

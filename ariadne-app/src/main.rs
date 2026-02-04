@@ -1,4 +1,5 @@
 use ariadne_core::errors::AriadneError;
+use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
@@ -12,6 +13,7 @@ use clap::{Parser, Subcommand};
 use kube::config::KubeConfigOptions;
 use shadow_rs::shadow;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::sleep;
@@ -84,7 +86,7 @@ async fn set_version_header<B>(mut res: Response<B>) -> Response<B> {
 
 async fn fetch_state(
     resolver: ClusterStateResolver,
-    memgraph: MemgraphAsync,
+    memgraph: Arc<dyn GraphBackend>,
     token: CancellationToken,
     poll_interval: Duration,
 ) -> errors::Result<()> {
@@ -152,7 +154,8 @@ async fn main() -> errors::Result<()> {
         return Ok(());
     }
 
-    let memgraph: MemgraphAsync = MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?;
+    let memgraph: Arc<dyn GraphBackend> =
+        Arc::new(MemgraphAsync::try_new_from_url(memgraph_uri.as_str())?);
 
     let snapshot_dir: Option<String> = std::env::var("KUBE_SNAPSHOT_DIR").ok();
     let resolver = if let Some(snapshot_dir) = snapshot_dir {

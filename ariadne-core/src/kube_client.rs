@@ -8,6 +8,7 @@ use crate::snapshot::{
     SNAPSHOT_SERVICES_FILE, SNAPSHOT_SERVICE_ACCOUNTS_FILE, SNAPSHOT_STATEFUL_SETS_FILE,
     SNAPSHOT_STORAGE_CLASSES_FILE,
 };
+use crate::tls::install_rustls_provider;
 use crate::types::Cluster;
 use std::any::type_name;
 
@@ -100,6 +101,7 @@ pub struct KubeClientImpl {
 
 impl KubeClientImpl {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
+        install_rustls_provider();
         let cfg = match Config::from_kubeconfig(options).await {
             Ok(cfg) => {
                 info!("Successfully loaded kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), cluster_url: {}", options.context, options.cluster, options.user, cfg.cluster_url);
@@ -517,6 +519,7 @@ fn store_ready_timeout() -> Duration {
 
 impl CachedKubeClient {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
+        install_rustls_provider();
         let cfg = match Config::from_kubeconfig(options).await {
             Ok(cfg) => {
                 info!("Successfully loaded kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), cluster_url: {}", options.context, options.cluster, options.user, cfg.cluster_url);

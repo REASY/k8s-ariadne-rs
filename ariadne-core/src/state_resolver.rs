@@ -1,8 +1,8 @@
 use crate::prelude::*;
 
 use crate::create_generic_object;
+use crate::graph_backend::GraphBackend;
 use crate::kube_client::{CachedKubeClient, KubeClient};
-use crate::memgraph_async::MemgraphAsync;
 use crate::snapshot::{
     write_json_to_dir, write_list_to_dir, SNAPSHOT_CLUSTER_FILE, SNAPSHOT_CONFIG_MAPS_FILE,
     SNAPSHOT_DAEMON_SETS_FILE, SNAPSHOT_DEPLOYMENTS_FILE, SNAPSHOT_ENDPOINT_SLICES_FILE,
@@ -117,7 +117,6 @@ pub struct DerivedClusterSnapshot {
 pub struct AugmentedClusterSnapshot {
     pub observed: ObservedClusterSnapshot,
     pub derived: DerivedClusterSnapshot,
-    pub container_logs: Vec<Logs>,
 }
 
 #[allow(unused)]
@@ -177,11 +176,9 @@ impl ClusterStateResolver {
         let last_snapshot =
             Self::get_observed_snapshot(cluster.clone(), kube_client.clone()).await?;
         let derived_snapshot = Self::get_derived_snapshot(&last_snapshot)?;
-        let container_logs: Vec<Logs> = Vec::new(); // Self::get_logs(&kube_client, &derived_snapshot.containers).await;
         let augmented = AugmentedClusterSnapshot {
             observed: last_snapshot,
             derived: derived_snapshot,
-            container_logs,
         };
         Ok(augmented)
     }
@@ -268,7 +265,7 @@ impl ClusterStateResolver {
 
     pub fn start_diff_loop(
         &self,
-        memgraph: MemgraphAsync,
+        backend: Arc<dyn GraphBackend>,
         token: CancellationToken,
     ) -> JoinHandle<()> {
         let cluster = self.cluster.clone();
@@ -281,7 +278,7 @@ impl ClusterStateResolver {
                 kube_client,
                 last_snapshot,
                 last_state,
-                memgraph,
+                backend,
                 token,
             )
             .await
@@ -296,7 +293,7 @@ impl ClusterStateResolver {
         kube_client: Arc<Box<dyn KubeClient>>,
         last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
         last_state: Arc<Mutex<ClusterState>>,
-        memgraph: MemgraphAsync,
+        backend: Arc<dyn GraphBackend>,
         token: CancellationToken,
     ) -> Result<()> {
         let poll_interval: Duration = Duration::from_secs(5);
@@ -340,7 +337,7 @@ impl ClusterStateResolver {
                             state_diff.added_edges.len(),
                             state_diff.removed_edges.len(),
                         );
-                        memgraph.update(state_diff).await?;
+                        backend.update(state_diff).await?;
                     } else {
                         trace!("Diff loop iteration {id}: no changes detected");
                     }
@@ -547,39 +544,6 @@ impl ClusterStateResolver {
                 item.pod_uid.as_str(),
                 ResourceType::Pod,
                 Edge::Runs,
-            );
-        }
-        for logs in &augmented.container_logs {
-            let obj_id = ObjectIdentifier {
-                uid: logs.metadata.uid.as_ref().unwrap().clone(),
-                name: logs.metadata.name.as_ref().unwrap().clone(),
-                namespace: logs.metadata.namespace.clone(),
-                resource_version: None,
-            };
-            let container_uid = logs.container_uid.clone();
-            state.add_node(GenericObject {
-                id: obj_id.clone(),
-                resource_type: ResourceType::Logs,
-                attributes: Some(Box::new(ResourceAttributes::Logs {
-                    logs: Box::new(logs.clone()),
-                })),
-            });
-
-            Self::connect_part_of_and_belongs_to(
-                &mut state,
-                &namespace_name_to_uid,
-                cluster_uid.as_str(),
-                obj_id.uid.as_str(),
-                ResourceType::Logs,
-                obj_id.namespace.as_deref(),
-            );
-
-            state.add_edge(
-                container_uid.as_str(),
-                ResourceType::Container,
-                obj_id.uid.as_str(),
-                ResourceType::Logs,
-                Edge::HasLogs,
             );
         }
 

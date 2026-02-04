@@ -32,7 +32,6 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
         ResourceType::Namespace,
     ),
     (ResourceType::Container, Edge::PartOf, ResourceType::Cluster),
-    (ResourceType::Container, Edge::HasLogs, ResourceType::Logs),
     (
         ResourceType::Container,
         Edge::BelongsTo,
@@ -46,6 +45,12 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
         ResourceType::Namespace,
     ),
     (ResourceType::DaemonSet, Edge::Manages, ResourceType::Pod),
+    // Some operators (e.g., Rook Ceph) use Deployment ownerReferences for DaemonSets.
+    (
+        ResourceType::Deployment,
+        Edge::Manages,
+        ResourceType::DaemonSet,
+    ),
     (
         ResourceType::Deployment,
         Edge::PartOf,
@@ -60,6 +65,12 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
         ResourceType::Deployment,
         Edge::Manages,
         ResourceType::ReplicaSet,
+    ),
+    // Some operators (e.g., Rook Ceph) use Deployment ownerReferences for other Deployments.
+    (
+        ResourceType::Deployment,
+        Edge::Manages,
+        ResourceType::Deployment,
     ),
     (
         ResourceType::Endpoint,
@@ -111,8 +122,6 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
     (ResourceType::Job, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Job, Edge::BelongsTo, ResourceType::Namespace),
     (ResourceType::Job, Edge::Manages, ResourceType::Pod),
-    (ResourceType::Logs, Edge::PartOf, ResourceType::Cluster),
-    (ResourceType::Logs, Edge::BelongsTo, ResourceType::Namespace),
     (ResourceType::Namespace, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Node, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Node, Edge::Manages, ResourceType::Pod),

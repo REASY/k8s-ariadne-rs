@@ -17,16 +17,37 @@ use testcontainers::{Container, ContainerAsync, GenericImage};
 
 const MEMGRAPH_PORT: u16 = 7687;
 
+fn docker_available() -> bool {
+    if std::env::var("ARIADNE_RUN_DOCKER_TESTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Ok(host) = std::env::var("DOCKER_HOST") {
+        if !host.trim().is_empty() {
+            return true;
+        }
+    }
+    std::fs::metadata("/var/run/docker.sock").is_ok()
+}
+
 fn memgraph_image() -> GenericImage {
     GenericImage::new("memgraph/memgraph-mage", "3.7.2")
         .with_exposed_port(ContainerPort::Tcp(MEMGRAPH_PORT))
 }
 
 fn start_memgraph_sync() -> Container<GenericImage> {
+    if !docker_available() {
+        panic!("Docker not available; set ARIADNE_RUN_DOCKER_TESTS=1 to force");
+    }
     SyncRunner::start(memgraph_image()).expect("failed to start memgraph container")
 }
 
 async fn start_memgraph_async() -> ContainerAsync<GenericImage> {
+    if !docker_available() {
+        panic!("Docker not available; set ARIADNE_RUN_DOCKER_TESTS=1 to force");
+    }
     AsyncRunner::start(memgraph_image())
         .await
         .expect("failed to start memgraph container")
@@ -132,6 +153,10 @@ fn extract_count(results: &[Value], key: &str) -> i64 {
 
 #[test]
 fn memgraph_create_from_snapshot_and_query() {
+    if !docker_available() {
+        eprintln!("Skipping memgraph integration test; Docker not available");
+        return;
+    }
     let container = start_memgraph_sync();
     let host_port = container
         .get_host_port_ipv4(ContainerPort::Tcp(MEMGRAPH_PORT))
@@ -154,6 +179,10 @@ fn memgraph_create_from_snapshot_and_query() {
 
 #[test]
 fn memgraph_update_from_diff_applies_changes() {
+    if !docker_available() {
+        eprintln!("Skipping memgraph integration test; Docker not available");
+        return;
+    }
     let container = start_memgraph_sync();
     let host_port = container
         .get_host_port_ipv4(ContainerPort::Tcp(MEMGRAPH_PORT))
@@ -185,6 +214,10 @@ fn memgraph_update_from_diff_applies_changes() {
 
 #[tokio::test]
 async fn memgraph_async_create_and_query() {
+    if !docker_available() {
+        eprintln!("Skipping memgraph integration test; Docker not available");
+        return;
+    }
     let container = start_memgraph_async().await;
     let host_port = container
         .get_host_port_ipv4(ContainerPort::Tcp(MEMGRAPH_PORT))

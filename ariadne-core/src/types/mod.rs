@@ -22,7 +22,6 @@ pub static LOGICAL_RESOURCE_TYPES: &[ResourceType] = &[
     ResourceType::Endpoint,
     ResourceType::Host,
     ResourceType::Cluster,
-    ResourceType::Logs,
     ResourceType::Container,
 ];
 
@@ -69,7 +68,6 @@ pub enum ResourceType {
     Endpoint,              //
     Host,                  // Represents a hostname claimed by an Ingress
     Cluster,               // Represents a cluster in which K8s objects exist
-    Logs,                  // Represents logs of a pod
     Container,             // Represents a container of a pod
 }
 
@@ -112,9 +110,8 @@ pub enum Edge {
     Manages, // e.g., Deployment -> ReplicaSet -> Pod
 
     // Pod & Node
-    RunsOn,  // e.g., Pod -> Node
-    HasLogs, // e.g., Container -> Logs
-    Runs,    // e.g., Pod -> Container
+    RunsOn, // e.g., Pod -> Node
+    Runs,   // e.g., Pod -> Container
 
     // Networking & Routing
     DefinesBackend, // e.g., Ingress -> IngressBackend
