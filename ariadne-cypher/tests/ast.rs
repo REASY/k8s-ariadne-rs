@@ -42,6 +42,33 @@ fn parses_relationship_pattern() {
 }
 
 #[test]
+fn parses_multi_hop_relationship_pattern() {
+    let query = parse_query(
+        "MATCH (d:Deployment)-[:MANAGES]->(rs:ReplicaSet)-[:MANAGES]->(p:Pod) RETURN p",
+    )
+    .unwrap();
+    match &query.clauses[0] {
+        Clause::Match(m) => match &m.pattern {
+            Pattern::Path(path) => {
+                assert_eq!(path.segments.len(), 2);
+                assert_eq!(
+                    path.segments[0].rel.direction,
+                    RelationshipDirection::LeftToRight
+                );
+                assert_eq!(path.segments[0].rel.types, vec!["MANAGES".to_string()]);
+                assert_eq!(
+                    path.segments[1].rel.direction,
+                    RelationshipDirection::LeftToRight
+                );
+                assert_eq!(path.segments[1].rel.types, vec!["MANAGES".to_string()]);
+            }
+            other => panic!("unexpected pattern: {other:?}"),
+        },
+        other => panic!("unexpected clause: {other:?}"),
+    }
+}
+
+#[test]
 fn parses_bracket_index_access() {
     let query =
         parse_query("MATCH (p:Pod) WHERE p['status']['phase'] = 'Failed' RETURN p").unwrap();

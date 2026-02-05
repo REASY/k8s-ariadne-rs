@@ -125,6 +125,17 @@ fn validate_pattern(pattern: &Pattern) -> Result<(), CypherError> {
             }
             Ok(())
         }
+        Pattern::Path(path) => {
+            for segment in &path.segments {
+                if segment.rel.types.len() > 1 {
+                    return Err(CypherError::semantic(
+                        "relationship type unions not supported",
+                        segment.span,
+                    ));
+                }
+            }
+            Ok(())
+        }
     }
 }
 
@@ -145,6 +156,19 @@ fn validate_engine_pattern(pattern: &Pattern) -> Result<(), CypherError> {
                     "multiple labels are not supported by the in-memory engine",
                     rel.span,
                 ));
+            }
+            Ok(())
+        }
+        Pattern::Path(path) => {
+            for node in std::iter::once(&path.start)
+                .chain(path.segments.iter().map(|segment| &segment.node))
+            {
+                if node.labels.len() > 1 {
+                    return Err(CypherError::semantic(
+                        "multiple labels are not supported by the in-memory engine",
+                        node.span,
+                    ));
+                }
             }
             Ok(())
         }

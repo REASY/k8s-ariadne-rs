@@ -3,7 +3,7 @@ use crate::prelude::Result;
 use crate::state::{ClusterState, ClusterStateDiff, SharedClusterState};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
 use ariadne_cypher::{
-    parse_query, validate_query, Clause, Expr, Literal, MatchClause, OrderBy, Pattern,
+    parse_query, validate_query, Clause, Expr, Literal, MatchClause, OrderBy, PathPattern, Pattern,
     ProjectionItem, Query, RelationshipDirection, RelationshipPattern, ReturnClause,
     ValidationMode,
 };
@@ -11,7 +11,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::Metadata;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Instant;
 use strum::IntoEnumIterator;
@@ -259,6 +259,19 @@ fn pattern_variables(pattern: &Pattern) -> Vec<String> {
                 vars.push(var.clone());
             }
         }
+        Pattern::Path(path) => {
+            if let Some(var) = &path.start.variable {
+                vars.push(var.clone());
+            }
+            for segment in &path.segments {
+                if let Some(var) = &segment.node.variable {
+                    vars.push(var.clone());
+                }
+                if let Some(var) = &segment.rel.variable {
+                    vars.push(var.clone());
+                }
+            }
+        }
     }
     vars.sort();
     vars.dedup();
@@ -274,6 +287,7 @@ fn match_pattern(
     match pattern {
         Pattern::Node(node) => match_node_pattern(row, node, state, stats),
         Pattern::Relationship(rel) => match_relationship_pattern(row, rel, state, stats),
+        Pattern::Path(path) => match_path_pattern(row, path, state, stats),
     }
 }
 
@@ -398,6 +412,116 @@ fn match_relationship_pattern(
     }
 
     Ok(results)
+}
+
+fn match_path_pattern(
+    row: &Row,
+    pattern: &PathPattern,
+    state: &ClusterState,
+    stats: &mut QueryStats,
+) -> Result<Vec<Row>> {
+    let (relationships, internal_vars) = path_relationships_with_internal_vars(pattern, row);
+    let mut bindings = vec![Row::new()];
+
+    for rel_pattern in relationships {
+        let mut next = Vec::new();
+        for binding in bindings {
+            let combined = combine_row_for_match(row, &binding);
+            let matches = match_relationship_pattern(&combined, &rel_pattern, state, stats)?;
+            for new_binding in matches {
+                let mut merged = binding.clone();
+                for (key, value) in new_binding {
+                    merged.insert(key, value);
+                }
+                next.push(merged);
+            }
+        }
+        bindings = next;
+        if bindings.is_empty() {
+            break;
+        }
+    }
+
+    if !internal_vars.is_empty() {
+        let internal: HashSet<String> = internal_vars.into_iter().collect();
+        for binding in &mut bindings {
+            for key in &internal {
+                binding.remove(key);
+            }
+        }
+    }
+
+    Ok(bindings)
+}
+
+fn combine_row_for_match(base: &Row, binding: &Row) -> Row {
+    let mut combined = base.clone();
+    for (key, value) in binding {
+        if !combined.contains_key(key) {
+            combined.insert(key.clone(), value.clone());
+        }
+    }
+    combined
+}
+
+fn path_relationships_with_internal_vars(
+    pattern: &PathPattern,
+    row: &Row,
+) -> (Vec<RelationshipPattern>, Vec<String>) {
+    let mut used = HashSet::new();
+    for key in row.keys() {
+        used.insert(key.clone());
+    }
+    if let Some(var) = &pattern.start.variable {
+        used.insert(var.clone());
+    }
+    for segment in &pattern.segments {
+        if let Some(var) = &segment.node.variable {
+            used.insert(var.clone());
+        }
+        if let Some(var) = &segment.rel.variable {
+            used.insert(var.clone());
+        }
+    }
+
+    let mut nodes = Vec::with_capacity(pattern.segments.len() + 1);
+    nodes.push(pattern.start.clone());
+    for segment in &pattern.segments {
+        nodes.push(segment.node.clone());
+    }
+
+    let mut internal_vars = Vec::new();
+    if nodes.len() > 2 {
+        for idx in 1..nodes.len() - 1 {
+            if nodes[idx].variable.is_none() {
+                let name = unique_internal_var(&mut used, idx);
+                nodes[idx].variable = Some(name.clone());
+                internal_vars.push(name);
+            }
+        }
+    }
+
+    let mut relationships = Vec::with_capacity(pattern.segments.len());
+    for (idx, segment) in pattern.segments.iter().enumerate() {
+        relationships.push(RelationshipPattern {
+            left: nodes[idx].clone(),
+            rel: segment.rel.clone(),
+            right: nodes[idx + 1].clone(),
+            span: segment.span,
+        });
+    }
+
+    (relationships, internal_vars)
+}
+
+fn unique_internal_var(used: &mut HashSet<String>, mut index: usize) -> String {
+    loop {
+        let candidate = format!("__ariadne_internal_path_node_{index}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        index += 1;
+    }
 }
 
 fn edge_type_from_str(name: &str) -> Option<Edge> {
@@ -1545,6 +1669,56 @@ mod tests {
         let results = execute_query_ast(&query, &state, &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("name").and_then(|v| v.as_str()), Some("rs"));
+    }
+
+    #[test]
+    fn executes_multi_hop_relationship_match() {
+        let mut state = ClusterState::new(dummy_cluster());
+        let dep = deployment("d1", "deploy", "ns1");
+        let rs1 = replica_set("r1", "rs1", "ns1");
+        let rs2 = replica_set("r2", "rs2", "ns1");
+        let pod1 = pod("p1", "pod1", "ns1");
+        let pod2 = pod("p2", "pod2", "ns1");
+        state.add_node(dep);
+        state.add_node(rs1);
+        state.add_node(rs2);
+        state.add_node(pod1);
+        state.add_node(pod2);
+        state.add_edge(
+            "d1",
+            ResourceType::Deployment,
+            "r1",
+            ResourceType::ReplicaSet,
+            Edge::Manages,
+        );
+        state.add_edge(
+            "r1",
+            ResourceType::ReplicaSet,
+            "p1",
+            ResourceType::Pod,
+            Edge::Manages,
+        );
+        state.add_edge(
+            "r2",
+            ResourceType::ReplicaSet,
+            "p2",
+            ResourceType::Pod,
+            Edge::Manages,
+        );
+
+        let query = parse_query(
+            "MATCH (d:Deployment)-[:Manages]->(:ReplicaSet)-[:Manages]->(p:Pod) RETURN p.metadata.name AS name",
+        )
+        .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].get("name").and_then(|v| v.as_str()),
+            Some("pod1")
+        );
     }
 
     #[test]

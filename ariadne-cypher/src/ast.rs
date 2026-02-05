@@ -106,6 +106,7 @@ pub enum SortDirection {
 pub enum Pattern {
     Node(NodePattern),
     Relationship(RelationshipPattern),
+    Path(PathPattern),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,6 +121,20 @@ pub struct RelationshipPattern {
     pub left: NodePattern,
     pub rel: RelationshipDetail,
     pub right: NodePattern,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathPattern {
+    pub start: NodePattern,
+    pub segments: Vec<PathSegment>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathSegment {
+    pub rel: RelationshipDetail,
+    pub node: NodePattern,
     pub span: Span,
 }
 

@@ -68,6 +68,7 @@ fn build_valid_queries() -> Vec<String> {
         "(a)-[r]->(b)",
         "(a)-[r:MANAGES]-(b)",
         "(a:Pod)-[r:RUNS_ON]->(b:Node)",
+        "(a)-[:REL]->(b)-[:REL]->(c)",
     ];
     let rel_wheres = [
         "",
@@ -145,7 +146,6 @@ fn build_invalid_queries() -> Vec<&'static str> {
         "MATCH (n:Pod {name:'x'}) RETURN n",
         "MATCH p = (a)--(b) RETURN p",
         "MATCH (a)-[:REL*1..3]->(b) RETURN a",
-        "MATCH (a)-[:REL]->(b)-[:REL]->(c) RETURN a",
         "MATCH (a)--(b), (c) RETURN a",
         "MATCH (n) WHERE n.name =~ 'k.*' RETURN n",
         "MATCH (n) RETURN [x IN [1,2,3] | x]",

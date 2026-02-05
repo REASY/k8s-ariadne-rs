@@ -422,30 +422,41 @@ fn parse_pattern_element(node: Node, input: &str) -> Result<Pattern, CypherError
     if chains.is_empty() {
         return Ok(Pattern::Node(base));
     }
-    if chains.len() > 1 {
-        return Err(CypherError::unsupported(
-            "multi-hop relationship patterns",
-            Span::from_node(element),
-        ));
+
+    let mut segments = Vec::with_capacity(chains.len());
+    for chain in chains {
+        let rel = named_children(chain)
+            .into_iter()
+            .find(|child| child.kind() == "relationship_pattern")
+            .ok_or_else(|| CypherError::missing("relationship pattern", Span::from_node(chain)))?;
+        let right = named_children(chain)
+            .into_iter()
+            .find(|child| child.kind() == "node_pattern")
+            .ok_or_else(|| CypherError::missing("node pattern", Span::from_node(chain)))?;
+
+        let rel_detail = parse_relationship_pattern(rel, input)?;
+        let right_node = parse_node_pattern(right, input)?;
+
+        segments.push(PathSegment {
+            rel: rel_detail,
+            node: right_node,
+            span: Span::from_node(chain),
+        });
     }
 
-    let chain = chains[0];
-    let rel = named_children(chain)
-        .into_iter()
-        .find(|child| child.kind() == "relationship_pattern")
-        .ok_or_else(|| CypherError::missing("relationship pattern", Span::from_node(chain)))?;
-    let right = named_children(chain)
-        .into_iter()
-        .find(|child| child.kind() == "node_pattern")
-        .ok_or_else(|| CypherError::missing("node pattern", Span::from_node(chain)))?;
+    if segments.len() == 1 {
+        let segment = segments.pop().expect("segment exists");
+        return Ok(Pattern::Relationship(RelationshipPattern {
+            left: base,
+            rel: segment.rel,
+            right: segment.node,
+            span: Span::from_node(element),
+        }));
+    }
 
-    let rel_detail = parse_relationship_pattern(rel, input)?;
-    let right_node = parse_node_pattern(right, input)?;
-
-    Ok(Pattern::Relationship(RelationshipPattern {
-        left: base,
-        rel: rel_detail,
-        right: right_node,
+    Ok(Pattern::Path(PathPattern {
+        start: base,
+        segments,
         span: Span::from_node(element),
     }))
 }
