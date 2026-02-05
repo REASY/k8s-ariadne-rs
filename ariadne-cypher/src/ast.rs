@@ -172,6 +172,11 @@ pub enum Expr {
         expr: Box<Expr>,
         list: Box<Expr>,
     },
+    Case {
+        base: Option<Box<Expr>>,
+        alternatives: Vec<(Expr, Expr)>,
+        else_expr: Option<Box<Expr>>,
+    },
     Parameter(String),
 }
 
@@ -193,6 +198,9 @@ pub enum BinaryOp {
     Gt,
     Lte,
     Gte,
+    StartsWith,
+    EndsWith,
+    Contains,
     Add,
     Sub,
     Mul,

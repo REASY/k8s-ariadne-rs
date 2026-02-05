@@ -544,6 +544,10 @@ fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         "or_expression" => parse_binary(node, input, BinaryOp::Or),
         "xor_expression" => parse_binary(node, input, BinaryOp::Xor),
         "and_expression" => parse_binary(node, input, BinaryOp::And),
+        "additive_expression" => parse_additive(node, input),
+        "multiplicative_expression" => parse_multiplicative(node, input),
+        "exponential_expression" => parse_exponential(node, input),
+        "unary_expression" => parse_unary(node, input),
         "not_expression" => {
             let child = named_children(node)
                 .into_iter()
@@ -559,6 +563,7 @@ fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         "list_operator_expression" => parse_index_access(node, input),
         "property_or_labels_expression" => parse_property_access(node, input),
         "parenthesized_expression" => parse_parenthesized(node, input),
+        "case_expression" => parse_case_expression(node, input),
         "literal" => parse_literal(node, input),
         "string_literal" | "number_literal" | "boolean_literal" | "null_literal"
         | "list_literal" | "map_literal" => parse_literal(node, input),
@@ -597,6 +602,82 @@ fn parse_binary(node: Node, input: &str, op: BinaryOp) -> Result<Expr, CypherErr
         op,
         left: Box::new(parse_expression(left, input)?),
         right: Box::new(parse_expression(right, input)?),
+    })
+}
+
+fn parse_additive(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let mut named = named_children(node).into_iter();
+    let left = named
+        .next()
+        .ok_or_else(|| CypherError::missing("additive left", Span::from_node(node)))?;
+    let right = named
+        .next()
+        .ok_or_else(|| CypherError::missing("additive right", Span::from_node(node)))?;
+    let text = node_text(node, input)?;
+    let op = if text.contains('-') {
+        BinaryOp::Sub
+    } else {
+        BinaryOp::Add
+    };
+    Ok(Expr::BinaryOp {
+        op,
+        left: Box::new(parse_expression(left, input)?),
+        right: Box::new(parse_expression(right, input)?),
+    })
+}
+
+fn parse_multiplicative(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let mut named = named_children(node).into_iter();
+    let left = named
+        .next()
+        .ok_or_else(|| CypherError::missing("multiplicative left", Span::from_node(node)))?;
+    let right = named
+        .next()
+        .ok_or_else(|| CypherError::missing("multiplicative right", Span::from_node(node)))?;
+    let text = node_text(node, input)?;
+    let op = if text.contains('*') {
+        BinaryOp::Mul
+    } else if text.contains('/') {
+        BinaryOp::Div
+    } else {
+        BinaryOp::Mod
+    };
+    Ok(Expr::BinaryOp {
+        op,
+        left: Box::new(parse_expression(left, input)?),
+        right: Box::new(parse_expression(right, input)?),
+    })
+}
+
+fn parse_exponential(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let mut named = named_children(node).into_iter();
+    let left = named
+        .next()
+        .ok_or_else(|| CypherError::missing("exponential left", Span::from_node(node)))?;
+    let right = named
+        .next()
+        .ok_or_else(|| CypherError::missing("exponential right", Span::from_node(node)))?;
+    Ok(Expr::BinaryOp {
+        op: BinaryOp::Pow,
+        left: Box::new(parse_expression(left, input)?),
+        right: Box::new(parse_expression(right, input)?),
+    })
+}
+
+fn parse_unary(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let child = named_children(node)
+        .into_iter()
+        .next()
+        .ok_or_else(|| CypherError::missing("unary expression", Span::from_node(node)))?;
+    let text = node_text(node, input)?;
+    let op = if text.contains('-') {
+        UnaryOp::Neg
+    } else {
+        UnaryOp::Pos
+    };
+    Ok(Expr::UnaryOp {
+        op,
+        expr: Box::new(parse_expression(child, input)?),
     })
 }
 
@@ -663,12 +744,72 @@ fn parse_predicate(node: Node, input: &str) -> Result<Expr, CypherError> {
                 negated,
             })
         }
-        "string_predicate_expression" => Err(CypherError::unsupported(
-            "string predicates",
-            Span::from_node(predicate),
-        )),
+        "string_predicate_expression" => {
+            let text = node_text(predicate, input)?.to_ascii_lowercase();
+            let right = named_children(predicate)
+                .into_iter()
+                .find(|child| child.kind() == "expression")
+                .ok_or_else(|| {
+                    CypherError::missing("string predicate expression", Span::from_node(predicate))
+                })?;
+            let op = if text.contains("starts with") {
+                BinaryOp::StartsWith
+            } else if text.contains("ends with") {
+                BinaryOp::EndsWith
+            } else if text.contains("contains") {
+                BinaryOp::Contains
+            } else {
+                return Err(CypherError::unsupported(
+                    "string predicate operator",
+                    Span::from_node(predicate),
+                ));
+            };
+            Ok(Expr::BinaryOp {
+                op,
+                left: Box::new(parse_expression(left, input)?),
+                right: Box::new(parse_expression(right, input)?),
+            })
+        }
         other => Err(CypherError::unsupported(other, Span::from_node(predicate))),
     }
+}
+
+fn parse_case_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let mut base: Option<Expr> = None;
+    let mut alternatives: Vec<(Expr, Expr)> = Vec::new();
+    let mut else_expr: Option<Expr> = None;
+
+    for child in named_children(node) {
+        match child.kind() {
+            "expression" => {
+                if base.is_none() && alternatives.is_empty() {
+                    base = Some(parse_expression(child, input)?);
+                } else {
+                    else_expr = Some(parse_expression(child, input)?);
+                }
+            }
+            "case_alternatives" => {
+                let mut iter = named_children(child).into_iter();
+                let when_expr = iter.next().ok_or_else(|| {
+                    CypherError::missing("case when expression", Span::from_node(child))
+                })?;
+                let then_expr = iter.next().ok_or_else(|| {
+                    CypherError::missing("case then expression", Span::from_node(child))
+                })?;
+                alternatives.push((
+                    parse_expression(when_expr, input)?,
+                    parse_expression(then_expr, input)?,
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Expr::Case {
+        base: base.map(Box::new),
+        alternatives,
+        else_expr: else_expr.map(Box::new),
+    })
 }
 
 fn parse_index_access(node: Node, input: &str) -> Result<Expr, CypherError> {

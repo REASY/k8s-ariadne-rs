@@ -962,6 +962,35 @@ fn eval_expr(expr: &Expr, row: &Row) -> Result<Value> {
             };
             Ok(Value::Bool(contains))
         }
+        Expr::Case {
+            base,
+            alternatives,
+            else_expr,
+        } => {
+            if let Some(base) = base {
+                let base_value = eval_expr(base, row)?;
+                for (when_expr, then_expr) in alternatives {
+                    let when_value = eval_expr(when_expr, row)?;
+                    let matches = compare_values(&base_value, &when_value)
+                        .map(|ord| ord == Ordering::Equal)
+                        .unwrap_or(false);
+                    if matches {
+                        return eval_expr(then_expr, row);
+                    }
+                }
+            } else {
+                for (when_expr, then_expr) in alternatives {
+                    if eval_bool(when_expr, row)? {
+                        return eval_expr(then_expr, row);
+                    }
+                }
+            }
+            if let Some(else_expr) = else_expr {
+                eval_expr(else_expr, row)
+            } else {
+                Ok(Value::Null)
+            }
+        }
         Expr::FunctionCall { name, args } => eval_function(name, args, row),
         Expr::CountStar => Err(std::io::Error::other("count(*) not valid here").into()),
         Expr::Parameter(name) => Err(std::io::Error::other(format!(
@@ -1057,6 +1086,21 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
             };
             Ok(Value::from(num))
         }
+        "replace" => {
+            if args.len() < 3 {
+                return Err(std::io::Error::other("replace requires three arguments").into());
+            }
+            let value = eval_expr(&args[0], row)?;
+            let search = eval_expr(&args[1], row)?;
+            let replacement = eval_expr(&args[2], row)?;
+            if value.is_null() || search.is_null() || replacement.is_null() {
+                return Ok(Value::Null);
+            }
+            let source = value_to_string(&value);
+            let needle = value_to_string(&search);
+            let repl = value_to_string(&replacement);
+            Ok(Value::String(source.replace(&needle, &repl)))
+        }
         "count" | "sum" | "avg" | "min" | "max" | "collect" => {
             Err(std::io::Error::other("aggregate functions must appear in projection").into())
         }
@@ -1090,6 +1134,22 @@ fn eval_binary(
             };
             Ok(Value::Bool(result))
         }
+        StartsWith | EndsWith | Contains => {
+            let l = eval_expr(left, row)?;
+            let r = eval_expr(right, row)?;
+            if l.is_null() || r.is_null() {
+                return Ok(Value::Bool(false));
+            }
+            let left_str = value_to_string(&l);
+            let right_str = value_to_string(&r);
+            let result = match op {
+                StartsWith => left_str.starts_with(&right_str),
+                EndsWith => left_str.ends_with(&right_str),
+                Contains => left_str.contains(&right_str),
+                _ => false,
+            };
+            Ok(Value::Bool(result))
+        }
         Add | Sub | Mul | Div | Mod | Pow => {
             let l = eval_expr(left, row)?.as_f64().unwrap_or(0.0);
             let r = eval_expr(right, row)?.as_f64().unwrap_or(0.0);
@@ -1104,6 +1164,13 @@ fn eval_binary(
             };
             Ok(Value::from(value))
         }
+    }
+}
+
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -1516,5 +1583,52 @@ mod tests {
                 .unwrap();
             assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
         });
+    }
+
+    #[test]
+    fn executes_string_predicate() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod("p1", "pod-one", "ns1"));
+        state.add_node(pod("p2", "pod-two", "ns1"));
+
+        let query = parse_query(
+            "MATCH (p:Pod) WHERE p.metadata.name ENDS WITH 'one' RETURN p.metadata.name AS name",
+        )
+        .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].get("name").and_then(|v| v.as_str()),
+            Some("pod-one")
+        );
+    }
+
+    #[test]
+    fn executes_case_expression() {
+        let state = ClusterState::new(dummy_cluster());
+        let query =
+            parse_query("UNWIND [1] AS x WITH CASE WHEN x = 1 THEN 5 ELSE 0 END AS v RETURN v")
+                .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get("v").and_then(|v| v.as_i64()), Some(5));
+    }
+
+    #[test]
+    fn executes_replace_function() {
+        let state = ClusterState::new(dummy_cluster());
+        let query = parse_query("RETURN replace('250m','m','') AS v").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get("v").and_then(|v| v.as_str()), Some("250"));
     }
 }

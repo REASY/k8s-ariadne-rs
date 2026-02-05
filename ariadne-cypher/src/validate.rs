@@ -212,6 +212,23 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
             validate_engine_expr(left)?;
             validate_engine_expr(right)
         }
+        Expr::Case {
+            base,
+            alternatives,
+            else_expr,
+        } => {
+            if let Some(base) = base {
+                validate_engine_expr(base)?;
+            }
+            for (when_expr, then_expr) in alternatives {
+                validate_engine_expr(when_expr)?;
+                validate_engine_expr(then_expr)?;
+            }
+            if let Some(else_expr) = else_expr {
+                validate_engine_expr(else_expr)?;
+            }
+            Ok(())
+        }
         Expr::IsNull { expr, .. } => validate_engine_expr(expr),
         Expr::In { expr, list } => {
             validate_engine_expr(expr)?;
