@@ -1086,6 +1086,32 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
             };
             Ok(Value::from(num))
         }
+        "labels" => {
+            let target = args
+                .first()
+                .ok_or_else(|| std::io::Error::other("labels requires one argument"))?;
+            let value = eval_expr(target, row)?;
+            match value {
+                Value::Object(map) => {
+                    if let Some(label) = map
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.to_string())
+                        .or_else(|| {
+                            map.get("resource_type")
+                                .and_then(|v| v.as_str())
+                                .map(|v| v.to_string())
+                        })
+                    {
+                        Ok(Value::Array(vec![Value::String(label)]))
+                    } else {
+                        Ok(Value::Array(vec![]))
+                    }
+                }
+                Value::Null => Ok(Value::Array(vec![])),
+                _ => Ok(Value::Array(vec![])),
+            }
+        }
         "replace" => {
             if args.len() < 3 {
                 return Err(std::io::Error::other("replace requires three arguments").into());
@@ -1630,5 +1656,19 @@ mod tests {
         let results = execute_query_ast(&query, &state, &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("v").and_then(|v| v.as_str()), Some("250"));
+    }
+
+    #[test]
+    fn executes_labels_function() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod("p1", "pod-one", "ns1"));
+
+        let query = parse_query("MATCH (p:Pod) RETURN labels(p) AS labels").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let labels = results[0].get("labels").and_then(|v| v.as_array()).cloned();
+        assert_eq!(labels, Some(vec![Value::String("Pod".to_string())]));
     }
 }
