@@ -1069,13 +1069,6 @@ fn render_feed_item(
                 }
 
                 ui.add_space(12.0);
-                // Actions
-                ui.horizontal(|ui| {
-                    let _ = ui.button("👍");
-                    let _ = ui.button("👎");
-                    let _ = ui.button("Share Result");
-                    let _ = ui.button("Pin to Dashboard");
-                });
             });
     });
 }
