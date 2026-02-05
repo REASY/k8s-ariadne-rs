@@ -1,6 +1,6 @@
 mod error;
+mod gui;
 mod llm;
-mod tui;
 mod validation;
 
 use std::path::{Path, PathBuf};
@@ -17,12 +17,12 @@ use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::state_resolver::ClusterStateResolver;
 
 use crate::error::CliResult;
+use crate::gui::run_gui;
 use crate::llm::{LlmConfig, LlmTranslator, Translator};
-use crate::tui::run_tui;
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
-#[command(about = "Interactive TUI for querying Kubernetes graphs", long_about = None)]
+#[command(about = "Interactive GUI for querying Kubernetes graphs", long_about = None)]
 struct Cli {
     #[arg(long, env = "CLUSTER")]
     cluster: String,
@@ -101,11 +101,33 @@ fn main() -> CliResult<()> {
         structured_output: cli.llm_structured_output,
     })?);
 
-    let tui_result = run_tui(&runtime, backend.clone(), translator, token);
+    let cluster_label = {
+        let guard = cluster_state.lock().expect("cluster state lock poisoned");
+        let version = format_k8s_version(&guard.cluster.info);
+        format!("{} (K8s {})", guard.cluster.name, version)
+    };
 
+    let gui_result = run_gui(
+        &runtime,
+        backend.clone(),
+        translator,
+        cluster_state.clone(),
+        token.clone(),
+        cluster_label,
+    );
+
+    token.cancel();
     runtime.block_on(async { backend.shutdown().await });
+    gui_result
+}
 
-    tui_result
+fn format_k8s_version(info: &k8s_openapi::apimachinery::pkg::version::Info) -> String {
+    let version = info.git_version.trim();
+    if version.is_empty() {
+        "unknown".to_string()
+    } else {
+        version.to_string()
+    }
 }
 
 fn init_logging() -> CliResult<()> {
