@@ -154,7 +154,7 @@ fn handle_key(
 }
 
 fn render(frame: &mut ratatui::Frame, app: &AppState) {
-    let size = frame.size();
+    let size = frame.area();
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
