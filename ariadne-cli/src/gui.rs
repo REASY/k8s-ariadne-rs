@@ -486,8 +486,8 @@ impl GuiApp {
             .suggestions
             .iter()
             .filter(|suggestion| suggestion.to_lowercase().starts_with(&token_lower))
-            .cloned()
             .take(6)
+            .cloned()
             .collect();
     }
 
@@ -555,7 +555,7 @@ impl eframe::App for GuiApp {
                             &self.pulse_nodes,
                             &self.palette,
                         );
-                        ui.add_space(10.0);
+                        ui.add_space(16.0);
                         pulse_metric(
                             ui,
                             "Properties",
@@ -760,7 +760,7 @@ impl eframe::App for GuiApp {
                                 for (label, target) in &self.inspector.relationships {
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new("→").color(self.palette.accent));
-                                        ui.label(format!("{label}"));
+                                        ui.label(label.to_string());
                                         ui.label(
                                             RichText::new(format!("({target})"))
                                                 .color(self.palette.text_muted),
@@ -883,27 +883,39 @@ fn nav_button(ui: &mut egui::Ui, label: &str, tooltip: &str) {
 }
 
 fn pulse_metric(ui: &mut egui::Ui, label: &str, count: usize, series: &[f64], palette: &Palette) {
-    let desired = Vec2::new(160.0, 42.0);
+    let desired = Vec2::new(176.0, 40.0);
     ui.allocate_ui_with_layout(desired, Layout::left_to_right(Align::Center), |ui| {
-        // Transparent frame for the group
-        ui.group(|ui| {
-            ui.set_min_size(desired);
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(label).color(palette.text_muted).size(10.0));
-                    ui.label(
-                        RichText::new(format_count(count))
-                            .color(palette.text_primary)
-                            .size(14.0)
-                            .strong(),
-                    );
+        Frame::new()
+            .fill(palette.bg_elevated)
+            .stroke(Stroke::new(1.0, palette.border))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_min_size(desired);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(label).color(palette.text_muted).size(10.0),
+                            )
+                            .truncate(),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format_count(count))
+                                    .color(palette.text_primary)
+                                    .size(14.0)
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    let spark_size = Vec2::new(60.0, 24.0);
+                    let (response, painter) = ui.allocate_painter(spark_size, egui::Sense::hover());
+                    draw_sparkline(painter, response.rect, series, palette.accent);
                 });
-                ui.add_space(4.0);
-                let spark_size = Vec2::new(60.0, 24.0);
-                let (response, painter) = ui.allocate_painter(spark_size, egui::Sense::hover());
-                draw_sparkline(painter, response.rect, series, palette.accent);
             });
-        });
     });
 }
 
@@ -1141,63 +1153,78 @@ fn render_result(
             });
         }
         ResultPayload::List { rows } => {
-            // Redo List with horizontal_wrapped for responsiveness
-            ui.horizontal_wrapped(|ui| {
-                for (idx, row) in rows.iter().enumerate() {
-                    let inner = Frame::new()
-                        .fill(palette.bg_panel)
-                        .stroke(Stroke::new(1.0, palette.border))
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.label(
-                                RichText::new(&row.title)
-                                    .color(palette.text_primary)
-                                    .size(13.0)
-                                    .strong(),
-                            );
-                            if let Some(subtitle) = &row.subtitle {
-                                ui.label(
-                                    RichText::new(subtitle).color(palette.text_muted).size(12.0),
-                                );
-                            }
-                            if let Some(status) = &row.status {
-                                ui.add_space(4.0);
-                                Frame::new()
-                                    .fill(palette.bg_primary)
-                                    .corner_radius(CornerRadius::same(4))
-                                    .inner_margin(Margin::symmetric(6, 2))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(status).size(10.0).color(palette.accent),
-                                        );
-                                    });
-                            }
-                            ui.add_space(6.0);
-                            for (key, value) in row.fields.iter().take(3) {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("{key}:"))
-                                            .color(palette.text_muted)
-                                            .size(11.0),
-                                    );
-                                    ui.label(
-                                        RichText::new(value).color(palette.text_primary).size(11.0),
-                                    );
-                                });
-                            }
-                        })
-                        .response;
-                    let response = ui.interact(
-                        inner.rect,
-                        ui.id().with(format!("row-{idx}")),
-                        egui::Sense::click(),
-                    );
-                    if response.clicked() {
-                        on_select(row);
+            // "VISUAL RESULT AREA" header is already rendered by render_feed_item, so we remove it here.
+
+            ui.add_space(6.0);
+            let frame = Frame::new()
+                .fill(palette.bg_panel)
+                .stroke(Stroke::new(1.0, palette.border))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(8));
+            frame.show(ui, |ui| {
+                let mut extra_keys: Vec<String> = Vec::new();
+                if let Some(first) = rows.first() {
+                    for (key, _) in &first.fields {
+                        if key == "metadata_name"
+                            || key == "metadata_namespace"
+                            || key == "status"
+                            || key == "phase"
+                            || key == "kind"
+                        {
+                            continue;
+                        }
+                        extra_keys.push(key.clone());
                     }
                 }
+
+                let show_namespace = rows.iter().any(|r| r.subtitle.is_some());
+                let show_status = rows.iter().any(|r| r.status.is_some());
+
+                let mut columns = vec!["Name".to_string()];
+                if show_namespace {
+                    columns.push("Namespace".to_string());
+                }
+                if show_status {
+                    columns.push("Status".to_string());
+                }
+                columns.extend(extra_keys.clone());
+
+                egui::Grid::new("result_table")
+                    .striped(true)
+                    .min_col_width(120.0)
+                    .show(ui, |ui| {
+                        for header in &columns {
+                            ui.label(
+                                RichText::new(header)
+                                    .color(palette.text_muted)
+                                    .size(11.0)
+                                    .strong(),
+                            );
+                        }
+                        ui.end_row();
+
+                        for (idx, row) in rows.iter().enumerate() {
+                            let clicked = ui.selectable_label(false, &row.title).clicked();
+
+                            if show_namespace {
+                                let namespace = row.subtitle.as_deref().unwrap_or("-");
+                                ui.label(namespace);
+                            }
+                            if show_status {
+                                let status = row.status.as_deref().unwrap_or("-");
+                                ui.label(status);
+                            }
+
+                            for key in &extra_keys {
+                                ui.label(find_field(&row.fields, key).unwrap_or("-"));
+                            }
+                            ui.end_row();
+                            if clicked {
+                                on_select(row);
+                            }
+                            let _ = idx;
+                        }
+                    });
             });
         }
         ResultPayload::Graph { nodes, edges } => {
@@ -1455,6 +1482,13 @@ fn format_value(value: &Value) -> String {
     }
 }
 
+fn find_field<'a>(fields: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
 fn build_suggestions() -> Vec<String> {
     let mut suggestions: Vec<String> = ResourceType::iter().map(|r| r.to_string()).collect();
     suggestions.extend(vec![
@@ -1476,7 +1510,7 @@ fn build_suggestions() -> Vec<String> {
 fn current_token(input: &str) -> String {
     input
         .split(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ')' || c == ':')
-        .last()
+        .next_back()
         .unwrap_or("")
         .to_string()
 }
@@ -1495,9 +1529,16 @@ fn replace_last_token(input: &str, suggestion: &str) -> String {
 }
 
 fn push_sparkline(series: &mut Vec<f64>, value: f64) {
-    series.push(value);
-    if series.len() > 12 {
-        series.remove(0);
+    if series.is_empty() {
+        // Pre-fill history so it shows a flat line immediately
+        for _ in 0..12 {
+            series.push(value);
+        }
+    } else {
+        series.push(value);
+        if series.len() > 12 {
+            series.remove(0);
+        }
     }
 }
 
@@ -1552,5 +1593,26 @@ mod tests {
     #[test]
     fn current_token_picks_last_word() {
         assert_eq!(current_token("MATCH (p:Pod"), "Pod");
+    }
+
+    #[test]
+    fn push_sparkline_prefills_empty() {
+        let mut series = vec![];
+        push_sparkline(&mut series, 42.0);
+        assert_eq!(series.len(), 12);
+        for val in series {
+            assert_eq!(val, 42.0);
+        }
+    }
+
+    #[test]
+    fn push_sparkline_maintains_size_and_shifts() {
+        let mut series = vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        push_sparkline(&mut series, 13.0);
+        assert_eq!(series.len(), 12);
+        assert_eq!(series[0], 2.0);
+        assert_eq!(series[11], 13.0);
     }
 }
