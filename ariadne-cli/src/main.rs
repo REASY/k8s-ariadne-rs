@@ -7,12 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ::llm::builder::LLMBackend;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use kube::config::KubeConfigOptions;
 use tokio_util::sync::CancellationToken;
 
 use ariadne_core::graph_backend::GraphBackend;
-use ariadne_core::graphqlite::{GraphqliteBackend, GraphqliteConfig};
 use ariadne_core::in_memory::InMemoryBackend;
 use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::state_resolver::ClusterStateResolver;
@@ -33,10 +32,6 @@ struct Cli {
     kube_namespace: Option<String>,
     #[arg(long, env = "KUBE_SNAPSHOT_DIR")]
     snapshot_dir: Option<String>,
-    #[arg(long, env = "GRAPHQLITE_DB_PATH", default_value = ":memory:")]
-    db_path: String,
-    #[arg(long, env = "GRAPH_BACKEND", value_enum, default_value = "in-memory")]
-    graph_backend: GraphBackendType,
     #[arg(long, env = "LLM_BACKEND", default_value = "openai")]
     llm_backend: LLMBackend,
     #[arg(long, env = "LLM_BASE_URL")]
@@ -51,12 +46,6 @@ struct Cli {
     llm_structured_output: bool,
 }
 
-#[derive(Clone, Debug, ValueEnum)]
-enum GraphBackendType {
-    Graphqlite,
-    InMemory,
-}
-
 fn main() -> CliResult<()> {
     init_logging()?;
 
@@ -66,12 +55,7 @@ fn main() -> CliResult<()> {
         .enable_all()
         .build()?;
 
-    let backend: Arc<dyn GraphBackend> = match cli.graph_backend {
-        GraphBackendType::Graphqlite => Arc::new(GraphqliteBackend::try_new(GraphqliteConfig {
-            db_path: cli.db_path.clone(),
-        })?),
-        GraphBackendType::InMemory => Arc::new(InMemoryBackend::new()),
-    };
+    let backend: Arc<dyn GraphBackend> = Arc::new(InMemoryBackend::new());
 
     let kube_opts = KubeConfigOptions {
         context: cli.kube_context.clone(),

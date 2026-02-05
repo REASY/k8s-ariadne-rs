@@ -31,7 +31,6 @@ const_format = "0.2"
 crossbeam = "0.8"
 crossterm = "0.27"
 futures = {  version = "0.3" }
-graphqlite = { version = "0.3.2", features = ["bundled-extension"] }
 http = "1"
 k8s-openapi = { version = "0.27.0", features = ["v1_32", "schemars"] }
 kube = { version = "3.0.1", features = ["runtime"] }

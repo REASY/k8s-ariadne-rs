@@ -1,5 +1,4 @@
 use crate::memgraph;
-use graphqlite;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -21,8 +20,6 @@ pub enum ErrorKind {
     KubeconfigInferError(#[from] kube::config::InClusterError),
     #[error("MemgraphError: {0}")]
     MemgraphError(#[from] memgraph::MemgraphError),
-    #[error("GraphqliteError: {0}")]
-    GraphqliteError(#[from] graphqlite::Error),
     #[error("InvalidResourceTypeError: {0}")]
     InvalidResourceTypeError(String),
 }

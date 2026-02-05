@@ -11,7 +11,6 @@ pub mod prelude {
 }
 
 mod diff;
-pub mod graphqlite;
 pub mod id_gen;
 pub mod in_memory;
 pub mod kube_client;
