@@ -23,3 +23,13 @@ fn parses_string_predicates() {
     "#;
     assert!(parse_query(query).is_ok());
 }
+
+#[test]
+fn parses_label_predicate() {
+    let query = r#"
+        MATCH (n)
+        WHERE n:Pod OR n:Service
+        RETURN n
+    "#;
+    assert!(parse_query(query).is_ok());
+}

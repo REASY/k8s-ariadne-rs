@@ -212,6 +212,7 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
             validate_engine_expr(left)?;
             validate_engine_expr(right)
         }
+        Expr::HasLabel { expr, .. } => validate_engine_expr(expr),
         Expr::Case {
             base,
             alternatives,

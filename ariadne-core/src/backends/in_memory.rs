@@ -962,6 +962,23 @@ fn eval_expr(expr: &Expr, row: &Row) -> Result<Value> {
             };
             Ok(Value::Bool(contains))
         }
+        Expr::HasLabel { expr, labels } => {
+            let value = eval_expr(expr, row)?;
+            let label = match value {
+                Value::Object(map) => map
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| map.get("resource_type").and_then(|v| v.as_str()))
+                    .map(|v| v.to_string()),
+                _ => None,
+            };
+            let matches = if let Some(label) = label {
+                labels.iter().all(|l| l == &label)
+            } else {
+                false
+            };
+            Ok(Value::Bool(matches))
+        }
         Expr::Case {
             base,
             alternatives,
@@ -1683,5 +1700,35 @@ mod tests {
         let v = results[0].get("v").and_then(|v| v.as_f64()).unwrap();
         let expected = 1000.0 / 1024.0 / 1024.0;
         assert!((v - expected).abs() < 1e-9, "expected {expected}, got {v}");
+    }
+
+    #[test]
+    fn executes_label_predicate_filter() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod("p1", "pod-one", "ns1"));
+        state.add_node(deployment("d1", "deploy", "ns1"));
+
+        let query = parse_query("MATCH (n) WHERE n:Pod RETURN count(n) AS total").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
+    }
+
+    #[test]
+    fn executes_label_predicate_with_or() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod("p1", "pod-one", "ns1"));
+        state.add_node(pod("p2", "pod-two", "ns1"));
+        state.add_node(deployment("d1", "deploy", "ns1"));
+
+        let query =
+            parse_query("MATCH (n) WHERE n:Pod OR n:Deployment RETURN count(n) AS total").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(3));
     }
 }

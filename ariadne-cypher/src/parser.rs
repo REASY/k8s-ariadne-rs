@@ -614,7 +614,11 @@ fn parse_additive(node: Node, input: &str) -> Result<Expr, CypherError> {
         .next()
         .ok_or_else(|| CypherError::missing("additive right", Span::from_node(node)))?;
     let op_text = find_operator(node, input, &["+", "-"])?;
-    let op = if op_text == "-" { BinaryOp::Sub } else { BinaryOp::Add };
+    let op = if op_text == "-" {
+        BinaryOp::Sub
+    } else {
+        BinaryOp::Add
+    };
     Ok(Expr::BinaryOp {
         op,
         left: Box::new(parse_expression(left, input)?),
@@ -666,7 +670,11 @@ fn parse_unary(node: Node, input: &str) -> Result<Expr, CypherError> {
         .next()
         .ok_or_else(|| CypherError::missing("unary expression", Span::from_node(node)))?;
     let op_text = find_operator(node, input, &["+", "-"])?;
-    let op = if op_text == "-" { UnaryOp::Neg } else { UnaryOp::Pos };
+    let op = if op_text == "-" {
+        UnaryOp::Neg
+    } else {
+        UnaryOp::Pos
+    };
     Ok(Expr::UnaryOp {
         op,
         expr: Box::new(parse_expression(child, input)?),
@@ -686,10 +694,7 @@ fn find_operator(node: Node, input: &str, ops: &[&str]) -> Result<String, Cypher
             return Ok(op.to_string());
         }
     }
-    Err(CypherError::unsupported(
-        "operator",
-        Span::from_node(node),
-    ))
+    Err(CypherError::unsupported("operator", Span::from_node(node)))
 }
 
 fn parse_comparison(node: Node, input: &str) -> Result<Expr, CypherError> {
@@ -857,16 +862,32 @@ fn parse_property_access(node: Node, input: &str) -> Result<Expr, CypherError> {
                 };
             }
             "node_labels" => {
-                return Err(CypherError::unsupported(
-                    "label predicates",
-                    Span::from_node(child),
-                ));
+                let labels = parse_node_labels(child, input)?;
+                expr = Expr::HasLabel {
+                    expr: Box::new(expr),
+                    labels,
+                };
             }
             _ => {}
         }
     }
 
     Ok(expr)
+}
+
+fn parse_node_labels(node: Node, input: &str) -> Result<Vec<String>, CypherError> {
+    let mut labels = Vec::new();
+    for child in named_children(node) {
+        match child.kind() {
+            "node_label" => labels.push(parse_label(child, input)?),
+            "label_name" => labels.push(parse_identifier(child, input)?),
+            _ => {}
+        }
+    }
+    if labels.is_empty() {
+        return Err(CypherError::missing("label name", Span::from_node(node)));
+    }
+    Ok(labels)
 }
 
 fn parse_parenthesized(node: Node, input: &str) -> Result<Expr, CypherError> {

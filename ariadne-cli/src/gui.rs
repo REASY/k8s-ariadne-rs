@@ -307,6 +307,7 @@ impl GuiApp {
                                     });
                                 }
                                 Err(err) => {
+                                    tracing::error!("Query failed: {err}");
                                     let _ = tx.send(AppEvent::QueryFailed {
                                         id,
                                         error: err.to_string(),
@@ -316,6 +317,7 @@ impl GuiApp {
                             }
                         }
                         Err(err) => {
+                            tracing::error!("Validation failed: {err}");
                             let _ = tx.send(AppEvent::ValidationFailed {
                                 id,
                                 error: err.to_string(),
@@ -325,6 +327,7 @@ impl GuiApp {
                     }
                 }
                 Err(err) => {
+                    tracing::error!("Translation failed: {err}");
                     let _ = tx.send(AppEvent::TranslationFailed {
                         id,
                         error: err.to_string(),
@@ -355,6 +358,7 @@ impl GuiApp {
                             });
                         }
                         Err(err) => {
+                            tracing::error!("Query failed: {err}");
                             let _ = tx.send(AppEvent::QueryFailed {
                                 id,
                                 error: err.to_string(),
@@ -364,6 +368,7 @@ impl GuiApp {
                     }
                 }
                 Err(err) => {
+                    tracing::error!("Validation failed: {err}");
                     let _ = tx.send(AppEvent::ValidationFailed {
                         id,
                         error: err.to_string(),

@@ -172,6 +172,10 @@ pub enum Expr {
         expr: Box<Expr>,
         list: Box<Expr>,
     },
+    HasLabel {
+        expr: Box<Expr>,
+        labels: Vec<String>,
+    },
     Case {
         base: Option<Box<Expr>>,
         alternatives: Vec<(Expr, Expr)>,
