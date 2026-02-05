@@ -613,12 +613,8 @@ fn parse_additive(node: Node, input: &str) -> Result<Expr, CypherError> {
     let right = named
         .next()
         .ok_or_else(|| CypherError::missing("additive right", Span::from_node(node)))?;
-    let text = node_text(node, input)?;
-    let op = if text.contains('-') {
-        BinaryOp::Sub
-    } else {
-        BinaryOp::Add
-    };
+    let op_text = find_operator(node, input, &["+", "-"])?;
+    let op = if op_text == "-" { BinaryOp::Sub } else { BinaryOp::Add };
     Ok(Expr::BinaryOp {
         op,
         left: Box::new(parse_expression(left, input)?),
@@ -634,13 +630,12 @@ fn parse_multiplicative(node: Node, input: &str) -> Result<Expr, CypherError> {
     let right = named
         .next()
         .ok_or_else(|| CypherError::missing("multiplicative right", Span::from_node(node)))?;
-    let text = node_text(node, input)?;
-    let op = if text.contains('*') {
-        BinaryOp::Mul
-    } else if text.contains('/') {
-        BinaryOp::Div
-    } else {
-        BinaryOp::Mod
+    let op_text = find_operator(node, input, &["*", "/", "%"])?;
+    let op = match op_text.as_str() {
+        "*" => BinaryOp::Mul,
+        "/" => BinaryOp::Div,
+        "%" => BinaryOp::Mod,
+        _ => BinaryOp::Mul,
     };
     Ok(Expr::BinaryOp {
         op,
@@ -657,6 +652,7 @@ fn parse_exponential(node: Node, input: &str) -> Result<Expr, CypherError> {
     let right = named
         .next()
         .ok_or_else(|| CypherError::missing("exponential right", Span::from_node(node)))?;
+    let _ = find_operator(node, input, &["^"])?;
     Ok(Expr::BinaryOp {
         op: BinaryOp::Pow,
         left: Box::new(parse_expression(left, input)?),
@@ -669,16 +665,31 @@ fn parse_unary(node: Node, input: &str) -> Result<Expr, CypherError> {
         .into_iter()
         .next()
         .ok_or_else(|| CypherError::missing("unary expression", Span::from_node(node)))?;
-    let text = node_text(node, input)?;
-    let op = if text.contains('-') {
-        UnaryOp::Neg
-    } else {
-        UnaryOp::Pos
-    };
+    let op_text = find_operator(node, input, &["+", "-"])?;
+    let op = if op_text == "-" { UnaryOp::Neg } else { UnaryOp::Pos };
     Ok(Expr::UnaryOp {
         op,
         expr: Box::new(parse_expression(child, input)?),
     })
+}
+
+fn find_operator(node: Node, input: &str, ops: &[&str]) -> Result<String, CypherError> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if !child.is_named() && ops.iter().any(|op| *op == child.kind()) {
+            return Ok(child.kind().to_string());
+        }
+    }
+    let text = node_text(node, input)?;
+    for op in ops {
+        if text.contains(op) {
+            return Ok(op.to_string());
+        }
+    }
+    Err(CypherError::unsupported(
+        "operator",
+        Span::from_node(node),
+    ))
 }
 
 fn parse_comparison(node: Node, input: &str) -> Result<Expr, CypherError> {

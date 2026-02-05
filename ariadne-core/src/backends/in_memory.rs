@@ -1671,4 +1671,17 @@ mod tests {
         let labels = results[0].get("labels").and_then(|v| v.as_array()).cloned();
         assert_eq!(labels, Some(vec![Value::String("Pod".to_string())]));
     }
+
+    #[test]
+    fn executes_mixed_multiplicative_expression() {
+        let state = ClusterState::new(dummy_cluster());
+        let query = parse_query("RETURN 1000 / 1024 / 1024 AS v").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let v = results[0].get("v").and_then(|v| v.as_f64()).unwrap();
+        let expected = 1000.0 / 1024.0 / 1024.0;
+        assert!((v - expected).abs() < 1e-9, "expected {expected}, got {v}");
+    }
 }

@@ -117,6 +117,8 @@ fn build_valid_queries() -> Vec<String> {
         "MATCH (n) RETURN n + 1",
         "MATCH (n) RETURN n.age - 1",
         "MATCH (n) RETURN n.age * 2",
+        "RETURN 1000 / 1024 AS ratio",
+        "RETURN 1024 * 1024 / 1000 AS ratio",
         "CALL db.labels() YIELD label RETURN label",
         "CALL db.labels() YIELD label AS l RETURN l",
         "CALL db.labels($arg) YIELD label RETURN label",
