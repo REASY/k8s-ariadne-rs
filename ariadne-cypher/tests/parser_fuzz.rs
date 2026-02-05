@@ -54,7 +54,10 @@ fn build_valid_queries() -> Vec<String> {
     for pattern in node_patterns {
         for where_clause in node_wheres {
             for ret in node_returns {
-                push_query(&mut queries, &[&format!("MATCH {pattern}"), where_clause, ret]);
+                push_query(
+                    &mut queries,
+                    &[&format!("MATCH {pattern}"), where_clause, ret],
+                );
             }
         }
     }
@@ -86,7 +89,10 @@ fn build_valid_queries() -> Vec<String> {
     for pattern in rel_patterns {
         for where_clause in rel_wheres {
             for ret in rel_returns {
-                push_query(&mut queries, &[&format!("MATCH {pattern}"), where_clause, ret]);
+                push_query(
+                    &mut queries,
+                    &[&format!("MATCH {pattern}"), where_clause, ret],
+                );
             }
         }
     }

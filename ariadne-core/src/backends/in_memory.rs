@@ -298,19 +298,20 @@ fn match_node_pattern(
     }
 
     let mut results = Vec::new();
-    let label_type = if pattern.labels.len() == 1 {
-        Some(ResourceType::try_new(&pattern.labels[0]).map_err(|_| {
-            std::io::Error::other(format!("unknown label: {}", pattern.labels[0]))
-        })?)
-    } else {
-        None
-    };
-    let candidates: Box<dyn Iterator<Item = &GenericObject>> = if let Some(ref expected) = label_type
-    {
-        Box::new(state.get_nodes_by_type(expected))
-    } else {
-        Box::new(state.get_nodes())
-    };
+    let label_type =
+        if pattern.labels.len() == 1 {
+            Some(ResourceType::try_new(&pattern.labels[0]).map_err(|_| {
+                std::io::Error::other(format!("unknown label: {}", pattern.labels[0]))
+            })?)
+        } else {
+            None
+        };
+    let candidates: Box<dyn Iterator<Item = &GenericObject>> =
+        if let Some(ref expected) = label_type {
+            Box::new(state.get_nodes_by_type(expected))
+        } else {
+            Box::new(state.get_nodes())
+        };
     for node in candidates {
         if label_type.is_some() {
             stats.nodes_indexed += 1;
@@ -348,18 +349,26 @@ fn match_relationship_pattern(
         None
     };
     let right_label_type = if pattern.right.labels.len() == 1 {
-        Some(ResourceType::try_new(&pattern.right.labels[0]).map_err(|_| {
-            std::io::Error::other(format!("unknown label: {}", pattern.right.labels[0]))
-        })?)
+        Some(
+            ResourceType::try_new(&pattern.right.labels[0]).map_err(|_| {
+                std::io::Error::other(format!("unknown label: {}", pattern.right.labels[0]))
+            })?,
+        )
     } else {
         None
     };
     if rel_types.is_empty() {
         for edge in state.get_edges() {
             stats.edges_scanned += 1;
-            if let Some(rows) =
-                match_edge_row(row, pattern, &edge, state, dir, left_label_type.as_ref(), right_label_type.as_ref())?
-            {
+            if let Some(rows) = match_edge_row(
+                row,
+                pattern,
+                &edge,
+                state,
+                dir,
+                left_label_type.as_ref(),
+                right_label_type.as_ref(),
+            )? {
                 results.extend(rows);
             }
         }
@@ -372,9 +381,15 @@ fn match_relationship_pattern(
                 }
                 for edge in state.get_edges_by_type(&edge_type) {
                     stats.edges_indexed += 1;
-                    if let Some(rows) =
-                        match_edge_row(row, pattern, &edge, state, dir, left_label_type.as_ref(), right_label_type.as_ref())?
-                    {
+                    if let Some(rows) = match_edge_row(
+                        row,
+                        pattern,
+                        &edge,
+                        state,
+                        dir,
+                        left_label_type.as_ref(),
+                        right_label_type.as_ref(),
+                    )? {
                         results.extend(rows);
                     }
                 }
@@ -422,7 +437,9 @@ fn match_edge_row(
             if left_node.resource_type != *expected {
                 continue;
             }
-        } else if !pattern.left.labels.is_empty() && !matches_labels(left_node, &pattern.left.labels)? {
+        } else if !pattern.left.labels.is_empty()
+            && !matches_labels(left_node, &pattern.left.labels)?
+        {
             continue;
         }
 
@@ -430,7 +447,9 @@ fn match_edge_row(
             if right_node.resource_type != *expected {
                 continue;
             }
-        } else if !pattern.right.labels.is_empty() && !matches_labels(right_node, &pattern.right.labels)? {
+        } else if !pattern.right.labels.is_empty()
+            && !matches_labels(right_node, &pattern.right.labels)?
+        {
             continue;
         }
 
@@ -470,7 +489,10 @@ fn match_edge_row(
         }
         if let Some(rel_var) = &pattern.rel.variable {
             if !row.contains_key(rel_var) {
-                binding.insert(rel_var.clone(), relationship_to_value(edge, &left_uid, &right_uid));
+                binding.insert(
+                    rel_var.clone(),
+                    relationship_to_value(edge, &left_uid, &right_uid),
+                );
             }
         }
 
@@ -670,7 +692,7 @@ fn eval_aggregate(expr: &Expr, rows: &[Row]) -> Result<Value> {
         Expr::FunctionCall { name, args } => match name.to_ascii_lowercase().as_str() {
             "count" => {
                 let target = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| std::io::Error::other("count requires one argument"))?;
                 let mut count = 0i64;
                 for row in rows {
@@ -683,7 +705,7 @@ fn eval_aggregate(expr: &Expr, rows: &[Row]) -> Result<Value> {
             }
             "sum" => {
                 let target = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| std::io::Error::other("sum requires one argument"))?;
                 let mut total = 0.0;
                 let mut seen = false;
@@ -701,7 +723,7 @@ fn eval_aggregate(expr: &Expr, rows: &[Row]) -> Result<Value> {
             }
             "avg" => {
                 let target = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| std::io::Error::other("avg requires one argument"))?;
                 let mut total = 0.0;
                 let mut count = 0.0;
@@ -719,7 +741,7 @@ fn eval_aggregate(expr: &Expr, rows: &[Row]) -> Result<Value> {
             }
             "min" | "max" => {
                 let target = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| std::io::Error::other("min/max require one argument"))?;
                 let mut current: Option<Value> = None;
                 for row in rows {
@@ -744,7 +766,7 @@ fn eval_aggregate(expr: &Expr, rows: &[Row]) -> Result<Value> {
             }
             "collect" => {
                 let target = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| std::io::Error::other("collect requires one argument"))?;
                 let mut values = Vec::new();
                 for row in rows {
@@ -954,7 +976,7 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
     match lower.as_str() {
         "size" => {
             let target = args
-                .get(0)
+                .first()
                 .ok_or_else(|| std::io::Error::other("size requires one argument"))?;
             let value = eval_expr(target, row)?;
             let size = match value {
@@ -967,7 +989,7 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
         }
         "lower" | "upper" => {
             let target = args
-                .get(0)
+                .first()
                 .ok_or_else(|| std::io::Error::other("lower/upper require one argument"))?;
             let value = eval_expr(target, row)?;
             let text = value.as_str().unwrap_or_default();
@@ -989,7 +1011,7 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
         }
         "tostring" => {
             let target = args
-                .get(0)
+                .first()
                 .ok_or_else(|| std::io::Error::other("toString requires one argument"))?;
             let value = eval_expr(target, row)?;
             Ok(Value::String(match value {
@@ -999,7 +1021,7 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
         }
         "tointeger" | "toint" => {
             let target = args
-                .get(0)
+                .first()
                 .ok_or_else(|| std::io::Error::other("toInteger requires one argument"))?;
             let value = eval_expr(target, row)?;
             let num = match value {
@@ -1018,7 +1040,7 @@ fn eval_function(name: &str, args: &[Expr], row: &Row) -> Result<Value> {
         }
         "tofloat" => {
             let target = args
-                .get(0)
+                .first()
                 .ok_or_else(|| std::io::Error::other("toFloat requires one argument"))?;
             let value = eval_expr(target, row)?;
             let num = match value {

@@ -169,18 +169,12 @@ impl ClusterState {
                 let previous = self.graph.add_edge(from, to, edge.clone());
                 match previous {
                     None => {
-                        self.edges_by_type
-                            .entry(edge)
-                            .or_default()
-                            .push((from, to));
+                        self.edges_by_type.entry(edge).or_default().push((from, to));
                     }
                     Some(old_edge) => {
                         if old_edge != edge {
                             self.remove_edge_index(&old_edge, from, to);
-                            self.edges_by_type
-                                .entry(edge)
-                                .or_default()
-                                .push((from, to));
+                            self.edges_by_type.entry(edge).or_default().push((from, to));
                         }
                     }
                 }
@@ -242,10 +236,7 @@ impl ClusterState {
             .filter_map(|id| self.id_to_node.get(id))
     }
 
-    pub fn get_edges_by_type<'a>(
-        &'a self,
-        edge: &'a Edge,
-    ) -> impl Iterator<Item = GraphEdge> + 'a {
+    pub fn get_edges_by_type<'a>(&'a self, edge: &'a Edge) -> impl Iterator<Item = GraphEdge> + 'a {
         self.edges_by_type
             .get(edge)
             .into_iter()

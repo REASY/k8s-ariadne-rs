@@ -112,10 +112,12 @@ impl QuerySpec {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn query(&self) -> &str {
         &self.query
     }
 
+    #[allow(dead_code)]
     pub(crate) fn params_map(&self) -> &HashMap<String, QueryParam> {
         &self.params
     }

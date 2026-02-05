@@ -132,14 +132,14 @@ fn parse_with(node: Node, input: &str) -> Result<WithClause, CypherError> {
         .map(|where_node| parse_where(where_node, input))
         .transpose()?;
 
-    let (distinct, items, order, skip, limit) = parse_projection_body(projection, input)?;
+    let projection_parts = parse_projection_body(projection, input)?;
 
     Ok(WithClause {
-        distinct,
-        items,
-        order,
-        skip,
-        limit,
+        distinct: projection_parts.distinct,
+        items: projection_parts.items,
+        order: projection_parts.order,
+        skip: projection_parts.skip,
+        limit: projection_parts.limit,
         where_clause,
         span: Span::from_node(node),
     })
@@ -150,14 +150,14 @@ fn parse_return(node: Node, input: &str) -> Result<ReturnClause, CypherError> {
         .into_iter()
         .find(|child| child.kind() == "projection_body")
         .ok_or_else(|| CypherError::missing("return projection", Span::from_node(node)))?;
-    let (distinct, items, order, skip, limit) = parse_projection_body(projection, input)?;
+    let projection_parts = parse_projection_body(projection, input)?;
 
     Ok(ReturnClause {
-        distinct,
-        items,
-        order,
-        skip,
-        limit,
+        distinct: projection_parts.distinct,
+        items: projection_parts.items,
+        order: projection_parts.order,
+        skip: projection_parts.skip,
+        limit: projection_parts.limit,
         span: Span::from_node(node),
     })
 }
@@ -206,19 +206,15 @@ fn parse_updating_clause(node: Node, input: &str) -> Result<UpdatingClause, Cyph
     })
 }
 
-fn parse_projection_body(
-    node: Node,
-    input: &str,
-) -> Result<
-    (
-        bool,
-        Vec<ProjectionItem>,
-        Option<OrderBy>,
-        Option<Expr>,
-        Option<Expr>,
-    ),
-    CypherError,
-> {
+struct ProjectionParts {
+    distinct: bool,
+    items: Vec<ProjectionItem>,
+    order: Option<OrderBy>,
+    skip: Option<Expr>,
+    limit: Option<Expr>,
+}
+
+fn parse_projection_body(node: Node, input: &str) -> Result<ProjectionParts, CypherError> {
     let mut items = Vec::new();
     let mut order = None;
     let mut skip = None;
@@ -271,7 +267,13 @@ fn parse_projection_body(
     let text = node_text(node, input)?.to_ascii_lowercase();
     let distinct = text.trim_start().starts_with("distinct");
 
-    Ok((distinct, items, order, skip, limit))
+    Ok(ProjectionParts {
+        distinct,
+        items,
+        order,
+        skip,
+        limit,
+    })
 }
 
 fn parse_projection_item(node: Node, input: &str) -> Result<ProjectionItem, CypherError> {
@@ -331,13 +333,12 @@ fn parse_yield_item(node: Node, input: &str) -> Result<YieldItem, CypherError> {
         .next()
         .ok_or_else(|| CypherError::missing("yield item", Span::from_node(node)))?;
     let second = named.next();
-    let (name, alias) = if first.kind() == "procedure_result_field" && second.is_some() {
-        (
+    let (name, alias) = match (first.kind(), second) {
+        ("procedure_result_field", Some(second)) => (
             parse_identifier(first, input)?,
-            Some(parse_identifier(second.unwrap(), input)?),
-        )
-    } else {
-        (parse_identifier(first, input)?, None)
+            Some(parse_identifier(second, input)?),
+        ),
+        _ => (parse_identifier(first, input)?, None),
     };
     Ok(YieldItem { name, alias })
 }
@@ -827,9 +828,10 @@ fn normalize_identifier(text: &str) -> String {
 
 fn unescape_string(text: &str) -> String {
     let trimmed = text.trim();
-    let unquoted = if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2 {
-        &trimmed[1..trimmed.len() - 1]
-    } else if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+    let unquoted = if trimmed.len() >= 2
+        && ((trimmed.starts_with('\'') && trimmed.ends_with('\''))
+            || (trimmed.starts_with('"') && trimmed.ends_with('"')))
+    {
         &trimmed[1..trimmed.len() - 1]
     } else {
         trimmed
