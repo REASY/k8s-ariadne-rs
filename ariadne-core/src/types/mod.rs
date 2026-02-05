@@ -14,6 +14,7 @@ use schemars;
 use serde::{Deserialize, Serialize};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 
 pub static LOGICAL_RESOURCE_TYPES: &[ResourceType] = &[
@@ -73,28 +74,26 @@ pub enum ResourceType {
 
 impl ResourceType {
     pub fn try_new(kind: &str) -> Result<Self> {
-        match kind {
-            "Pod" => Ok(ResourceType::Pod),
-            "Deployment" => Ok(ResourceType::Deployment),
-            "StatefulSet" => Ok(ResourceType::StatefulSet),
-            "ReplicaSet" => Ok(ResourceType::ReplicaSet),
-            "DaemonSet" => Ok(ResourceType::DaemonSet),
-            "Job" => Ok(ResourceType::Job),
-            "Ingress" => Ok(ResourceType::Ingress),
-            "Service" => Ok(ResourceType::Service),
-            "EndpointSlice" => Ok(ResourceType::EndpointSlice),
-            "NetworkPolicy" => Ok(ResourceType::NetworkPolicy),
-            "ConfigMap" => Ok(ResourceType::ConfigMap),
-            "StorageClass" => Ok(ResourceType::StorageClass),
-            "PersistentVolumeClaim" => Ok(ResourceType::PersistentVolumeClaim),
-            "PersistentVolume" => Ok(ResourceType::PersistentVolume),
-            "Node" => Ok(ResourceType::Node),
-            "Namespace" => Ok(ResourceType::Namespace),
-            "ServiceAccount" => Ok(ResourceType::ServiceAccount),
-            "Event" => Ok(ResourceType::Event),
-            _ => Err(AriadneError::from(ErrorKind::InvalidResourceTypeError(
-                kind.to_string(),
-            ))),
+        if let Some(resource_type) =
+            ResourceType::iter().find(|candidate| candidate.to_string() == kind)
+        {
+            return Ok(resource_type);
+        }
+        Err(AriadneError::from(ErrorKind::InvalidResourceTypeError(
+            kind.to_string(),
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_type_try_new_accepts_all_variants() {
+        for resource in ResourceType::iter() {
+            let parsed = ResourceType::try_new(&resource.to_string());
+            assert!(parsed.is_ok(), "missing ResourceType mapping: {resource}");
         }
     }
 }

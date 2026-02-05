@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+ariadne-cypher = { workspace = true }
 chrono = { workspace = true }
 futures = {workspace = true }
 graphqlite = { workspace = true }

@@ -91,6 +91,8 @@ pub struct ClusterState {
     graph: DiGraphMap<NodeId, Edge>,
     id_gen: IdGen,
     id_to_node: HashMap<NodeId, GenericObject>,
+    nodes_by_type: HashMap<ResourceType, Vec<NodeId>>,
+    edges_by_type: HashMap<Edge, Vec<(NodeId, NodeId)>>,
 }
 
 type EdgeKey = (ResourceType, Edge, ResourceType);
@@ -109,17 +111,38 @@ impl ClusterState {
             graph: DiGraphMap::new(),
             id_gen: IdGen::new(),
             id_to_node: HashMap::new(),
+            nodes_by_type: HashMap::new(),
+            edges_by_type: HashMap::new(),
         }
     }
 
     pub fn add_node(&mut self, node: GenericObject) {
         match self.id_gen.get_next_id(&node.id.uid) {
             GetNextIdResult::Existing(id) => {
+                if let Some(existing_type) = self
+                    .id_to_node
+                    .get(&id)
+                    .map(|existing| existing.resource_type.clone())
+                {
+                    if existing_type != node.resource_type {
+                        self.remove_node_index(&existing_type, id);
+                        self.nodes_by_type
+                            .entry(node.resource_type.clone())
+                            .or_default()
+                            .push(id);
+                    }
+                }
                 self.id_to_node.insert(id, node);
             }
             GetNextIdResult::New(new_id) => {
                 self.id_to_node.insert(new_id, node);
                 self.graph.add_node(new_id);
+                if let Some(node) = self.id_to_node.get(&new_id) {
+                    self.nodes_by_type
+                        .entry(node.resource_type.clone())
+                        .or_default()
+                        .push(new_id);
+                }
             }
         }
     }
@@ -143,7 +166,24 @@ impl ClusterState {
 
         match (maybe_source, maybe_target) {
             (Some(from), Some(to)) => {
-                self.graph.add_edge(from, to, edge);
+                let previous = self.graph.add_edge(from, to, edge.clone());
+                match previous {
+                    None => {
+                        self.edges_by_type
+                            .entry(edge)
+                            .or_default()
+                            .push((from, to));
+                    }
+                    Some(old_edge) => {
+                        if old_edge != edge {
+                            self.remove_edge_index(&old_edge, from, to);
+                            self.edges_by_type
+                                .entry(edge)
+                                .or_default()
+                                .push((from, to));
+                        }
+                    }
+                }
             }
             (from_id, to_id) => {
                 warn!("Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}")
@@ -191,6 +231,28 @@ impl ClusterState {
         })
     }
 
+    pub fn get_nodes_by_type(
+        &self,
+        node_type: &ResourceType,
+    ) -> impl Iterator<Item = &GenericObject> + '_ {
+        self.nodes_by_type
+            .get(node_type)
+            .into_iter()
+            .flat_map(|ids| ids.iter())
+            .filter_map(|id| self.id_to_node.get(id))
+    }
+
+    pub fn get_edges_by_type<'a>(
+        &'a self,
+        edge: &'a Edge,
+    ) -> impl Iterator<Item = GraphEdge> + 'a {
+        self.edges_by_type
+            .get(edge)
+            .into_iter()
+            .flat_map(|pairs| pairs.iter())
+            .filter_map(move |(from, to)| self.graph_edge_from_ids(*from, *to, edge))
+    }
+
     pub fn get_node_count(&self) -> usize {
         self.graph.node_count()
     }
@@ -203,6 +265,36 @@ impl ClusterState {
         self.id_gen
             .get_id(uid)
             .and_then(|node_id| self.id_to_node.get(&node_id))
+    }
+
+    fn graph_edge_from_ids(&self, from: NodeId, to: NodeId, edge: &Edge) -> Option<GraphEdge> {
+        let source = self.id_gen.get_by_id(from)?;
+        let source_type = self.id_to_node.get(&from)?.resource_type.clone();
+        let target = self.id_gen.get_by_id(to)?;
+        let target_type = self.id_to_node.get(&to)?.resource_type.clone();
+        Some(GraphEdge {
+            source,
+            source_type,
+            target,
+            target_type,
+            edge_type: edge.clone(),
+        })
+    }
+
+    fn remove_node_index(&mut self, node_type: &ResourceType, node_id: NodeId) {
+        if let Some(list) = self.nodes_by_type.get_mut(node_type) {
+            if let Some(pos) = list.iter().position(|id| *id == node_id) {
+                list.swap_remove(pos);
+            }
+        }
+    }
+
+    fn remove_edge_index(&mut self, edge: &Edge, from: NodeId, to: NodeId) {
+        if let Some(list) = self.edges_by_type.get_mut(edge) {
+            if let Some(pos) = list.iter().position(|(s, t)| *s == from && *t == to) {
+                list.swap_remove(pos);
+            }
+        }
     }
 
     fn node_map(&self) -> HashMap<String, &GenericObject> {

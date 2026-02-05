@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::CliResult;
 use crate::llm::Translator;
+use crate::validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
 
 struct AppState {
@@ -114,17 +115,27 @@ fn handle_key(
             match translation {
                 Ok(cypher) => {
                     app.cypher = cypher.clone();
-                    app.status = "Running query...".to_string();
-                    let result = runtime.block_on(backend.execute_query(cypher));
-                    match result {
-                        Ok(records) => {
-                            app.results = serde_json::to_string_pretty(&records)
-                                .unwrap_or_else(|_| "Failed to format results".to_string());
-                            app.status = "Ready".to_string();
+                    app.status = "Validating...".to_string();
+                    let validation = validate_cypher(&cypher);
+                    match validation {
+                        Ok(()) => {
+                            app.status = "Running query...".to_string();
+                            let result = runtime.block_on(backend.execute_query(cypher));
+                            match result {
+                                Ok(records) => {
+                                    app.results = serde_json::to_string_pretty(&records)
+                                        .unwrap_or_else(|_| "Failed to format results".to_string());
+                                    app.status = "Ready".to_string();
+                                }
+                                Err(err) => {
+                                    app.error = Some(err.to_string());
+                                    app.status = "Query failed".to_string();
+                                }
+                            }
                         }
                         Err(err) => {
                             app.error = Some(err.to_string());
-                            app.status = "Query failed".to_string();
+                            app.status = "Validation failed".to_string();
                         }
                     }
                 }

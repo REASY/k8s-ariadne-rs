@@ -1,12 +1,15 @@
 use crate::logger::setup;
 use clap::Parser;
+#[cfg(feature = "build-info")]
 use shadow_rs::shadow;
 use tracing::info;
 pub mod logger;
 use ariadne_tools::{full_prompt, schema_prompt};
 
+#[cfg(feature = "build-info")]
 shadow!(build);
 
+#[cfg(feature = "build-info")]
 pub const APP_VERSION: &str = shadow_rs::formatcp!(
     "{} ({} {}), build_env: {}, {}, {}",
     build::PKG_VERSION,
@@ -16,6 +19,9 @@ pub const APP_VERSION: &str = shadow_rs::formatcp!(
     build::RUST_CHANNEL,
     build::CARGO_VERSION
 );
+
+#[cfg(not(feature = "build-info"))]
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version = APP_VERSION, about, long_about = None)]
