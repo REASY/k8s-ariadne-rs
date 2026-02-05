@@ -6,6 +6,7 @@ use eframe::egui::{
     text::LayoutJob, Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Layout,
     Margin, RichText, ScrollArea, Stroke, TextEdit, TextFormat, TextStyle, Vec2,
 };
+use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
@@ -16,7 +17,7 @@ use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
 
 use crate::error::CliResult;
-use crate::llm::Translator;
+use crate::llm::{LlmUsage, Translator};
 use crate::validation::validate_cypher;
 
 pub fn run_gui(
@@ -85,10 +86,93 @@ impl Default for Palette {
             text_primary: Color32::from_rgb(0xE6, 0xED, 0xF3),
             text_muted: Color32::from_rgb(0x8A, 0xA0, 0xB2),
             border: Color32::from_rgb(0x26, 0x32, 0x41),
-            keyword: Color32::from_rgb(0xF9, 0x75, 0x83), // Pinkish for keywords
-            string: Color32::from_rgb(0xA5, 0xD6, 0xFF),  // Light blue for strings
+            keyword: Color32::from_rgb(0xF4, 0xA2, 0x61),
+            string: Color32::from_rgb(0xA6, 0xE3, 0xFF),
         }
     }
+}
+
+// ... (FeedState, ResultPayload, etc. unchanged) ...
+
+fn lighten_color(color: Color32, factor: f32) -> Color32 {
+    color.gamma_multiply(factor)
+}
+
+fn setup_style(ctx: &egui::Context, palette: &Palette) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = palette.bg_panel;
+    visuals.window_fill = palette.bg_primary;
+    visuals.faint_bg_color = lighten_color(palette.bg_panel, 1.05);
+    visuals.extreme_bg_color = palette.bg_elevated; // Inputs background
+    visuals.text_edit_bg_color = Some(palette.bg_elevated);
+    visuals.code_bg_color = lighten_color(palette.bg_primary, 1.08);
+    visuals.widgets.noninteractive.bg_fill = palette.bg_panel;
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette.border);
+    visuals.widgets.inactive.bg_fill = palette.bg_elevated; // Buttons/Cards default
+    visuals.widgets.active.bg_fill = lighten_color(palette.bg_elevated, 1.08);
+    visuals.widgets.hovered.bg_fill = lighten_color(palette.bg_elevated, 1.08);
+    visuals.selection.bg_fill = palette.accent.gamma_multiply(0.3);
+    visuals.selection.stroke = Stroke::new(1.0, palette.accent);
+    visuals.override_text_color = Some(palette.text_primary);
+    visuals.weak_text_color = Some(palette.text_muted);
+    visuals.hyperlink_color = palette.accent;
+    visuals.warn_fg_color = palette.accent_warm;
+    visuals.error_fg_color = palette.danger;
+    visuals.striped = true;
+
+    // Borders & Rounding
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette.accent);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, palette.text_muted);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+    visuals.widgets.active.corner_radius = CornerRadius::same(6);
+    visuals.window_corner_radius = CornerRadius::same(12);
+    visuals.window_stroke = Stroke::new(1.0, palette.border);
+    visuals.window_shadow = egui::Shadow {
+        offset: [10, 18],
+        blur: 16,
+        spread: 0,
+        color: Color32::from_black_alpha(110),
+    };
+    visuals.popup_shadow = egui::Shadow {
+        offset: [6, 10],
+        blur: 10,
+        spread: 0,
+        color: Color32::from_black_alpha(110),
+    };
+    visuals.menu_corner_radius = CornerRadius::same(8);
+    visuals.button_frame = true;
+    visuals.collapsing_header_frame = true;
+    visuals.indent_has_left_vline = false;
+
+    ctx.set_visuals(visuals);
+
+    let mut style = (*ctx.style()).clone();
+    style.text_styles.insert(
+        TextStyle::Heading,
+        FontId::new(20.0, FontFamily::Proportional),
+    );
+    style
+        .text_styles
+        .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+    style.text_styles.insert(
+        TextStyle::Small,
+        FontId::new(12.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Monospace,
+        FontId::new(13.0, FontFamily::Monospace),
+    );
+    style.text_styles.insert(
+        TextStyle::Button,
+        FontId::new(14.0, FontFamily::Proportional),
+    );
+    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
+    style.spacing.window_margin = Margin::same(14);
+    style.spacing.button_padding = Vec2::new(8.0, 5.0);
+    ctx.set_style(style);
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +231,9 @@ struct FeedItem {
     cypher: Option<String>,
     result: ResultPayload,
     state: FeedState,
+    llm_usage: Option<LlmUsage>,
+    llm_duration_ms: Option<u128>,
+    exec_duration_ms: Option<u128>,
 }
 
 impl FeedItem {
@@ -157,6 +244,9 @@ impl FeedItem {
             cypher: None,
             result: ResultPayload::Empty,
             state: FeedState::Translating,
+            llm_usage: None,
+            llm_duration_ms: None,
+            exec_duration_ms: None,
         }
     }
 }
@@ -168,6 +258,8 @@ enum AppEvent {
     TranslationCompleted {
         id: u64,
         cypher: String,
+        usage: Option<LlmUsage>,
+        duration_ms: u128,
     },
     TranslationFailed {
         id: u64,
@@ -186,11 +278,13 @@ enum AppEvent {
         id: u64,
         cypher: String,
         records: Vec<Value>,
+        duration_ms: u128,
     },
     QueryFailed {
         id: u64,
         error: String,
         cypher: String,
+        duration_ms: u128,
     },
 }
 
@@ -286,32 +380,41 @@ impl GuiApp {
 
         runtime.spawn(async move {
             let _ = tx.send(AppEvent::TranslationStarted { id });
+            let llm_start = Instant::now();
             match translator.translate(&question).await {
-                Ok(cypher) => {
+                Ok(result) => {
+                    let llm_ms = llm_start.elapsed().as_millis();
                     let _ = tx.send(AppEvent::TranslationCompleted {
                         id,
-                        cypher: cypher.clone(),
+                        cypher: result.cypher.clone(),
+                        usage: result.usage.clone(),
+                        duration_ms: llm_ms,
                     });
-                    match validate_cypher(&cypher) {
+                    match validate_cypher(&result.cypher) {
                         Ok(()) => {
                             let _ = tx.send(AppEvent::QueryStarted {
                                 id,
-                                cypher: cypher.clone(),
+                                cypher: result.cypher.clone(),
                             });
-                            match backend.execute_query(cypher.clone()).await {
+                            let exec_start = Instant::now();
+                            match backend.execute_query(result.cypher.clone()).await {
                                 Ok(records) => {
+                                    let exec_ms = exec_start.elapsed().as_millis();
                                     let _ = tx.send(AppEvent::QueryCompleted {
                                         id,
-                                        cypher,
+                                        cypher: result.cypher,
                                         records,
+                                        duration_ms: exec_ms,
                                     });
                                 }
                                 Err(err) => {
+                                    let exec_ms = exec_start.elapsed().as_millis();
                                     tracing::error!("Query failed: {err}");
                                     let _ = tx.send(AppEvent::QueryFailed {
                                         id,
                                         error: err.to_string(),
-                                        cypher,
+                                        cypher: result.cypher,
+                                        duration_ms: exec_ms,
                                     });
                                 }
                             }
@@ -321,7 +424,7 @@ impl GuiApp {
                             let _ = tx.send(AppEvent::ValidationFailed {
                                 id,
                                 error: err.to_string(),
-                                cypher,
+                                cypher: result.cypher,
                             });
                         }
                     }
@@ -349,20 +452,25 @@ impl GuiApp {
                         id,
                         cypher: cypher.clone(),
                     });
+                    let exec_start = Instant::now();
                     match backend.execute_query(cypher.clone()).await {
                         Ok(records) => {
+                            let exec_ms = exec_start.elapsed().as_millis();
                             let _ = tx.send(AppEvent::QueryCompleted {
                                 id,
                                 cypher,
                                 records,
+                                duration_ms: exec_ms,
                             });
                         }
                         Err(err) => {
+                            let exec_ms = exec_start.elapsed().as_millis();
                             tracing::error!("Query failed: {err}");
                             let _ = tx.send(AppEvent::QueryFailed {
                                 id,
                                 error: err.to_string(),
                                 cypher,
+                                duration_ms: exec_ms,
                             });
                         }
                     }
@@ -413,10 +521,17 @@ impl GuiApp {
                         item.state = FeedState::Translating;
                     }
                 }
-                AppEvent::TranslationCompleted { id, cypher } => {
+                AppEvent::TranslationCompleted {
+                    id,
+                    cypher,
+                    usage,
+                    duration_ms,
+                } => {
                     if let Some(item) = self.feed_item_mut(id) {
                         item.cypher = Some(cypher);
                         item.state = FeedState::Validating;
+                        item.llm_usage = usage;
+                        item.llm_duration_ms = Some(duration_ms);
                     }
                 }
                 AppEvent::TranslationFailed { id, error } => {
@@ -440,17 +555,25 @@ impl GuiApp {
                     id,
                     cypher,
                     records,
+                    duration_ms,
                 } => {
                     if let Some(item) = self.feed_item_mut(id) {
                         item.cypher = Some(cypher);
                         item.result = classify_result(&records);
                         item.state = FeedState::Ready;
+                        item.exec_duration_ms = Some(duration_ms);
                     }
                 }
-                AppEvent::QueryFailed { id, error, cypher } => {
+                AppEvent::QueryFailed {
+                    id,
+                    error,
+                    cypher,
+                    duration_ms,
+                } => {
                     if let Some(item) = self.feed_item_mut(id) {
                         item.cypher = Some(cypher);
                         item.state = FeedState::Error(error);
+                        item.exec_duration_ms = Some(duration_ms);
                     }
                 }
             }
@@ -530,46 +653,65 @@ impl eframe::App for GuiApp {
             .frame(
                 Frame::new()
                     .fill(self.palette.bg_panel)
-                    .stroke(Stroke::new(1.0, self.palette.border)),
+                    .stroke(Stroke::new(1.0, self.palette.border))
+                    .shadow(egui::Shadow {
+                        offset: [0, 6],
+                        blur: 12,
+                        spread: 0,
+                        color: Color32::from_black_alpha(80),
+                    }),
             )
             .show(ctx, |ui| {
                 ui.set_height(56.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(16.0);
-                    ui.label(
-                        RichText::new("KubeGraph Ops")
-                            .color(self.palette.text_primary)
-                            .size(18.0)
-                            .strong(),
-                    );
-                    ui.add_space(16.0);
-                    let status = if self.cluster_meta.connected {
-                        format!("Connected to: {}", self.cluster_meta.label)
-                    } else {
-                        "DISCONNECTED".to_string()
-                    };
-                    ui.label(RichText::new(status).color(self.palette.text_muted));
-
-                    // Right aligned Pulse
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_space(16.0);
-                        pulse_metric(
-                            ui,
-                            "Nodes",
-                            self.pulse_nodes.last().copied().unwrap_or(0.0) as usize,
-                            &self.pulse_nodes,
-                            &self.palette,
-                        );
-                        ui.add_space(16.0);
-                        pulse_metric(
-                            ui,
-                            "Properties",
-                            self.pulse_props.last().copied().unwrap_or(0.0) as usize,
-                            &self.pulse_props,
-                            &self.palette,
-                        );
+                let pulse_gap = 12.0;
+                let pulse_width = 2.0 * 176.0 + pulse_gap + 16.0;
+                StripBuilder::new(ui)
+                    .size(Size::remainder())
+                    .size(Size::exact(pulse_width))
+                    .horizontal(|mut strip| {
+                        strip.cell(|ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(16.0);
+                                    ui.label(
+                                        RichText::new("KubeGraph Ops")
+                                            .color(self.palette.text_primary)
+                                            .size(18.0)
+                                            .strong(),
+                                    );
+                                    ui.add_space(16.0);
+                                    let status = if self.cluster_meta.connected {
+                                        format!("Connected to: {}", self.cluster_meta.label)
+                                    } else {
+                                        "DISCONNECTED".to_string()
+                                    };
+                                    ui.label(RichText::new(status).color(self.palette.text_muted));
+                                });
+                            });
+                        });
+                        strip.cell(|ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.add_space(16.0);
+                                    pulse_metric(
+                                        ui,
+                                        "Nodes",
+                                        self.pulse_nodes.last().copied().unwrap_or(0.0) as usize,
+                                        &self.pulse_nodes,
+                                        &self.palette,
+                                    );
+                                    ui.add_space(pulse_gap);
+                                    pulse_metric(
+                                        ui,
+                                        "Properties",
+                                        self.pulse_props.last().copied().unwrap_or(0.0) as usize,
+                                        &self.pulse_props,
+                                        &self.palette,
+                                    );
+                                });
+                            });
+                        });
                     });
-                });
             });
 
         // FOOTER
@@ -578,7 +720,13 @@ impl eframe::App for GuiApp {
             .frame(
                 Frame::new()
                     .fill(self.palette.bg_panel)
-                    .stroke(Stroke::new(1.0, self.palette.border)),
+                    .stroke(Stroke::new(1.0, self.palette.border))
+                    .shadow(egui::Shadow {
+                        offset: [0, -4],
+                        blur: 10,
+                        spread: 0,
+                        color: Color32::from_black_alpha(80),
+                    }),
             )
             .show(ctx, |ui| {
                 ui.add_space(12.0);
@@ -596,6 +744,7 @@ impl eframe::App for GuiApp {
                         TextEdit::singleline(&mut self.input)
                             .hint_text("Ask about your cluster...")
                             .font(TextStyle::Monospace)
+                            .background_color(self.palette.bg_elevated)
                             .margin(Margin::same(10)),
                     );
                     self.input_rect = Some(response.rect);
@@ -608,7 +757,17 @@ impl eframe::App for GuiApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(16.0);
                         if ui
-                            .add_sized([92.0, 36.0], egui::Button::new("Run Query"))
+                            .add_sized(
+                                [100.0, 36.0],
+                                egui::Button::new(
+                                    RichText::new("Run Query")
+                                        .color(self.palette.bg_primary)
+                                        .strong(),
+                                )
+                                .fill(self.palette.accent)
+                                .stroke(Stroke::new(1.0, self.palette.accent))
+                                .corner_radius(CornerRadius::same(6)),
+                            )
                             .clicked()
                         {
                             self.submit_question();
@@ -664,9 +823,9 @@ impl eframe::App for GuiApp {
             .show(ctx, |ui| {
                 ui.add_space(16.0);
                 ui.vertical_centered(|ui| {
-                    nav_button(ui, "H", "History");
-                    nav_button(ui, "S", "Saved");
-                    nav_button(ui, "!", "Alerts");
+                    nav_button(ui, "H", "History", &self.palette);
+                    nav_button(ui, "S", "Saved", &self.palette);
+                    nav_button(ui, "!", "Alerts", &self.palette);
                 });
             });
 
@@ -833,70 +992,35 @@ impl eframe::App for GuiApp {
     }
 }
 
-fn setup_style(ctx: &egui::Context, palette: &Palette) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = palette.bg_panel;
-    visuals.window_fill = palette.bg_primary;
-    visuals.extreme_bg_color = palette.bg_primary;
-    visuals.widgets.noninteractive.bg_fill = palette.bg_panel;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette.border);
-    visuals.widgets.inactive.bg_fill = palette.bg_elevated;
-    visuals.widgets.active.bg_fill = palette.bg_elevated;
-    visuals.widgets.hovered.bg_fill = palette.bg_elevated;
-    visuals.selection.bg_fill = palette.accent;
-    visuals.override_text_color = Some(palette.text_primary);
-
-    // Borders
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette.accent);
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.accent);
-
-    ctx.set_visuals(visuals);
-
-    let mut style = (*ctx.style()).clone();
-    style.text_styles.insert(
-        TextStyle::Heading,
-        FontId::new(18.0, FontFamily::Proportional),
-    );
-    style
-        .text_styles
-        .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
-    style.text_styles.insert(
-        TextStyle::Small,
-        FontId::new(12.0, FontFamily::Proportional),
-    );
-    style.text_styles.insert(
-        TextStyle::Monospace,
-        FontId::new(13.0, FontFamily::Monospace),
-    );
-    style.text_styles.insert(
-        TextStyle::Button,
-        FontId::new(13.0, FontFamily::Proportional),
-    );
-    style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-    style.spacing.window_margin = Margin::same(8);
-    ctx.set_style(style);
-}
-
-fn nav_button(ui: &mut egui::Ui, label: &str, tooltip: &str) {
+fn nav_button(ui: &mut egui::Ui, label: &str, tooltip: &str, palette: &Palette) {
     ui.add_space(8.0);
     ui.add_sized(
         [48.0, 48.0],
-        egui::Button::new(RichText::new(label).size(16.0)),
+        egui::Button::new(RichText::new(label).size(16.0).color(palette.text_primary))
+            .fill(lighten_color(palette.bg_elevated, 1.02))
+            .stroke(Stroke::new(1.0, palette.border))
+            .corner_radius(CornerRadius::same(10)),
     )
     .on_hover_text(tooltip);
 }
 
 fn pulse_metric(ui: &mut egui::Ui, label: &str, count: usize, series: &[f64], palette: &Palette) {
-    let desired = Vec2::new(176.0, 40.0);
+    let desired = Vec2::new(176.0, 44.0);
     ui.allocate_ui_with_layout(desired, Layout::left_to_right(Align::Center), |ui| {
         Frame::new()
             .fill(palette.bg_elevated)
             .stroke(Stroke::new(1.0, palette.border))
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::same(6))
+            .shadow(egui::Shadow {
+                offset: [0, 4],
+                blur: 10,
+                spread: 0,
+                color: Color32::from_black_alpha(80),
+            })
             .show(ui, |ui| {
                 ui.set_min_size(desired);
+                ui.set_max_size(desired);
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.add(
@@ -961,28 +1085,30 @@ fn render_feed_item(
 ) {
     ui.add_space(16.0);
 
-    // User Question Bubble
+    // User Question Bubble (Left aligned)
     ui.horizontal(|ui| {
         let max_width = ui.available_width() * 0.7;
-
         Frame::new()
             .fill(palette.bg_elevated)
             .stroke(Stroke::new(1.0, palette.border))
-            .corner_radius(CornerRadius::same(16))
-            .inner_margin(Margin::same(14))
+            .corner_radius(CornerRadius::same(14))
+            .inner_margin(Margin::symmetric(14, 10))
+            .shadow(egui::Shadow {
+                offset: [0, 6],
+                blur: 12,
+                spread: 0,
+                color: Color32::from_black_alpha(80),
+            })
             .show(ui, |ui| {
                 ui.set_max_width(max_width);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("User > ")
-                            .color(palette.text_muted)
-                            .size(12.0),
-                    );
                     ui.label(
                         RichText::new(&item.user_text)
                             .color(palette.text_primary)
                             .size(15.0),
                     );
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("👤").size(14.0));
                 });
             });
     });
@@ -990,90 +1116,174 @@ fn render_feed_item(
     ui.add_space(8.0);
 
     // System Response Block
-    Frame::new().fill(Color32::TRANSPARENT).show(ui, |ui| {
-        // 1. Cypher Layer (if present)
-        if let Some(cypher) = &item.cypher {
-            let id = ui.make_persistent_id(format!("cypher-header-{}", item.id));
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-                .show_header(ui, |ui| {
-                    ui.label(
-                        RichText::new("GENERATED CYPHER")
-                            .size(12.0)
-                            .color(palette.accent),
-                    );
-                })
-                .body(|ui| {
-                    Frame::new()
-                        .fill(palette.bg_primary)
-                        .stroke(Stroke::new(1.0, palette.border))
-                        .corner_radius(CornerRadius::same(6))
-                        .inner_margin(Margin::same(8))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                let mut job = highlight_cypher(cypher, palette);
-                                job.wrap.max_width = ui.available_width() - 80.0;
-                                ui.label(job);
-
-                                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                    if ui.small_button("Run").clicked() {
-                                        on_run(item.id, cypher.clone());
-                                    }
-                                    if ui.small_button("Copy").clicked() {
-                                        ui.ctx().copy_text(cypher.clone());
-                                    }
-                                });
-                            });
-                        });
-                });
-        }
-
-        ui.add_space(8.0);
-
-        // 2. Result / Status Layer
+    ui.vertical(|ui| {
+        let max_width = ui.available_width();
         Frame::new()
-            .fill(palette.bg_elevated)
+            .fill(palette.bg_panel)
             .stroke(Stroke::new(1.0, palette.border))
             .corner_radius(CornerRadius::same(12))
-            .inner_margin(Margin::same(16))
+            .inner_margin(Margin::same(14))
+            .shadow(egui::Shadow {
+                offset: [0, 8],
+                blur: 14,
+                spread: 0,
+                color: Color32::from_black_alpha(90),
+            })
             .show(ui, |ui| {
-                // Header for result area
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("VISUAL RESULT AREA")
-                            .size(10.0)
-                            .color(palette.text_muted),
-                    );
-                });
-                ui.add_space(4.0);
+                ui.set_max_width(max_width);
+                // 1. Cypher Layer (if present)
+                if let Some(cypher) = &item.cypher {
+                    let id = ui.make_persistent_id(format!("cypher-header-{}", item.id));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        id,
+                        true,
+                    )
+                    .show_header(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("GENERATED CYPHER")
+                                    .size(12.0)
+                                    .color(palette.text_muted)
+                                    .strong(),
+                            );
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("•").color(palette.accent));
+                        });
+                    })
+                    .body(|ui| {
+                        Frame::new()
+                            .fill(palette.bg_primary)
+                            .stroke(Stroke::new(1.0, palette.border))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let mut job = highlight_cypher(cypher, palette);
+                                    job.wrap.max_width = ui.available_width() - 96.0;
+                                    job.wrap.break_anywhere = true;
+                                    ui.add(egui::Label::new(job).wrap());
 
-                match &item.state {
-                    FeedState::Translating => {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new());
-                            ui.label(RichText::new("Translating to Cypher...").italics());
-                        });
-                    }
-                    FeedState::Validating => {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new());
-                            ui.label(RichText::new("Validating query...").italics());
-                        });
-                    }
-                    FeedState::Running => {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new());
-                            ui.label(RichText::new("Executing query on graph...").italics());
-                        });
-                    }
-                    FeedState::Error(err) => {
-                        ui.colored_label(palette.danger, format!("Error: {err}"));
-                    }
-                    FeedState::Ready => {
-                        render_result(ui, item, palette, &mut on_select);
-                    }
+                                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    RichText::new("Run")
+                                                        .color(palette.bg_primary)
+                                                        .strong(),
+                                                )
+                                                .fill(palette.accent)
+                                                .stroke(Stroke::new(1.0, palette.accent))
+                                                .corner_radius(CornerRadius::same(6)),
+                                            )
+                                            .clicked()
+                                        {
+                                            on_run(item.id, cypher.clone());
+                                        }
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    RichText::new("Copy")
+                                                        .color(palette.text_primary),
+                                                )
+                                                .fill(palette.bg_elevated)
+                                                .stroke(Stroke::new(1.0, palette.border))
+                                                .corner_radius(CornerRadius::same(6)),
+                                            )
+                                            .clicked()
+                                        {
+                                            ui.ctx().copy_text(cypher.clone());
+                                        }
+                                    });
+                                });
+                            });
+                    });
+                }
+
+                if item.llm_duration_ms.is_some()
+                    || item.exec_duration_ms.is_some()
+                    || item.llm_usage.is_some()
+                {
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(ms) = item.llm_duration_ms {
+                            ui.label(
+                                RichText::new(format!("LLM {}", format_duration(ms)))
+                                    .color(palette.text_muted),
+                            );
+                        }
+                        if let Some(usage) = &item.llm_usage {
+                            ui.label(
+                                RichText::new(format!(
+                                    "tokens {}/{}/{}",
+                                    usage.prompt_tokens,
+                                    usage.completion_tokens,
+                                    usage.total_tokens
+                                ))
+                                .color(palette.text_muted),
+                            );
+                            if let Some(cached) = usage.cached_tokens {
+                                ui.label(
+                                    RichText::new(format!("cached {cached}"))
+                                        .color(palette.text_muted),
+                                );
+                            }
+                            if let Some(reasoning) = usage.reasoning_tokens {
+                                ui.label(
+                                    RichText::new(format!("reasoning {reasoning}"))
+                                        .color(palette.text_muted),
+                                );
+                            }
+                        }
+                        if let Some(ms) = item.exec_duration_ms {
+                            ui.label(
+                                RichText::new(format!("exec {}", format_duration(ms)))
+                                    .color(palette.text_muted),
+                            );
+                        }
+                    });
                 }
 
                 ui.add_space(12.0);
+
+                // 2. Result / Status Layer
+                Frame::new()
+                    .fill(palette.bg_elevated)
+                    .stroke(Stroke::new(1.0, palette.border))
+                    .corner_radius(CornerRadius::same(10))
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        match &item.state {
+                            FeedState::Translating => {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new());
+                                    ui.label(RichText::new("Translating to Cypher...").italics());
+                                });
+                            }
+                            FeedState::Validating => {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new());
+                                    ui.label(RichText::new("Validating query...").italics());
+                                });
+                            }
+                            FeedState::Running => {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new());
+                                    ui.label(
+                                        RichText::new("Executing query on graph...").italics(),
+                                    );
+                                });
+                            }
+                            FeedState::Error(err) => {
+                                ui.colored_label(palette.danger, format!("Error: {err}"));
+                            }
+                            FeedState::Ready => {
+                                render_result(ui, item, palette, &mut on_select);
+                            }
+                        }
+
+                        ui.add_space(12.0);
+                    });
             });
     });
 }
@@ -1129,36 +1339,48 @@ fn render_result(
             );
         }
         ResultPayload::Metric { label, value, unit } => {
-            ui.vertical_centered(|ui| {
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    // Skull icon placeholder
-                    ui.label(RichText::new("💀").size(32.0));
-                    ui.add_space(10.0);
-                    let mut text = value.clone();
-                    if let Some(unit) = unit {
-                        text = format!("{text} {unit}");
-                    }
-                    ui.label(
-                        RichText::new(text)
-                            .size(42.0)
-                            .color(palette.accent_warm)
-                            .strong(),
-                    );
+            Frame::new()
+                .fill(palette.bg_primary)
+                .stroke(Stroke::new(1.0, palette.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin::same(16))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("💀").size(32.0));
+                            ui.add_space(12.0);
+                            let mut text = value.clone();
+                            if let Some(unit) = unit {
+                                text = format!("{text} {unit}");
+                            }
+                            ui.label(
+                                RichText::new(text)
+                                    .size(42.0)
+                                    .color(palette.accent_warm)
+                                    .strong(),
+                            );
+                        });
+                        ui.label(RichText::new(label).size(16.0).color(palette.text_muted));
+                        ui.add_space(6.0);
+                    });
                 });
-                ui.label(RichText::new(label).size(16.0).color(palette.text_muted));
-                ui.add_space(10.0);
-            });
         }
         ResultPayload::List { rows } => {
             // "VISUAL RESULT AREA" header is already rendered by render_feed_item, so we remove it here.
 
             ui.add_space(6.0);
             let frame = Frame::new()
-                .fill(palette.bg_panel)
+                .fill(palette.bg_primary)
                 .stroke(Stroke::new(1.0, palette.border))
                 .corner_radius(CornerRadius::same(8))
-                .inner_margin(Margin::same(8));
+                .inner_margin(Margin::same(8))
+                .shadow(egui::Shadow {
+                    offset: [0, 6],
+                    blur: 12,
+                    spread: 0,
+                    color: Color32::from_black_alpha(80),
+                });
             frame.show(ui, |ui| {
                 let mut extra_keys: Vec<String> = Vec::new();
                 if let Some(first) = rows.first() {
@@ -1177,60 +1399,100 @@ fn render_result(
 
                 let show_namespace = rows.iter().any(|r| r.subtitle.is_some());
                 let show_status = rows.iter().any(|r| r.status.is_some());
-
-                let mut columns = vec!["Name".to_string()];
+                let mut column_labels = vec!["Name".to_string()];
                 if show_namespace {
-                    columns.push("Namespace".to_string());
+                    column_labels.push("Namespace".to_string());
                 }
                 if show_status {
-                    columns.push("Status".to_string());
+                    column_labels.push("Status".to_string());
                 }
-                columns.extend(extra_keys.clone());
+                column_labels.extend(extra_keys.clone());
 
-                egui::Grid::new("result_table")
-                    .striped(true)
-                    .min_col_width(120.0)
+                let mut column_defs = Vec::new();
+                column_defs.push(Column::initial(220.0).at_least(140.0).resizable(true));
+                if show_namespace {
+                    column_defs.push(Column::initial(160.0).at_least(120.0).resizable(true));
+                }
+                if show_status {
+                    column_defs.push(Column::initial(120.0).at_least(100.0).resizable(true));
+                }
+                for _ in &extra_keys {
+                    column_defs.push(Column::initial(160.0).at_least(120.0).resizable(true));
+                }
+
+                ScrollArea::horizontal()
+                    .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        for header in &columns {
-                            ui.label(
-                                RichText::new(header)
-                                    .color(palette.text_muted)
-                                    .size(11.0)
-                                    .strong(),
-                            );
+                        let mut table = TableBuilder::new(ui)
+                            .striped(true)
+                            .resizable(true)
+                            .cell_layout(Layout::left_to_right(Align::Center))
+                            .min_scrolled_height(120.0)
+                            .max_scroll_height(260.0);
+                        for col in &column_defs {
+                            table = table.column(*col);
                         }
-                        ui.end_row();
+                        table
+                            .header(22.0, |mut header| {
+                                for header_label in &column_labels {
+                                    header.col(|ui| {
+                                        ui.label(
+                                            RichText::new(header_label)
+                                                .color(palette.text_muted)
+                                                .size(11.0)
+                                                .strong(),
+                                        );
+                                    });
+                                }
+                            })
+                            .body(|body| {
+                                let row_height = 26.0;
+                                body.rows(row_height, rows.len(), |mut row| {
+                                    let row_index = row.index();
+                                    let row_data = &rows[row_index];
 
-                        for (idx, row) in rows.iter().enumerate() {
-                            let clicked = ui.selectable_label(false, &row.title).clicked();
-
-                            if show_namespace {
-                                let namespace = row.subtitle.as_deref().unwrap_or("-");
-                                ui.label(namespace);
-                            }
-                            if show_status {
-                                let status = row.status.as_deref().unwrap_or("-");
-                                ui.label(status);
-                            }
-
-                            for key in &extra_keys {
-                                ui.label(find_field(&row.fields, key).unwrap_or("-"));
-                            }
-                            ui.end_row();
-                            if clicked {
-                                on_select(row);
-                            }
-                            let _ = idx;
-                        }
+                                    row.col(|ui| {
+                                        let response = ui.selectable_label(false, &row_data.title);
+                                        if response.clicked() {
+                                            on_select(row_data);
+                                        }
+                                    });
+                                    if show_namespace {
+                                        let namespace = row_data.subtitle.as_deref().unwrap_or("-");
+                                        row.col(|ui| {
+                                            ui.label(namespace);
+                                        });
+                                    }
+                                    if show_status {
+                                        let status = row_data.status.as_deref().unwrap_or("-");
+                                        row.col(|ui| {
+                                            ui.label(status);
+                                        });
+                                    }
+                                    for key in &extra_keys {
+                                        row.col(|ui| {
+                                            ui.label(
+                                                find_field(&row_data.fields, key).unwrap_or("-"),
+                                            );
+                                        });
+                                    }
+                                });
+                            });
                     });
             });
         }
         ResultPayload::Graph { nodes, edges } => {
             Frame::new()
-                .fill(palette.bg_primary) // contrast
+                .fill(palette.bg_primary)
                 .stroke(Stroke::new(1.0, palette.border))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(0))
+                .shadow(egui::Shadow {
+                    offset: [0, 6],
+                    blur: 12,
+                    spread: 0,
+                    color: Color32::from_black_alpha(80),
+                })
                 .show(ui, |ui| {
                     let size = Vec2::new(ui.available_width(), 300.0);
                     let (response, painter) = ui.allocate_painter(size, egui::Sense::click());
@@ -1270,13 +1532,14 @@ fn draw_graph(
     // Use a slightly better layout: distribute on circle
     let radius = rect.width().min(rect.height()) * 0.35;
 
-    // Draw background grid (subtle)
-    let grid_step = 40.0;
+    // Draw background grid (subtle cyber aesthetic)
+    let grid_step = 30.0;
+    let grid_color = palette.bg_elevated.gamma_multiply(0.4);
     let mut x = rect.left();
     while x < rect.right() {
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            Stroke::new(0.5, palette.bg_elevated),
+            Stroke::new(0.5, grid_color),
         );
         x += grid_step;
     }
@@ -1284,7 +1547,7 @@ fn draw_graph(
     while y < rect.bottom() {
         painter.line_segment(
             [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            Stroke::new(0.5, palette.bg_elevated),
+            Stroke::new(0.5, grid_color),
         );
         y += grid_step;
     }
@@ -1301,18 +1564,28 @@ fn draw_graph(
 
     for edge in edges {
         if let (Some(from), Some(to)) = (positions.get(edge.from), positions.get(edge.to)) {
+            // Glowing Edges
+            painter.line_segment(
+                [*from, *to],
+                Stroke::new(2.0, lighten_color(palette.border, 1.12)),
+            );
             painter.line_segment([*from, *to], Stroke::new(1.0, palette.text_muted));
+
             if let Some(label) = &edge.label {
                 let mid = egui::pos2((from.x + to.x) * 0.5, (from.y + to.y) * 0.5);
-                // Draw label background
-                painter.rect_filled(
-                    egui::Rect::from_center_size(
-                        mid,
-                        Vec2::new(label.len() as f32 * 6.0 + 8.0, 14.0),
-                    ),
-                    CornerRadius::same(4),
+                // Draw label background pill (Estimated size to avoid galley complexity)
+                let text_width = label.len() as f32 * 6.0;
+                let rect_width = text_width + 12.0;
+                let text_rect = egui::Rect::from_center_size(mid, Vec2::new(rect_width, 16.0));
+
+                painter.rect(
+                    text_rect,
+                    CornerRadius::same(6),
                     palette.bg_primary,
+                    Stroke::new(1.0, palette.border),
+                    egui::StrokeKind::Middle,
                 );
+
                 painter.text(
                     mid,
                     Align2::CENTER_CENTER,
@@ -1326,13 +1599,21 @@ fn draw_graph(
 
     for (idx, node) in nodes.iter().enumerate() {
         if let Some(pos) = positions.get(idx) {
-            // Node glow
-            painter.circle_filled(*pos, 10.0, palette.accent.gamma_multiply(0.2));
-            painter.circle_filled(*pos, 6.0, palette.accent);
+            // Cyber Node: Glow + Core
+            // Outer Glow
+            painter.circle_filled(*pos, 14.0, palette.accent.gamma_multiply(0.1));
+            painter.circle_stroke(
+                *pos,
+                12.0,
+                Stroke::new(1.0, palette.accent.gamma_multiply(0.5)),
+            );
+
+            // Core
+            painter.circle_filled(*pos, 5.0, palette.accent);
 
             // Label
             painter.text(
-                *pos + Vec2::new(0.0, 14.0),
+                *pos + Vec2::new(0.0, 18.0),
                 Align2::CENTER_TOP,
                 &node.label,
                 FontId::new(12.0, FontFamily::Proportional),
@@ -1575,6 +1856,14 @@ fn format_count(value: usize) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+fn format_duration(ms: u128) -> String {
+    if ms >= 1000 {
+        format!("{:.2}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms} ms")
+    }
 }
 
 #[cfg(test)]

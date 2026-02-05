@@ -8,6 +8,39 @@ use tracing::error;
 use crate::error::CliResult;
 
 #[derive(Debug, Clone)]
+pub struct LlmUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub reasoning_tokens: Option<u32>,
+    pub cached_tokens: Option<u32>,
+}
+
+impl From<::llm::chat::Usage> for LlmUsage {
+    fn from(value: ::llm::chat::Usage) -> Self {
+        let reasoning_tokens = value
+            .completion_tokens_details
+            .and_then(|details| details.reasoning_tokens);
+        let cached_tokens = value
+            .prompt_tokens_details
+            .and_then(|details| details.cached_tokens);
+        Self {
+            prompt_tokens: value.prompt_tokens,
+            completion_tokens: value.completion_tokens,
+            total_tokens: value.total_tokens,
+            reasoning_tokens,
+            cached_tokens,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TranslationResult {
+    pub cypher: String,
+    pub usage: Option<LlmUsage>,
+}
+
+#[derive(Debug, Clone)]
 pub struct LlmConfig {
     pub backend: LLMBackend,
     pub base_url: String,
@@ -19,7 +52,7 @@ pub struct LlmConfig {
 
 #[async_trait]
 pub trait Translator: Send + Sync {
-    async fn translate(&self, question: &str) -> CliResult<String>;
+    async fn translate(&self, question: &str) -> CliResult<TranslationResult>;
 }
 
 pub struct LlmTranslator {
@@ -64,20 +97,22 @@ impl LlmTranslator {
 
 #[async_trait]
 impl Translator for LlmTranslator {
-    async fn translate(&self, question: &str) -> CliResult<String> {
+    async fn translate(&self, question: &str) -> CliResult<TranslationResult> {
         let messages = build_messages(question);
         let response = match self.llm.chat(&messages).await {
             Ok(response) => response,
             Err(err) => return Err(map_llm_error(err, self.structured_output)),
         };
+        let usage = response.usage().map(LlmUsage::from);
         let text = response
             .text()
             .ok_or_else(|| "LLM response missing text".to_string())?;
-        if self.structured_output {
-            parse_structured_cypher(&text)
+        let cypher = if self.structured_output {
+            parse_structured_cypher(&text)?
         } else {
-            Ok(extract_cypher(&text))
-        }
+            extract_cypher(&text)
+        };
+        Ok(TranslationResult { cypher, usage })
     }
 }
 

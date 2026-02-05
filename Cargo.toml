@@ -30,8 +30,9 @@ clap = {  version = "4.5", features = ["derive", "env"] }
 const_format = "0.2"
 crossbeam = "0.8"
 crossterm = "0.29"
-egui = "0.33.3"
 eframe = "0.33.3"
+egui = "0.33.3"
+egui_extras = "0.33.3"
 futures = {  version = "0.3" }
 http = "1"
 k8s-openapi = { version = "0.27.0", features = ["v1_32", "schemars"] }

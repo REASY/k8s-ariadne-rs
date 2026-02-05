@@ -14,6 +14,7 @@ async-trait = { workspace = true }
 clap = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
+egui_extras = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
 llm = { workspace = true }
