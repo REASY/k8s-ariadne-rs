@@ -1472,6 +1472,18 @@ fn eval_expr(
             let exists = eval_exists(row, pattern, where_clause.as_deref(), state, stats)?;
             Ok(Value::Bool(exists))
         }
+        Expr::ListComprehension {
+            variable,
+            list,
+            where_clause,
+            map,
+        } => eval_list_comprehension(variable, list, where_clause.as_deref(), map, row, state, stats),
+        Expr::Quantifier {
+            kind,
+            variable,
+            list,
+            where_clause,
+        } => eval_quantifier(kind, variable, list, where_clause.as_deref(), row, state, stats),
         Expr::Case {
             base,
             alternatives,
@@ -1508,6 +1520,95 @@ fn eval_expr(
         ))
         .into()),
     }
+}
+
+fn eval_list_comprehension(
+    variable: &str,
+    list_expr: &Expr,
+    where_clause: Option<&Expr>,
+    map_expr: &Expr,
+    row: &Row,
+    state: &ClusterState,
+    stats: &mut QueryStats,
+) -> Result<Value> {
+    let list_value = eval_expr(list_expr, row, state, stats)?;
+    let items = match list_value {
+        Value::Array(items) => items,
+        _ => return Ok(Value::Array(Vec::new())),
+    };
+    let mut output = Vec::new();
+    for item in items {
+        let mut scoped = row.clone();
+        scoped.insert(variable.to_string(), item);
+        if let Some(where_clause) = where_clause {
+            if !eval_bool(where_clause, &scoped, state, stats)? {
+                continue;
+            }
+        }
+        output.push(eval_expr(map_expr, &scoped, state, stats)?);
+    }
+    Ok(Value::Array(output))
+}
+
+fn eval_quantifier(
+    kind: &ariadne_cypher::QuantifierKind,
+    variable: &str,
+    list_expr: &Expr,
+    where_clause: Option<&Expr>,
+    row: &Row,
+    state: &ClusterState,
+    stats: &mut QueryStats,
+) -> Result<Value> {
+    let list_value = eval_expr(list_expr, row, state, stats)?;
+    let items = match list_value {
+        Value::Array(items) => items,
+        _ => return Ok(Value::Bool(false)),
+    };
+
+    let mut matches = 0usize;
+    for item in items {
+        let mut scoped = row.clone();
+        scoped.insert(variable.to_string(), item.clone());
+        let passed = if let Some(where_clause) = where_clause {
+            eval_bool(where_clause, &scoped, state, stats)?
+        } else {
+            item.as_bool().unwrap_or(false)
+        };
+
+        match kind {
+            ariadne_cypher::QuantifierKind::Any => {
+                if passed {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            ariadne_cypher::QuantifierKind::All => {
+                if !passed {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            ariadne_cypher::QuantifierKind::None => {
+                if passed {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            ariadne_cypher::QuantifierKind::Single => {
+                if passed {
+                    matches += 1;
+                    if matches > 1 {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+            }
+        }
+    }
+
+    let result = match kind {
+        ariadne_cypher::QuantifierKind::Any => false,
+        ariadne_cypher::QuantifierKind::All => true,
+        ariadne_cypher::QuantifierKind::None => true,
+        ariadne_cypher::QuantifierKind::Single => matches == 1,
+    };
+    Ok(Value::Bool(result))
 }
 
 fn eval_function(
@@ -1918,7 +2019,9 @@ mod tests {
     use crate::state::ClusterState;
     use crate::types::{Cluster, Edge, ObjectIdentifier};
     use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
-    use k8s_openapi::api::core::v1::Pod;
+    use k8s_openapi::api::core::v1::{
+        ContainerState, ContainerStateTerminated, ContainerStatus, Pod, PodStatus,
+    };
     use k8s_openapi::apimachinery::pkg::version::Info;
     use std::sync::{Arc, Mutex};
 
@@ -1940,6 +2043,50 @@ mod tests {
             namespace: Some(namespace.to_string()),
             ..Default::default()
         };
+        GenericObject {
+            id: ObjectIdentifier {
+                uid: uid.to_string(),
+                name: name.to_string(),
+                namespace: Some(namespace.to_string()),
+                resource_version: None,
+            },
+            resource_type: ResourceType::Pod,
+            attributes: Some(Box::new(ResourceAttributes::Pod { pod: Arc::new(pod) })),
+        }
+    }
+
+    fn pod_with_container_status(
+        uid: &str,
+        name: &str,
+        namespace: &str,
+        reason: &str,
+    ) -> GenericObject {
+        let mut pod = Pod::default();
+        pod.metadata = ObjectMeta {
+            uid: Some(uid.to_string()),
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            ..Default::default()
+        };
+        let terminated = ContainerStateTerminated {
+            reason: Some(reason.to_string()),
+            exit_code: 137,
+            message: Some("terminated".to_string()),
+            ..Default::default()
+        };
+        let last_state = ContainerState {
+            terminated: Some(terminated),
+            ..Default::default()
+        };
+        let status = ContainerStatus {
+            name: "main".to_string(),
+            last_state: Some(last_state),
+            ..Default::default()
+        };
+        pod.status = Some(PodStatus {
+            container_statuses: Some(vec![status]),
+            ..Default::default()
+        });
         GenericObject {
             id: ObjectIdentifier {
                 uid: uid.to_string(),
@@ -2414,5 +2561,90 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["deploy".to_string()]);
+    }
+
+    #[test]
+    fn executes_quantifiers() {
+        let state = ClusterState::new(dummy_cluster());
+        let query = parse_query(
+            "RETURN any(x IN [1,2,3] WHERE x = 2) AS any, \
+             all(x IN [1,2,3] WHERE x > 0) AS all, \
+             none(x IN [1,2,3] WHERE x < 0) AS none, \
+             single(x IN [1,2,3] WHERE x = 2) AS single",
+        )
+        .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get("any").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(results[0].get("all").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            results[0].get("none").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            results[0].get("single").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn executes_quantifier_with_list_comprehension_smoke() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod_with_container_status(
+            "p1",
+            "oom-pod",
+            "ns1",
+            "OOMKilled",
+        ));
+        state.add_node(pod_with_container_status(
+            "p2",
+            "ok-pod",
+            "ns1",
+            "Completed",
+        ));
+
+        let query = parse_query(
+            "MATCH (p:Pod)\n\
+             WHERE ANY(cs IN p['status']['containerStatuses'] WHERE cs['lastState']['terminated']['reason'] = 'OOMKilled')\n\
+             RETURN p['metadata']['namespace'] AS namespace,\n\
+                    p['metadata']['name'] AS pod,\n\
+                    [cs IN p['status']['containerStatuses'] WHERE cs['lastState']['terminated']['reason'] = 'OOMKilled' | {\n\
+                      container: cs['name'],\n\
+                      exitCode: cs['lastState']['terminated']['exitCode'],\n\
+                      finishedAt: cs['lastState']['terminated']['finishedAt'],\n\
+                      message: cs['lastState']['terminated']['message']\n\
+                    }] AS oom_killed_containers\n\
+             ORDER BY namespace, pod",
+        )
+        .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].get("pod").and_then(|v| v.as_str()),
+            Some("oom-pod")
+        );
+        let containers = results[0]
+            .get("oom_killed_containers")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(containers.len(), 1);
+        let container = containers[0].as_object().cloned().unwrap_or_default();
+        assert_eq!(
+            container
+                .get("container")
+                .and_then(|v| v.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            container.get("exitCode").and_then(|v| v.as_i64()),
+            Some(137)
+        );
     }
 }

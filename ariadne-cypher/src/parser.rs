@@ -59,6 +59,7 @@ fn is_expression_kind(kind: &str) -> bool {
             "expression"
                 | "list_comprehension"
                 | "pattern_comprehension"
+                | "quantifier"
                 | "existential_subquery"
                 | "case_expression"
                 | "function_invocation"
@@ -575,6 +576,7 @@ fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         "property_or_labels_expression" => parse_property_access(node, input),
         "parenthesized_expression" => parse_parenthesized(node, input),
         "case_expression" => parse_case_expression(node, input),
+        "list_comprehension" => parse_list_comprehension(node, input),
         "literal" => parse_literal(node, input),
         "string_literal" | "number_literal" | "boolean_literal" | "null_literal"
         | "list_literal" | "map_literal" => parse_literal(node, input),
@@ -582,6 +584,7 @@ fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         "parameter" => Ok(Expr::Parameter(parse_parameter(node, input)?)),
         "function_invocation" => parse_function(node, input),
         "existential_subquery" => parse_existential_subquery(node, input),
+        "quantifier" => parse_quantifier(node, input),
         "atom" => parse_atom(node, input),
         other => Err(CypherError::unsupported(other, Span::from_node(node))),
     }
@@ -868,6 +871,84 @@ fn parse_case_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         alternatives,
         else_expr: else_expr.map(Box::new),
     })
+}
+
+fn parse_list_comprehension(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let filter_node = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "filter_expression")
+        .ok_or_else(|| CypherError::missing("list comprehension filter", Span::from_node(node)))?;
+    let (variable, list, where_clause) = parse_filter_expression(filter_node, input)?;
+    let map_expr = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "expression")
+        .map(|expr| parse_expression(expr, input))
+        .transpose()?
+        .unwrap_or_else(|| Expr::Variable(variable.clone()));
+
+    Ok(Expr::ListComprehension {
+        variable,
+        list: Box::new(list),
+        where_clause: where_clause.map(Box::new),
+        map: Box::new(map_expr),
+    })
+}
+
+fn parse_quantifier(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let filter_node = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "filter_expression")
+        .ok_or_else(|| CypherError::missing("quantifier filter", Span::from_node(node)))?;
+    let (variable, list, where_clause) = parse_filter_expression(filter_node, input)?;
+    let keyword = node_text(node, input)?
+        .trim_start()
+        .to_ascii_lowercase();
+    let kind = if keyword.starts_with("any") {
+        QuantifierKind::Any
+    } else if keyword.starts_with("all") {
+        QuantifierKind::All
+    } else if keyword.starts_with("none") {
+        QuantifierKind::None
+    } else if keyword.starts_with("single") {
+        QuantifierKind::Single
+    } else {
+        return Err(CypherError::unsupported(
+            "quantifier keyword",
+            Span::from_node(node),
+        ));
+    };
+    Ok(Expr::Quantifier {
+        kind,
+        variable,
+        list: Box::new(list),
+        where_clause: where_clause.map(Box::new),
+    })
+}
+
+fn parse_filter_expression(
+    node: Node,
+    input: &str,
+) -> Result<(String, Expr, Option<Expr>), CypherError> {
+    let id_in_coll = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "id_in_coll")
+        .ok_or_else(|| CypherError::missing("filter id_in_coll", Span::from_node(node)))?;
+    let mut id_named = named_children(id_in_coll).into_iter();
+    let var_node = id_named
+        .find(|child| child.kind() == "variable")
+        .ok_or_else(|| CypherError::missing("filter variable", Span::from_node(id_in_coll)))?;
+    let list_node = named_children(id_in_coll)
+        .into_iter()
+        .find(|child| child.kind() == "expression")
+        .ok_or_else(|| CypherError::missing("filter list", Span::from_node(id_in_coll)))?;
+    let variable = parse_identifier(var_node, input)?;
+    let list = parse_expression(list_node, input)?;
+    let where_clause = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "where")
+        .map(|where_node| parse_where(where_node, input))
+        .transpose()?;
+    Ok((variable, list, where_clause))
 }
 
 fn parse_index_access(node: Node, input: &str) -> Result<Expr, CypherError> {

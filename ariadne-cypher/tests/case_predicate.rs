@@ -43,3 +43,22 @@ fn parses_exists_subquery() {
     "#;
     assert!(parse_query(query).is_ok());
 }
+
+#[test]
+fn parses_quantifier_and_list_comprehension() {
+    let query = r#"
+        MATCH (p:Pod)
+        WHERE ANY(cs IN p['status']['containerStatuses'] WHERE cs['lastState']['terminated']['reason'] = 'OOMKilled')
+        RETURN
+          p['metadata']['namespace'] AS namespace,
+          p['metadata']['name'] AS pod,
+          [cs IN p['status']['containerStatuses'] WHERE cs['lastState']['terminated']['reason'] = 'OOMKilled' | {
+            container: cs['name'],
+            exitCode: cs['lastState']['terminated']['exitCode'],
+            finishedAt: cs['lastState']['terminated']['finishedAt'],
+            message: cs['lastState']['terminated']['message']
+          }] AS oom_killed_containers
+        ORDER BY namespace, pod
+    "#;
+    assert!(parse_query(query).is_ok());
+}

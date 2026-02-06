@@ -200,7 +200,27 @@ pub enum Expr {
         pattern: Pattern,
         where_clause: Option<Box<Expr>>,
     },
+    ListComprehension {
+        variable: String,
+        list: Box<Expr>,
+        where_clause: Option<Box<Expr>>,
+        map: Box<Expr>,
+    },
+    Quantifier {
+        kind: QuantifierKind,
+        variable: String,
+        list: Box<Expr>,
+        where_clause: Option<Box<Expr>>,
+    },
     Parameter(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum QuantifierKind {
+    Any,
+    All,
+    None,
+    Single,
 }
 
 #[derive(Debug, Clone, PartialEq)]
