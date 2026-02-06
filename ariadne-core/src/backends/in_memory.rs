@@ -1967,6 +1967,21 @@ fn eval_function(
                 _ => Ok(Value::Array(vec![])),
             }
         }
+        "keys" => {
+            let target = args
+                .first()
+                .ok_or_else(|| std::io::Error::other("keys requires one argument"))?;
+            let value = eval_expr(target, row, state, stats)?;
+            match value {
+                Value::Object(map) => {
+                    let mut keys: Vec<String> = map.keys().cloned().collect();
+                    keys.sort();
+                    Ok(Value::Array(keys.into_iter().map(Value::String).collect()))
+                }
+                Value::Null => Ok(Value::Null),
+                _ => Ok(Value::Null),
+            }
+        }
         "replace" => {
             if args.len() < 3 {
                 return Err(std::io::Error::other("replace requires three arguments").into());
@@ -2933,5 +2948,27 @@ mod tests {
             Some(3072.0)
         );
         assert_eq!(results[0].get("gib").and_then(|v| v.as_f64()), Some(3.0));
+    }
+
+    #[test]
+    fn executes_keys_function() {
+        let state = ClusterState::new(dummy_cluster());
+        let query = parse_query("RETURN keys({b: 1, a: 2}) AS ks").unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let keys = results[0]
+            .get("ks")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            keys,
+            vec![
+                Value::String("a".to_string()),
+                Value::String("b".to_string())
+            ]
+        );
     }
 }
