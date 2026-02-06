@@ -39,22 +39,28 @@ pub fn run_gui(
         viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]),
         ..Default::default()
     };
-    let app = GuiApp::new(
-        runtime.handle().clone(),
-        backend,
-        translator,
-        cluster_state,
-        token,
-        cluster_label,
-        context_window_tokens,
-    );
+    let runtime_handle = runtime.handle().clone();
+    let backend = backend.clone();
+    let translator = translator.clone();
+    let cluster_state = cluster_state.clone();
+    let token = token.clone();
+    let cluster_label = cluster_label.clone();
     eframe::run_native(
         "KubeGraph Ops",
         native_options,
         Box::new(|cc| {
             let palette = Palette::default();
             setup_style(&cc.egui_ctx, &palette);
-            Ok(Box::new(app))
+            Ok(Box::new(GuiApp::new(
+                runtime_handle.clone(),
+                backend.clone(),
+                translator.clone(),
+                cluster_state.clone(),
+                token.clone(),
+                cluster_label.clone(),
+                context_window_tokens,
+                cc.egui_ctx.clone(),
+            )))
         }),
     )
     .map_err(|err| std::io::Error::other(err.to_string()))?;
@@ -326,6 +332,7 @@ pub struct GuiApp {
     cluster_state: SharedClusterState,
     cluster_meta: ClusterMeta,
     token: CancellationToken,
+    egui_ctx: egui::Context,
     palette: Palette,
     feed: Vec<FeedItem>,
     next_id: u64,
@@ -370,6 +377,7 @@ impl GuiApp {
         token: CancellationToken,
         cluster_label: String,
         context_window_tokens: Option<usize>,
+        egui_ctx: egui::Context,
     ) -> Self {
         let (events_tx, events_rx) = mpsc::channel();
         let suggestions = build_suggestions();
@@ -384,6 +392,7 @@ impl GuiApp {
                 connected: true,
             },
             token,
+            egui_ctx,
             palette,
             feed: Vec::new(),
             next_id: 1,
@@ -433,9 +442,14 @@ impl GuiApp {
         let runtime = self.runtime.clone();
         let context = self.build_context_with_budget();
         let context_summary = self.context_compact_summary.clone();
+        let ctx = self.egui_ctx.clone();
 
         runtime.spawn(async move {
-            let _ = tx.send(AppEvent::TranslationStarted { id });
+            let send_event = |event| {
+                let _ = tx.send(event);
+                ctx.request_repaint();
+            };
+            send_event(AppEvent::TranslationStarted { id });
             let llm_start = Instant::now();
             match translator
                 .translate(&question, &context, context_summary.as_deref())
@@ -443,7 +457,7 @@ impl GuiApp {
             {
                 Ok(result) => {
                     let llm_ms = llm_start.elapsed().as_millis();
-                    let _ = tx.send(AppEvent::TranslationCompleted {
+                    send_event(AppEvent::TranslationCompleted {
                         id,
                         cypher: result.cypher.clone(),
                         usage: result.usage.clone(),
@@ -451,7 +465,7 @@ impl GuiApp {
                     });
                     match validate_cypher(&result.cypher) {
                         Ok(()) => {
-                            let _ = tx.send(AppEvent::QueryStarted {
+                            send_event(AppEvent::QueryStarted {
                                 id,
                                 cypher: result.cypher.clone(),
                             });
@@ -459,7 +473,7 @@ impl GuiApp {
                             match backend.execute_query(result.cypher.clone()).await {
                                 Ok(records) => {
                                     let exec_ms = exec_start.elapsed().as_millis();
-                                    let _ = tx.send(AppEvent::QueryCompleted {
+                                    send_event(AppEvent::QueryCompleted {
                                         id,
                                         cypher: result.cypher,
                                         records,
@@ -469,7 +483,7 @@ impl GuiApp {
                                 Err(err) => {
                                     let exec_ms = exec_start.elapsed().as_millis();
                                     tracing::error!("Query failed: {err}");
-                                    let _ = tx.send(AppEvent::QueryFailed {
+                                    send_event(AppEvent::QueryFailed {
                                         id,
                                         error: err.to_string(),
                                         cypher: result.cypher,
@@ -480,7 +494,7 @@ impl GuiApp {
                         }
                         Err(err) => {
                             tracing::error!("Validation failed: {err}");
-                            let _ = tx.send(AppEvent::ValidationFailed {
+                            send_event(AppEvent::ValidationFailed {
                                 id,
                                 error: err.to_string(),
                                 cypher: result.cypher,
@@ -490,7 +504,7 @@ impl GuiApp {
                 }
                 Err(err) => {
                     tracing::error!("Translation failed: {err}");
-                    let _ = tx.send(AppEvent::TranslationFailed {
+                    send_event(AppEvent::TranslationFailed {
                         id,
                         error: err.to_string(),
                     });
@@ -503,11 +517,16 @@ impl GuiApp {
         let tx = self.events_tx.clone();
         let backend = self.backend.clone();
         let runtime = self.runtime.clone();
+        let ctx = self.egui_ctx.clone();
 
         runtime.spawn(async move {
+            let send_event = |event| {
+                let _ = tx.send(event);
+                ctx.request_repaint();
+            };
             match validate_cypher(&cypher) {
                 Ok(()) => {
-                    let _ = tx.send(AppEvent::QueryStarted {
+                    send_event(AppEvent::QueryStarted {
                         id,
                         cypher: cypher.clone(),
                     });
@@ -515,7 +534,7 @@ impl GuiApp {
                     match backend.execute_query(cypher.clone()).await {
                         Ok(records) => {
                             let exec_ms = exec_start.elapsed().as_millis();
-                            let _ = tx.send(AppEvent::QueryCompleted {
+                            send_event(AppEvent::QueryCompleted {
                                 id,
                                 cypher,
                                 records,
@@ -525,7 +544,7 @@ impl GuiApp {
                         Err(err) => {
                             let exec_ms = exec_start.elapsed().as_millis();
                             tracing::error!("Query failed: {err}");
-                            let _ = tx.send(AppEvent::QueryFailed {
+                            send_event(AppEvent::QueryFailed {
                                 id,
                                 error: err.to_string(),
                                 cypher,
@@ -536,7 +555,7 @@ impl GuiApp {
                 }
                 Err(err) => {
                     tracing::error!("Validation failed: {err}");
-                    let _ = tx.send(AppEvent::ValidationFailed {
+                    send_event(AppEvent::ValidationFailed {
                         id,
                         error: err.to_string(),
                         cypher,
@@ -765,24 +784,29 @@ impl GuiApp {
         let tx = self.events_tx.clone();
         let translator = self.translator.clone();
         let runtime = self.runtime.clone();
+        let ctx = self.egui_ctx.clone();
 
         self.context_compacting = true;
         self.context_compact_error = None;
 
         runtime.spawn(async move {
-            let _ = tx.send(AppEvent::ContextCompactionStarted);
+            let send_event = |event| {
+                let _ = tx.send(event);
+                ctx.request_repaint();
+            };
+            send_event(AppEvent::ContextCompactionStarted);
             let start = Instant::now();
             match translator.compact_context(&context).await {
                 Ok(result) => {
                     let duration_ms = start.elapsed().as_millis();
-                    let _ = tx.send(AppEvent::ContextCompactionCompleted {
+                    send_event(AppEvent::ContextCompactionCompleted {
                         summary: result.summary,
                         usage: result.usage,
                         duration_ms,
                     });
                 }
                 Err(err) => {
-                    let _ = tx.send(AppEvent::ContextCompactionFailed {
+                    send_event(AppEvent::ContextCompactionFailed {
                         error: err.to_string(),
                     });
                 }
