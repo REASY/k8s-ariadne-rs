@@ -27,6 +27,7 @@ const CONTEXT_MIN_TOKENS: usize = 512;
 const GRAPH_PULSE_HEIGHT: f32 = 40.0;
 const LLM_MAX_RETRIES: usize = 1;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_gui(
     runtime: &tokio::runtime::Runtime,
     backend: Arc<dyn GraphBackend>,
@@ -1215,7 +1216,7 @@ impl eframe::App for GuiApp {
                                                     .size(13.0),
                                             );
                                             ui.add_space(4.0);
-                                            let lines = value.lines().count().max(3).min(10);
+                                            let lines = value.lines().count().clamp(3, 10);
                                             let height = (lines as f32) * 16.0 + 12.0;
                                             Frame::new()
                                                 .fill(self.palette.bg_primary)
