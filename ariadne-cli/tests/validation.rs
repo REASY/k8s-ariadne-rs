@@ -17,3 +17,15 @@ fn accepts_with_unwind() {
     let res = validate_cypher("UNWIND [1,2,3] AS x WITH x RETURN x");
     assert!(res.is_ok());
 }
+
+#[test]
+fn rejects_schema_mismatch() {
+    let err = validate_cypher("MATCH (p:Pod)-[:BelongsTo]->(c:Cluster) RETURN p").unwrap_err();
+    assert!(err.to_string().contains("not allowed"));
+}
+
+#[test]
+fn rejects_unknown_label() {
+    let err = validate_cypher("MATCH (x:NotAReal)-[:Manages]->(p:Pod) RETURN x").unwrap_err();
+    assert!(err.to_string().contains("Unknown label"));
+}

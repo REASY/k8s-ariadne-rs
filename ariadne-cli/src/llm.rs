@@ -156,6 +156,7 @@ pub trait Translator: Send + Sync {
         question: &str,
         context: &[ConversationTurn],
         context_summary: Option<&str>,
+        feedback: Option<&str>,
     ) -> CliResult<TranslationResult>;
 
     async fn compact_context(&self, context: &[ConversationTurn]) -> CliResult<ContextCompaction>;
@@ -210,8 +211,9 @@ impl Translator for LlmTranslator {
         question: &str,
         context: &[ConversationTurn],
         context_summary: Option<&str>,
+        feedback: Option<&str>,
     ) -> CliResult<TranslationResult> {
-        let messages = build_messages(question, context, context_summary);
+        let messages = build_messages(question, context, context_summary, feedback);
         let response = match self.llm.chat(&messages).await {
             Ok(response) => response,
             Err(err) => return Err(map_llm_error(err, self.structured_output)),
@@ -261,6 +263,7 @@ fn build_messages(
     question: &str,
     context: &[ConversationTurn],
     context_summary: Option<&str>,
+    feedback: Option<&str>,
 ) -> Vec<ChatMessage> {
     let mut messages = Vec::new();
     if let Some(summary) = context_summary {
@@ -286,6 +289,19 @@ fn build_messages(
             }
         }
         messages.push(ChatMessage::assistant().content(assistant).build());
+    }
+    if let Some(feedback) = feedback {
+        let feedback = feedback.trim();
+        if !feedback.is_empty() {
+            messages.push(
+                ChatMessage::user()
+                    .content(format!(
+                        "Previous Cypher failed validation: {feedback}\n\
+Please correct the Cypher. Return only the fixed query."
+                    ))
+                    .build(),
+            );
+        }
     }
     messages.push(ChatMessage::user().content(question.trim()).build());
     messages

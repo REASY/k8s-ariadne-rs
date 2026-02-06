@@ -25,6 +25,7 @@ const COMPACT_CONTEXT_LIMIT: usize = 12;
 const CONTEXT_RESERVED_TOKENS: usize = 2048;
 const CONTEXT_MIN_TOKENS: usize = 512;
 const GRAPH_PULSE_HEIGHT: f32 = 40.0;
+const LLM_MAX_RETRIES: usize = 1;
 
 pub fn run_gui(
     runtime: &tokio::runtime::Runtime,
@@ -368,7 +369,8 @@ struct InspectorState {
     relationships: Vec<(String, String)>,
 }
 
-impl GuiApp {
+    impl GuiApp {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         runtime: Handle,
         backend: Arc<dyn GraphBackend>,
@@ -449,65 +451,85 @@ impl GuiApp {
                 let _ = tx.send(event);
                 ctx.request_repaint();
             };
-            send_event(AppEvent::TranslationStarted { id });
-            let llm_start = Instant::now();
-            match translator
-                .translate(&question, &context, context_summary.as_deref())
-                .await
-            {
-                Ok(result) => {
-                    let llm_ms = llm_start.elapsed().as_millis();
-                    send_event(AppEvent::TranslationCompleted {
-                        id,
-                        cypher: result.cypher.clone(),
-                        usage: result.usage.clone(),
-                        duration_ms: llm_ms,
-                    });
-                    match validate_cypher(&result.cypher) {
-                        Ok(()) => {
-                            send_event(AppEvent::QueryStarted {
-                                id,
-                                cypher: result.cypher.clone(),
-                            });
-                            let exec_start = Instant::now();
-                            match backend.execute_query(result.cypher.clone()).await {
-                                Ok(records) => {
-                                    let exec_ms = exec_start.elapsed().as_millis();
-                                    send_event(AppEvent::QueryCompleted {
-                                        id,
-                                        cypher: result.cypher,
-                                        records,
-                                        duration_ms: exec_ms,
-                                    });
-                                }
-                                Err(err) => {
-                                    let exec_ms = exec_start.elapsed().as_millis();
-                                    tracing::error!("Query failed: {err}");
-                                    send_event(AppEvent::QueryFailed {
-                                        id,
-                                        error: err.to_string(),
-                                        cypher: result.cypher,
-                                        duration_ms: exec_ms,
-                                    });
-                                }
+            let mut attempt = 0usize;
+            let mut feedback: Option<String> = None;
+
+            loop {
+                attempt += 1;
+                send_event(AppEvent::TranslationStarted { id });
+                let llm_start = Instant::now();
+                let result = translator
+                    .translate(
+                        &question,
+                        &context,
+                        context_summary.as_deref(),
+                        feedback.as_deref(),
+                    )
+                    .await;
+                let llm_ms = llm_start.elapsed().as_millis();
+
+                let result = match result {
+                    Ok(result) => result,
+                    Err(err) => {
+                        tracing::error!("Translation failed: {err}");
+                        send_event(AppEvent::TranslationFailed {
+                            id,
+                            error: err.to_string(),
+                        });
+                        return;
+                    }
+                };
+
+                send_event(AppEvent::TranslationCompleted {
+                    id,
+                    cypher: result.cypher.clone(),
+                    usage: result.usage.clone(),
+                    duration_ms: llm_ms,
+                });
+
+                match validate_cypher(&result.cypher) {
+                    Ok(()) => {
+                        send_event(AppEvent::QueryStarted {
+                            id,
+                            cypher: result.cypher.clone(),
+                        });
+                        let exec_start = Instant::now();
+                        match backend.execute_query(result.cypher.clone()).await {
+                            Ok(records) => {
+                                let exec_ms = exec_start.elapsed().as_millis();
+                                send_event(AppEvent::QueryCompleted {
+                                    id,
+                                    cypher: result.cypher,
+                                    records,
+                                    duration_ms: exec_ms,
+                                });
+                            }
+                            Err(err) => {
+                                let exec_ms = exec_start.elapsed().as_millis();
+                                tracing::error!("Query failed: {err}");
+                                send_event(AppEvent::QueryFailed {
+                                    id,
+                                    error: err.to_string(),
+                                    cypher: result.cypher,
+                                    duration_ms: exec_ms,
+                                });
                             }
                         }
-                        Err(err) => {
-                            tracing::error!("Validation failed: {err}");
-                            send_event(AppEvent::ValidationFailed {
-                                id,
-                                error: err.to_string(),
-                                cypher: result.cypher,
-                            });
-                        }
+                        return;
                     }
-                }
-                Err(err) => {
-                    tracing::error!("Translation failed: {err}");
-                    send_event(AppEvent::TranslationFailed {
-                        id,
-                        error: err.to_string(),
-                    });
+                    Err(issue) => {
+                        tracing::error!("Validation failed: {issue}");
+                        if attempt <= LLM_MAX_RETRIES && issue.retriable() {
+                            feedback = Some(issue.feedback());
+                            continue;
+                        }
+                        send_event(AppEvent::ValidationFailed {
+                            id,
+                            error: issue.to_string(),
+                            cypher: result.cypher,
+                        });
+                        return;
+                    }
                 }
             }
         });
