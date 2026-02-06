@@ -25,6 +25,8 @@ impl GraphRelationship {
 }
 
 const BASE_RELATIONSHIPS: &[EdgeKey] = &[
+    (ResourceType::AWX, Edge::Manages, ResourceType::Deployment),
+    (ResourceType::AWX, Edge::Manages, ResourceType::Ingress),
     (ResourceType::ConfigMap, Edge::PartOf, ResourceType::Cluster),
     (
         ResourceType::ConfigMap,
@@ -123,6 +125,16 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
     (ResourceType::Job, Edge::BelongsTo, ResourceType::Namespace),
     (ResourceType::Job, Edge::Manages, ResourceType::Pod),
     (ResourceType::Namespace, Edge::PartOf, ResourceType::Cluster),
+    (
+        ResourceType::NetworkPolicy,
+        Edge::PartOf,
+        ResourceType::Cluster,
+    ),
+    (
+        ResourceType::NetworkPolicy,
+        Edge::BelongsTo,
+        ResourceType::Namespace,
+    ),
     (ResourceType::Node, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Node, Edge::Manages, ResourceType::Pod),
     (
@@ -156,6 +168,11 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
     (
         ResourceType::Pod,
         Edge::ClaimsVolume,
+        ResourceType::PersistentVolumeClaim,
+    ),
+    (
+        ResourceType::Pod,
+        Edge::Manages,
         ResourceType::PersistentVolumeClaim,
     ),
     (

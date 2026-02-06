@@ -63,6 +63,9 @@ pub enum ResourceType {
     // Event
     Event,
 
+    // Ansible
+    AWX,
+
     // Logical resource types
     IngressServiceBackend, //  Represents a backend in an Ingress spec
     EndpointAddress,       // Represents a single IP address in an Endpoints object
