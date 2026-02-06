@@ -240,6 +240,7 @@ struct RowCard {
     subtitle: Option<String>,
     status: Option<String>,
     fields: Vec<(String, String)>,
+    raw_fields: Vec<(String, Value)>,
 }
 
 #[derive(Debug, Clone)]
@@ -368,8 +369,20 @@ struct InspectorState {
     is_open: bool,
     node_type: Option<String>,
     node_id: Option<String>,
-    properties: Vec<(String, String)>,
+    properties: Vec<InspectorProperty>,
     relationships: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug)]
+struct InspectorProperty {
+    key: String,
+    value: InspectorValue,
+}
+
+#[derive(Clone, Debug)]
+enum InspectorValue {
+    Text(String),
+    Json(String),
 }
 
 impl GuiApp {
@@ -897,12 +910,20 @@ impl GuiApp {
     fn open_inspector_from_row(&mut self, row: &RowCard) {
         self.inspector.is_open = true;
         self.inspector.node_type = row
-            .fields
+            .raw_fields
             .iter()
             .find(|(key, _)| key == "kind")
-            .map(|(_, value)| value.clone());
+            .and_then(|(_, value)| value.as_str())
+            .map(|value| value.to_string());
         self.inspector.node_id = Some(row.title.clone());
-        self.inspector.properties = row.fields.clone();
+        self.inspector.properties = row
+            .raw_fields
+            .iter()
+            .map(|(key, value)| InspectorProperty {
+                key: key.clone(),
+                value: inspector_value(value),
+            })
+            .collect();
         self.inspector.relationships = vec![];
     }
 }
@@ -1170,20 +1191,50 @@ impl eframe::App for GuiApp {
                             );
                             ui.add_space(4.0);
                             ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                                for (key, value) in &self.inspector.properties {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(
-                                            RichText::new(format!("{key}:"))
-                                                .color(self.palette.text_muted)
-                                                .size(13.0),
-                                        );
-                                        ui.label(
-                                            RichText::new(value)
-                                                .color(self.palette.text_primary)
-                                                .size(13.0),
-                                        );
-                                    });
-                                    ui.add_space(2.0);
+                                for property in &self.inspector.properties {
+                                    match &property.value {
+                                        InspectorValue::Text(value) => {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.label(
+                                                    RichText::new(format!("{}:", property.key))
+                                                        .color(self.palette.text_muted)
+                                                        .size(13.0),
+                                                );
+                                                ui.label(
+                                                    RichText::new(value)
+                                                        .color(self.palette.text_primary)
+                                                        .size(13.0),
+                                                );
+                                            });
+                                            ui.add_space(2.0);
+                                        }
+                                        InspectorValue::Json(value) => {
+                                            ui.label(
+                                                RichText::new(format!("{}:", property.key))
+                                                    .color(self.palette.text_muted)
+                                                    .size(13.0),
+                                            );
+                                            ui.add_space(4.0);
+                                            let lines = value.lines().count().max(3).min(10);
+                                            let height = (lines as f32) * 16.0 + 12.0;
+                                            Frame::new()
+                                                .fill(self.palette.bg_primary)
+                                                .stroke(Stroke::new(1.0, self.palette.border))
+                                                .corner_radius(CornerRadius::same(6))
+                                                .inner_margin(Margin::same(6))
+                                                .show(ui, |ui| {
+                                                    let mut display = value.clone();
+                                                    ui.add_sized(
+                                                        [ui.available_width(), height],
+                                                        TextEdit::multiline(&mut display)
+                                                            .font(TextStyle::Monospace)
+                                                            .interactive(false)
+                                                            .desired_width(f32::INFINITY),
+                                                    );
+                                                });
+                                            ui.add_space(6.0);
+                                        }
+                                    }
                                 }
                             });
 
@@ -2022,7 +2073,6 @@ fn render_result(
                                 body.rows(row_height, rows.len(), |mut row| {
                                     let row_index = row.index();
                                     let row_data = &rows[row_index];
-                                    let mut used_select = false;
 
                                     if show_title {
                                         row.col(|ui| {
@@ -2032,34 +2082,22 @@ fn render_result(
                                                 on_select(row_data);
                                             }
                                         });
-                                        used_select = true;
                                     }
                                     if show_namespace {
                                         let namespace = row_data.subtitle.as_deref().unwrap_or("-");
                                         row.col(|ui| {
-                                            if !used_select {
-                                                let response =
-                                                    ui.selectable_label(false, namespace);
-                                                if response.clicked() {
-                                                    on_select(row_data);
-                                                }
-                                                used_select = true;
-                                            } else {
-                                                ui.label(namespace);
+                                            let response = ui.selectable_label(false, namespace);
+                                            if response.clicked() {
+                                                on_select(row_data);
                                             }
                                         });
                                     }
                                     if show_status {
                                         let status = row_data.status.as_deref().unwrap_or("-");
                                         row.col(|ui| {
-                                            if !used_select {
-                                                let response = ui.selectable_label(false, status);
-                                                if response.clicked() {
-                                                    on_select(row_data);
-                                                }
-                                                used_select = true;
-                                            } else {
-                                                ui.label(status);
+                                            let response = ui.selectable_label(false, status);
+                                            if response.clicked() {
+                                                on_select(row_data);
                                             }
                                         });
                                     }
@@ -2067,14 +2105,9 @@ fn render_result(
                                         row.col(|ui| {
                                             let value =
                                                 find_field(&row_data.fields, key).unwrap_or("-");
-                                            if !used_select {
-                                                let response = ui.selectable_label(false, value);
-                                                if response.clicked() {
-                                                    on_select(row_data);
-                                                }
-                                                used_select = true;
-                                            } else {
-                                                ui.label(value);
+                                            let response = ui.selectable_label(false, value);
+                                            if response.clicked() {
+                                                on_select(row_data);
                                             }
                                         });
                                     }
@@ -2402,17 +2435,21 @@ fn summarize_row(obj: &Map<String, Value>) -> RowCard {
         })
         .map(|v| v.to_string());
 
-    let mut fields: Vec<(String, String)> = obj
+    let mut raw_fields: Vec<(String, Value)> =
+        obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    raw_fields.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let fields: Vec<(String, String)> = raw_fields
         .iter()
         .map(|(k, v)| (k.clone(), format_value(v)))
         .collect();
-    fields.sort_by(|a, b| a.0.cmp(&b.0));
 
     RowCard {
         title,
         subtitle,
         status,
         fields,
+        raw_fields,
     }
 }
 
@@ -2454,6 +2491,17 @@ fn format_array_item(value: &Value) -> String {
         Value::String(v) => v.clone(),
         Value::Array(arr) => format!("array({})", arr.len()),
         Value::Object(obj) => format!("object({})", obj.len()),
+    }
+}
+
+fn inspector_value(value: &Value) -> InspectorValue {
+    match value {
+        Value::Array(_) | Value::Object(_) => {
+            let pretty = serde_json::to_string_pretty(value)
+                .unwrap_or_else(|_| format_value(value));
+            InspectorValue::Json(pretty)
+        }
+        _ => InspectorValue::Text(format_value(value)),
     }
 }
 
