@@ -351,18 +351,42 @@ fn contains_aggregate(expr: &Expr) -> bool {
 }
 
 fn is_aggregate_projection(expr: &Expr) -> bool {
+    let (has_agg, ok) = aggregate_expr_shape(expr);
+    has_agg && ok
+}
+
+fn aggregate_expr_shape(expr: &Expr) -> (bool, bool) {
     match expr {
-        Expr::CountStar => true,
-        Expr::FunctionCall { name, .. } if is_aggregate_name(name) => true,
+        Expr::CountStar => (true, true),
+        Expr::FunctionCall { name, .. } if is_aggregate_name(name) => (true, true),
+        Expr::Literal(_) => (false, true),
+        Expr::UnaryOp { expr, .. } => aggregate_expr_shape(expr),
+        Expr::BinaryOp { left, right, .. } => {
+            let (l_has, l_ok) = aggregate_expr_shape(left);
+            let (r_has, r_ok) = aggregate_expr_shape(right);
+            (l_has || r_has, l_ok && r_ok)
+        }
         Expr::IndexAccess { expr, index } => {
-            is_aggregate_projection(expr) && !contains_aggregate(index)
+            let (base_has, base_ok) = aggregate_expr_shape(expr);
+            let (idx_has, idx_ok) = aggregate_expr_shape(index);
+            (base_has, base_ok && idx_ok && !idx_has)
         }
         Expr::ListSlice { expr, start, end } => {
-            is_aggregate_projection(expr)
-                && !start.as_deref().is_some_and(contains_aggregate)
-                && !end.as_deref().is_some_and(contains_aggregate)
+            let (base_has, base_ok) = aggregate_expr_shape(expr);
+            let (start_has, start_ok) = start
+                .as_deref()
+                .map(aggregate_expr_shape)
+                .unwrap_or((false, true));
+            let (end_has, end_ok) = end
+                .as_deref()
+                .map(aggregate_expr_shape)
+                .unwrap_or((false, true));
+            (
+                base_has,
+                base_ok && start_ok && end_ok && !start_has && !end_has,
+            )
         }
-        _ => false,
+        _ => (false, false),
     }
 }
 

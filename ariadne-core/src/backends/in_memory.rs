@@ -864,7 +864,7 @@ fn project_rows_internal(
     state: &ClusterState,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
-    let has_agg = items.iter().any(|item| is_aggregate_expr(&item.expr));
+    let has_agg = items.iter().any(|item| contains_aggregate_expr(&item.expr));
 
     if has_agg {
         return project_rows_aggregate(rows, items, state, stats);
@@ -903,7 +903,7 @@ fn project_rows_aggregate(
 ) -> Result<Vec<Row>> {
     let mut non_agg_indices = Vec::new();
     for (idx, item) in items.iter().enumerate() {
-        if !is_aggregate_expr(&item.expr) {
+        if !contains_aggregate_expr(&item.expr) {
             if matches!(item.expr, Expr::Star) {
                 return Err(std::io::Error::other("cannot aggregate with RETURN *").into());
             }
@@ -931,8 +931,8 @@ fn project_rows_aggregate(
         let mut record = Row::new();
         let mut key_iter = key_values.into_iter();
         for (idx, item) in items.iter().enumerate() {
-            let value = if is_aggregate_expr(&item.expr) {
-                eval_aggregate(&item.expr, &group_rows, state, stats)?
+            let value = if contains_aggregate_expr(&item.expr) {
+                eval_aggregate_expr(&item.expr, &group_rows, state, stats)?
             } else {
                 key_iter
                     .next()
@@ -1087,16 +1087,141 @@ fn projection_label(item: &ProjectionItem, idx: usize) -> String {
     }
 }
 
-fn is_aggregate_expr(expr: &Expr) -> bool {
+fn contains_aggregate_expr(expr: &Expr) -> bool {
     match expr {
         Expr::CountStar => true,
         Expr::FunctionCall { name, .. } => matches!(
             name.to_ascii_lowercase().as_str(),
             "count" | "sum" | "avg" | "min" | "max" | "collect"
         ),
-        Expr::IndexAccess { expr, .. } => is_aggregate_expr(expr),
-        Expr::ListSlice { expr, .. } => is_aggregate_expr(expr),
+        Expr::UnaryOp { expr, .. } => contains_aggregate_expr(expr),
+        Expr::BinaryOp { left, right, .. } => {
+            contains_aggregate_expr(left) || contains_aggregate_expr(right)
+        }
+        Expr::PropertyAccess { expr, .. } => contains_aggregate_expr(expr),
+        Expr::IndexAccess { expr, index } => {
+            contains_aggregate_expr(expr) || contains_aggregate_expr(index)
+        }
+        Expr::ListSlice { expr, start, end } => {
+            contains_aggregate_expr(expr)
+                || start.as_deref().is_some_and(contains_aggregate_expr)
+                || end.as_deref().is_some_and(contains_aggregate_expr)
+        }
+        Expr::IsNull { expr, .. } => contains_aggregate_expr(expr),
+        Expr::In { expr, list } => contains_aggregate_expr(expr) || contains_aggregate_expr(list),
+        Expr::Case {
+            base,
+            alternatives,
+            else_expr,
+        } => {
+            base.as_deref().is_some_and(contains_aggregate_expr)
+                || alternatives
+                    .iter()
+                    .any(|(a, b)| contains_aggregate_expr(a) || contains_aggregate_expr(b))
+                || else_expr.as_deref().is_some_and(contains_aggregate_expr)
+        }
+        Expr::ListComprehension {
+            list,
+            where_clause,
+            map,
+            ..
+        } => {
+            contains_aggregate_expr(list)
+                || where_clause.as_deref().is_some_and(contains_aggregate_expr)
+                || contains_aggregate_expr(map)
+        }
+        Expr::Quantifier {
+            list, where_clause, ..
+        } => {
+            contains_aggregate_expr(list)
+                || where_clause.as_deref().is_some_and(contains_aggregate_expr)
+        }
         _ => false,
+    }
+}
+
+fn eval_aggregate_expr(
+    expr: &Expr,
+    rows: &[Row],
+    state: &ClusterState,
+    stats: &mut QueryStats,
+) -> Result<Value> {
+    match expr {
+        Expr::CountStar
+        | Expr::FunctionCall { .. }
+        | Expr::IndexAccess { .. }
+        | Expr::ListSlice { .. } => eval_aggregate(expr, rows, state, stats),
+        Expr::Literal(lit) => literal_to_value(lit, &Row::new(), state, stats),
+        Expr::UnaryOp { op, expr } => {
+            let value = eval_aggregate_expr(expr, rows, state, stats)?;
+            match op {
+                ariadne_cypher::UnaryOp::Not => Ok(Value::Bool(!value.as_bool().unwrap_or(false))),
+                ariadne_cypher::UnaryOp::Neg => Ok(Value::from(-value.as_f64().unwrap_or(0.0))),
+                ariadne_cypher::UnaryOp::Pos => Ok(Value::from(value.as_f64().unwrap_or(0.0))),
+            }
+        }
+        Expr::BinaryOp { op, left, right } => {
+            let l = eval_aggregate_expr(left, rows, state, stats)?;
+            let r = eval_aggregate_expr(right, rows, state, stats)?;
+            eval_binary_values(op, l, r)
+        }
+        _ => Err(std::io::Error::other("unsupported aggregate expression shape").into()),
+    }
+}
+
+fn eval_binary_values(op: &ariadne_cypher::BinaryOp, left: Value, right: Value) -> Result<Value> {
+    use ariadne_cypher::BinaryOp::*;
+    match op {
+        Or => Ok(Value::Bool(
+            left.as_bool().unwrap_or(false) || right.as_bool().unwrap_or(false),
+        )),
+        And => Ok(Value::Bool(
+            left.as_bool().unwrap_or(false) && right.as_bool().unwrap_or(false),
+        )),
+        Xor => Ok(Value::Bool(
+            left.as_bool().unwrap_or(false) ^ right.as_bool().unwrap_or(false),
+        )),
+        Eq | Neq | Lt | Gt | Lte | Gte => {
+            let cmp = compare_values(&left, &right);
+            let result = match op {
+                Eq => cmp.map(|c| c == Ordering::Equal).unwrap_or(false),
+                Neq => cmp.map(|c| c != Ordering::Equal).unwrap_or(true),
+                Lt => cmp.map(|c| c == Ordering::Less).unwrap_or(false),
+                Gt => cmp.map(|c| c == Ordering::Greater).unwrap_or(false),
+                Lte => cmp.map(|c| c != Ordering::Greater).unwrap_or(false),
+                Gte => cmp.map(|c| c != Ordering::Less).unwrap_or(false),
+                _ => false,
+            };
+            Ok(Value::Bool(result))
+        }
+        StartsWith | EndsWith | Contains => {
+            if left.is_null() || right.is_null() {
+                return Ok(Value::Bool(false));
+            }
+            let left_str = value_to_string(&left);
+            let right_str = value_to_string(&right);
+            let result = match op {
+                StartsWith => left_str.starts_with(&right_str),
+                EndsWith => left_str.ends_with(&right_str),
+                Contains => left_str.contains(&right_str),
+                _ => false,
+            };
+            Ok(Value::Bool(result))
+        }
+        Add | Sub | Mul | Div | Mod | Pow => {
+            let l = left.as_f64().unwrap_or(0.0);
+            let r = right.as_f64().unwrap_or(0.0);
+            let value = match op {
+                Add => l + r,
+                Sub => l - r,
+                Mul => l * r,
+                Div => l / r,
+                Mod => l % r,
+                Pow => l.powf(r),
+                _ => 0.0,
+            };
+            Ok(Value::from(value))
+        }
     }
 }
 
@@ -2790,5 +2915,23 @@ mod tests {
             results[0].get("second").and_then(|v| v.as_str()),
             Some("beta")
         );
+    }
+
+    #[test]
+    fn executes_aggregate_arithmetic() {
+        let state = ClusterState::new(dummy_cluster());
+        let query =
+            parse_query("UNWIND [1024, 2048] AS x RETURN sum(x) AS total, sum(x) / 1024 AS gib")
+                .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].get("total").and_then(|v| v.as_f64()),
+            Some(3072.0)
+        );
+        assert_eq!(results[0].get("gib").and_then(|v| v.as_f64()), Some(3.0));
     }
 }

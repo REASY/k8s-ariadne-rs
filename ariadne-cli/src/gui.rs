@@ -369,7 +369,7 @@ struct InspectorState {
     relationships: Vec<(String, String)>,
 }
 
-    impl GuiApp {
+impl GuiApp {
     #[allow(clippy::too_many_arguments)]
     fn new(
         runtime: Handle,
