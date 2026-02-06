@@ -445,13 +445,16 @@ impl KubeClient for CachedKubeClient {
         let Some(store) = &self.event_store else {
             return Ok(Vec::new());
         };
-        match timeout(Duration::from_secs(2), store.wait_until_ready()).await {
+        let timeout_duration = event_store_ready_timeout();
+        match timeout(timeout_duration, store.wait_until_ready()).await {
             Ok(wait_result) => {
                 wait_result.expect("Event store is not ready");
                 Ok(store.state())
             }
             Err(_elapsed) => {
-                warn!("Timed out waiting for events after 2s; returning empty list",);
+                warn!(
+                    "Timed out waiting for events after {timeout_duration:?}; returning empty list",
+                );
                 Ok(Vec::new())
             }
         }
@@ -515,6 +518,14 @@ fn store_ready_timeout() -> Duration {
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(STORE_READY_TIMEOUT_SECONDS))
+}
+
+fn event_store_ready_timeout() -> Duration {
+    std::env::var("KUBE_EVENT_STORE_READY_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(4))
 }
 
 impl CachedKubeClient {
