@@ -196,6 +196,10 @@ pub enum Expr {
         alternatives: Vec<(Expr, Expr)>,
         else_expr: Option<Box<Expr>>,
     },
+    Exists {
+        pattern: Pattern,
+        where_clause: Option<Box<Expr>>,
+    },
     Parameter(String),
 }
 

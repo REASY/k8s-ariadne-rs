@@ -581,9 +581,40 @@ fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
         "variable" => Ok(Expr::Variable(parse_identifier(node, input)?)),
         "parameter" => Ok(Expr::Parameter(parse_parameter(node, input)?)),
         "function_invocation" => parse_function(node, input),
+        "existential_subquery" => parse_existential_subquery(node, input),
         "atom" => parse_atom(node, input),
         other => Err(CypherError::unsupported(other, Span::from_node(node))),
     }
+}
+
+fn parse_existential_subquery(node: Node, input: &str) -> Result<Expr, CypherError> {
+    let mut pattern_node = None;
+    let mut where_node = None;
+    for child in named_children(node) {
+        match child.kind() {
+            "pattern" => pattern_node = Some(child),
+            "where" => where_node = Some(child),
+            "regular_query" => {
+                return Err(CypherError::unsupported(
+                    "exists subquery with regular query",
+                    Span::from_node(child),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let pattern_node = pattern_node
+        .ok_or_else(|| CypherError::missing("exists pattern", Span::from_node(node)))?;
+    let pattern = parse_pattern(pattern_node, input)?;
+    let where_clause = if let Some(where_node) = where_node {
+        Some(Box::new(parse_where(where_node, input)?))
+    } else {
+        None
+    };
+    Ok(Expr::Exists {
+        pattern,
+        where_clause,
+    })
 }
 
 fn parse_atom(node: Node, input: &str) -> Result<Expr, CypherError> {

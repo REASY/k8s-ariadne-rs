@@ -254,6 +254,12 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
             }
             Ok(())
         }
+        Expr::Exists { where_clause, .. } => {
+            if let Some(where_clause) = where_clause {
+                validate_engine_expr(where_clause)?;
+            }
+            Ok(())
+        }
         Expr::IsNull { expr, .. } => validate_engine_expr(expr),
         Expr::In { expr, list } => {
             validate_engine_expr(expr)?;

@@ -33,3 +33,13 @@ fn parses_label_predicate() {
     "#;
     assert!(parse_query(query).is_ok());
 }
+
+#[test]
+fn parses_exists_subquery() {
+    let query = r#"
+        MATCH (n)
+        WHERE exists { (n)-->(m) }
+        RETURN n
+    "#;
+    assert!(parse_query(query).is_ok());
+}
