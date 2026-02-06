@@ -34,6 +34,7 @@ pub fn run_gui(
     cluster_state: SharedClusterState,
     token: CancellationToken,
     cluster_label: String,
+    backend_label: String,
     context_window_tokens: Option<usize>,
 ) -> CliResult<()> {
     let native_options = eframe::NativeOptions {
@@ -59,6 +60,7 @@ pub fn run_gui(
                 cluster_state.clone(),
                 token.clone(),
                 cluster_label.clone(),
+                backend_label.clone(),
                 context_window_tokens,
                 cc.egui_ctx.clone(),
             )))
@@ -72,6 +74,7 @@ pub fn run_gui(
 struct ClusterMeta {
     label: String,
     connected: bool,
+    backend_label: String,
 }
 
 #[derive(Clone)]
@@ -378,6 +381,7 @@ impl GuiApp {
         cluster_state: SharedClusterState,
         token: CancellationToken,
         cluster_label: String,
+        backend_label: String,
         context_window_tokens: Option<usize>,
         egui_ctx: egui::Context,
     ) -> Self {
@@ -392,6 +396,7 @@ impl GuiApp {
             cluster_meta: ClusterMeta {
                 label: cluster_label,
                 connected: true,
+                backend_label,
             },
             token,
             egui_ctx,
@@ -1435,6 +1440,21 @@ fn render_graph_pulse(
                             .color(palette.text_muted)
                             .size(12.0),
                     );
+                    ui.add_space(10.0);
+                    let backend_text =
+                        truncate_text(&format!("Backend: {}", cluster_meta.backend_label), 48);
+                    Frame::new()
+                        .fill(palette.bg_elevated)
+                        .stroke(Stroke::new(1.0, palette.border))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::symmetric(10, 4))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(backend_text)
+                                    .color(palette.text_muted)
+                                    .size(11.0),
+                            );
+                        });
                 });
             });
 

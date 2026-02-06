@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::in_memory::InMemoryBackend;
 use ariadne_core::kube_client::SnapshotKubeClient;
+use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
 
 use crate::error::CliResult;
@@ -32,6 +33,8 @@ struct Cli {
     kube_namespace: Option<String>,
     #[arg(long, env = "KUBE_SNAPSHOT_DIR")]
     snapshot_dir: Option<String>,
+    #[arg(long, env = "MEMGRAPH_URL")]
+    memgraph_url: Option<String>,
     #[arg(long, env = "LLM_BACKEND", default_value = "openai")]
     llm_backend: LLMBackend,
     #[arg(long, env = "LLM_BASE_URL")]
@@ -55,7 +58,24 @@ fn main() -> CliResult<()> {
         .enable_all()
         .build()?;
 
-    let backend: Arc<dyn GraphBackend> = Arc::new(InMemoryBackend::new());
+    let memgraph_url = cli
+        .memgraph_url
+        .clone()
+        .or_else(|| std::env::var("MEMGRAPH_URI").ok());
+    let (backend, backend_label): (Arc<dyn GraphBackend>, String) =
+        if let Some(memgraph_url) = memgraph_url {
+            if !memgraph_url.starts_with("bolt://") {
+                return Err(
+                    format!("memgraph url must use bolt:// scheme (got {memgraph_url})").into(),
+                );
+            }
+            (
+                Arc::new(MemgraphAsync::try_new_from_url(&memgraph_url)?),
+                format!("memgraph ({memgraph_url})"),
+            )
+        } else {
+            (Arc::new(InMemoryBackend::new()), "in-memory".to_string())
+        };
 
     let kube_opts = KubeConfigOptions {
         context: cli.kube_context.clone(),
@@ -115,6 +135,7 @@ fn main() -> CliResult<()> {
         cluster_state.clone(),
         token.clone(),
         cluster_label,
+        backend_label,
         context_window_tokens,
     );
 
