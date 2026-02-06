@@ -2497,8 +2497,8 @@ fn format_array_item(value: &Value) -> String {
 fn inspector_value(value: &Value) -> InspectorValue {
     match value {
         Value::Array(_) | Value::Object(_) => {
-            let pretty = serde_json::to_string_pretty(value)
-                .unwrap_or_else(|_| format_value(value));
+            let pretty =
+                serde_json::to_string_pretty(value).unwrap_or_else(|_| format_value(value));
             InspectorValue::Json(pretty)
         }
         _ => InspectorValue::Text(format_value(value)),
