@@ -3,6 +3,7 @@ pub struct Query {
     pub clauses: Vec<Clause>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Clause {
     Match(MatchClause),
@@ -152,6 +153,7 @@ pub enum RelationshipDirection {
     Undirected,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Literal),

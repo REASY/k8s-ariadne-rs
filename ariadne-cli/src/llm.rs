@@ -84,7 +84,7 @@ pub fn context_window_tokens_for_model(model: &str) -> Option<usize> {
 
 fn context_window_config() -> Option<&'static ContextWindowConfig> {
     static CONFIG: OnceLock<Option<ContextWindowConfig>> = OnceLock::new();
-    CONFIG.get_or_init(|| read_context_window_config()).as_ref()
+    CONFIG.get_or_init(read_context_window_config).as_ref()
 }
 
 fn read_context_window_config() -> Option<ContextWindowConfig> {
@@ -128,12 +128,7 @@ fn locate_context_window_config_path() -> Option<PathBuf> {
         cwd.join("config/model_context_windows.toml"),
         cwd.join("ariadne-cli/config/model_context_windows.toml"),
     ];
-    for path in candidates {
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    None
+    candidates.into_iter().find(|path| path.exists())
 }
 
 fn resolve_context_window_tokens(model: &str, config: &ContextWindowConfig) -> Option<usize> {

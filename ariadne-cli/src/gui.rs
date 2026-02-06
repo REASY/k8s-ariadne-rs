@@ -1321,6 +1321,7 @@ impl eframe::App for GuiApp {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_graph_pulse(
     ui: &mut egui::Ui,
     palette: &Palette,
