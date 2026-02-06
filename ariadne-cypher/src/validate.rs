@@ -178,11 +178,11 @@ fn validate_engine_pattern(pattern: &Pattern) -> Result<(), CypherError> {
 fn validate_projection_items(items: &[ProjectionItem]) -> Result<(), CypherError> {
     let mut has_agg = false;
     for item in items {
-        if is_aggregate_expr(&item.expr) {
+        if contains_aggregate(&item.expr) {
             has_agg = true;
-            if !is_top_level_aggregate(&item.expr) {
+            if !is_aggregate_projection(&item.expr) {
                 return Err(CypherError::semantic(
-                    "aggregate functions must be top-level expressions",
+                    "aggregate functions must appear in projection",
                     dummy_span(),
                 ));
             }
@@ -214,6 +214,16 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
         Expr::IndexAccess { expr, index } => {
             validate_engine_expr(expr)?;
             validate_engine_expr(index)
+        }
+        Expr::ListSlice { expr, start, end } => {
+            validate_engine_expr(expr)?;
+            if let Some(start) = start {
+                validate_engine_expr(start)?;
+            }
+            if let Some(end) = end {
+                validate_engine_expr(end)?;
+            }
+            Ok(())
         }
         Expr::FunctionCall { name, args } => {
             if is_aggregate_name(name) {
@@ -273,9 +283,7 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
             validate_engine_expr(map)
         }
         Expr::Quantifier {
-            list,
-            where_clause,
-            ..
+            list, where_clause, ..
         } => {
             validate_engine_expr(list)?;
             if let Some(where_clause) = where_clause {
@@ -295,14 +303,67 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
     }
 }
 
-fn is_aggregate_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::CountStar)
-        || matches!(expr, Expr::FunctionCall { name, .. } if is_aggregate_name(name))
+fn contains_aggregate(expr: &Expr) -> bool {
+    match expr {
+        Expr::CountStar => true,
+        Expr::FunctionCall { name, .. } if is_aggregate_name(name) => true,
+        Expr::UnaryOp { expr, .. } => contains_aggregate(expr),
+        Expr::BinaryOp { left, right, .. } => contains_aggregate(left) || contains_aggregate(right),
+        Expr::IsNull { expr, .. } => contains_aggregate(expr),
+        Expr::In { expr, list } => contains_aggregate(expr) || contains_aggregate(list),
+        Expr::HasLabel { expr, .. } => contains_aggregate(expr),
+        Expr::PropertyAccess { expr, .. } => contains_aggregate(expr),
+        Expr::IndexAccess { expr, index } => contains_aggregate(expr) || contains_aggregate(index),
+        Expr::ListSlice { expr, start, end } => {
+            contains_aggregate(expr)
+                || start.as_deref().is_some_and(contains_aggregate)
+                || end.as_deref().is_some_and(contains_aggregate)
+        }
+        Expr::Case {
+            base,
+            alternatives,
+            else_expr,
+        } => {
+            base.as_deref().is_some_and(contains_aggregate)
+                || alternatives
+                    .iter()
+                    .any(|(a, b)| contains_aggregate(a) || contains_aggregate(b))
+                || else_expr.as_deref().is_some_and(contains_aggregate)
+        }
+        Expr::Exists { where_clause, .. } => {
+            where_clause.as_deref().is_some_and(contains_aggregate)
+        }
+        Expr::ListComprehension {
+            list,
+            where_clause,
+            map,
+            ..
+        } => {
+            contains_aggregate(list)
+                || where_clause.as_deref().is_some_and(contains_aggregate)
+                || contains_aggregate(map)
+        }
+        Expr::Quantifier {
+            list, where_clause, ..
+        } => contains_aggregate(list) || where_clause.as_deref().is_some_and(contains_aggregate),
+        _ => false,
+    }
 }
 
-fn is_top_level_aggregate(expr: &Expr) -> bool {
-    matches!(expr, Expr::CountStar)
-        || matches!(expr, Expr::FunctionCall { name, .. } if is_aggregate_name(name))
+fn is_aggregate_projection(expr: &Expr) -> bool {
+    match expr {
+        Expr::CountStar => true,
+        Expr::FunctionCall { name, .. } if is_aggregate_name(name) => true,
+        Expr::IndexAccess { expr, index } => {
+            is_aggregate_projection(expr) && !contains_aggregate(index)
+        }
+        Expr::ListSlice { expr, start, end } => {
+            is_aggregate_projection(expr)
+                && !start.as_deref().is_some_and(contains_aggregate)
+                && !end.as_deref().is_some_and(contains_aggregate)
+        }
+        _ => false,
+    }
 }
 
 fn is_aggregate_name(name: &str) -> bool {

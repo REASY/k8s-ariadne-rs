@@ -900,9 +900,7 @@ fn parse_quantifier(node: Node, input: &str) -> Result<Expr, CypherError> {
         .find(|child| child.kind() == "filter_expression")
         .ok_or_else(|| CypherError::missing("quantifier filter", Span::from_node(node)))?;
     let (variable, list, where_clause) = parse_filter_expression(filter_node, input)?;
-    let keyword = node_text(node, input)?
-        .trim_start()
-        .to_ascii_lowercase();
+    let keyword = node_text(node, input)?.trim_start().to_ascii_lowercase();
     let kind = if keyword.starts_with("any") {
         QuantifierKind::Any
     } else if keyword.starts_with("all") {
@@ -952,16 +950,47 @@ fn parse_filter_expression(
 }
 
 fn parse_index_access(node: Node, input: &str) -> Result<Expr, CypherError> {
-    let mut named = named_children(node).into_iter();
+    let named = named_children(node);
     let base = named
-        .next()
+        .first()
         .ok_or_else(|| CypherError::missing("index base", Span::from_node(node)))?;
+    let base_expr = parse_expression(*base, input)?;
+    let text = node_text(node, input)?;
+    let has_slice = text.contains("..");
+    if has_slice {
+        let mut start: Option<Expr> = None;
+        let mut end: Option<Expr> = None;
+        if named.len() >= 2 {
+            let first = named[1];
+            let first_expr = parse_expression(first, input)?;
+            if named.len() >= 3 {
+                start = Some(first_expr);
+                end = Some(parse_expression(named[2], input)?);
+            } else {
+                let slice_pos = text
+                    .find("..")
+                    .ok_or_else(|| CypherError::unsupported("list slice", Span::from_node(node)))?;
+                let bound_start = first.start_byte().saturating_sub(node.start_byte());
+                if bound_start < slice_pos {
+                    start = Some(first_expr);
+                } else {
+                    end = Some(first_expr);
+                }
+            }
+        }
+        return Ok(Expr::ListSlice {
+            expr: Box::new(base_expr),
+            start: start.map(Box::new),
+            end: end.map(Box::new),
+        });
+    }
+
     let index = named
-        .next()
+        .get(1)
         .ok_or_else(|| CypherError::missing("index expression", Span::from_node(node)))?;
     Ok(Expr::IndexAccess {
-        expr: Box::new(parse_expression(base, input)?),
-        index: Box::new(parse_expression(index, input)?),
+        expr: Box::new(base_expr),
+        index: Box::new(parse_expression(*index, input)?),
     })
 }
 

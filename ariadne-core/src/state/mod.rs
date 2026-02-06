@@ -8,6 +8,7 @@ use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use tracing::log::trace;
 use tracing::warn;
 
 pub type NodeId = u32;
@@ -180,7 +181,7 @@ impl ClusterState {
                 }
             }
             (from_id, to_id) => {
-                warn!("Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}")
+                trace!("Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}")
             }
         }
     }

@@ -165,6 +165,11 @@ pub enum Expr {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
+    ListSlice {
+        expr: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    },
     FunctionCall {
         name: String,
         args: Vec<Expr>,

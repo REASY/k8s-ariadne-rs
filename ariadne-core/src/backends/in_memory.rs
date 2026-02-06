@@ -1041,6 +1041,34 @@ fn eval_aggregate(
             }
             _ => Err(std::io::Error::other("unsupported aggregate function").into()),
         },
+        Expr::IndexAccess { expr, index } => {
+            let base = eval_aggregate(expr, rows, state, stats)?;
+            let sample = rows.first().cloned().unwrap_or_default();
+            let idx = eval_expr(index, &sample, state, stats)?;
+            match (base, idx) {
+                (Value::Array(items), Value::Number(n)) => {
+                    let i = n.as_i64().unwrap_or(-1);
+                    if i < 0 {
+                        Ok(Value::Null)
+                    } else {
+                        Ok(items.get(i as usize).cloned().unwrap_or(Value::Null))
+                    }
+                }
+                _ => Ok(Value::Null),
+            }
+        }
+        Expr::ListSlice { expr, start, end } => {
+            let base = eval_aggregate(expr, rows, state, stats)?;
+            let sample = rows.first().cloned().unwrap_or_default();
+            eval_list_slice(
+                base,
+                start.as_deref(),
+                end.as_deref(),
+                &sample,
+                state,
+                stats,
+            )
+        }
         _ => Err(std::io::Error::other("unsupported aggregate expression").into()),
     }
 }
@@ -1060,9 +1088,74 @@ fn projection_label(item: &ProjectionItem, idx: usize) -> String {
 }
 
 fn is_aggregate_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::CountStar)
-        || matches!(expr, Expr::FunctionCall { name, .. }
-            if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max" | "collect"))
+    match expr {
+        Expr::CountStar => true,
+        Expr::FunctionCall { name, .. } => matches!(
+            name.to_ascii_lowercase().as_str(),
+            "count" | "sum" | "avg" | "min" | "max" | "collect"
+        ),
+        Expr::IndexAccess { expr, .. } => is_aggregate_expr(expr),
+        Expr::ListSlice { expr, .. } => is_aggregate_expr(expr),
+        _ => false,
+    }
+}
+
+fn eval_list_slice(
+    base: Value,
+    start: Option<&Expr>,
+    end: Option<&Expr>,
+    row: &Row,
+    state: &ClusterState,
+    stats: &mut QueryStats,
+) -> Result<Value> {
+    let items = match base {
+        Value::Array(items) => items,
+        _ => return Ok(Value::Null),
+    };
+    let len = items.len() as i64;
+    let mut start_idx = 0i64;
+    let mut end_idx = len;
+
+    if let Some(start_expr) = start {
+        let value = eval_expr(start_expr, row, state, stats)?;
+        if value.is_null() {
+            start_idx = 0;
+        } else if let Some(v) = value.as_i64() {
+            start_idx = v;
+        } else {
+            return Ok(Value::Null);
+        }
+    }
+    if let Some(end_expr) = end {
+        let value = eval_expr(end_expr, row, state, stats)?;
+        if value.is_null() {
+            end_idx = len;
+        } else if let Some(v) = value.as_i64() {
+            end_idx = v;
+        } else {
+            return Ok(Value::Null);
+        }
+    }
+
+    if start_idx < 0 {
+        start_idx = 0;
+    }
+    if end_idx < 0 {
+        end_idx = 0;
+    }
+    if start_idx > len {
+        start_idx = len;
+    }
+    if end_idx > len {
+        end_idx = len;
+    }
+    if end_idx < start_idx {
+        end_idx = start_idx;
+    }
+
+    let start_usize = start_idx as usize;
+    let end_usize = end_idx as usize;
+    Ok(Value::Array(items[start_usize..end_usize].to_vec()))
 }
 
 fn group_key(values: &[Value]) -> String {
@@ -1425,6 +1518,10 @@ fn eval_expr(
                 _ => Ok(Value::Null),
             }
         }
+        Expr::ListSlice { expr, start, end } => {
+            let base = eval_expr(expr, row, state, stats)?;
+            eval_list_slice(base, start.as_deref(), end.as_deref(), row, state, stats)
+        }
         Expr::UnaryOp { op, expr } => {
             let value = eval_expr(expr, row, state, stats)?;
             match op {
@@ -1477,13 +1574,29 @@ fn eval_expr(
             list,
             where_clause,
             map,
-        } => eval_list_comprehension(variable, list, where_clause.as_deref(), map, row, state, stats),
+        } => eval_list_comprehension(
+            variable,
+            list,
+            where_clause.as_deref(),
+            map,
+            row,
+            state,
+            stats,
+        ),
         Expr::Quantifier {
             kind,
             variable,
             list,
             where_clause,
-        } => eval_quantifier(kind, variable, list, where_clause.as_deref(), row, state, stats),
+        } => eval_quantifier(
+            kind,
+            variable,
+            list,
+            where_clause.as_deref(),
+            row,
+            state,
+            stats,
+        ),
         Expr::Case {
             base,
             alternatives,
@@ -2580,10 +2693,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("any").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(results[0].get("all").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(
-            results[0].get("none").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(results[0].get("none").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(
             results[0].get("single").and_then(|v| v.as_bool()),
             Some(true)
@@ -2637,14 +2747,48 @@ mod tests {
         assert_eq!(containers.len(), 1);
         let container = containers[0].as_object().cloned().unwrap_or_default();
         assert_eq!(
-            container
-                .get("container")
-                .and_then(|v| v.as_str()),
+            container.get("container").and_then(|v| v.as_str()),
             Some("main")
         );
         assert_eq!(
             container.get("exitCode").and_then(|v| v.as_i64()),
             Some(137)
+        );
+    }
+
+    #[test]
+    fn executes_collect_slice_and_index() {
+        let mut state = ClusterState::new(dummy_cluster());
+        state.add_node(pod("p1", "alpha", "ns1"));
+        state.add_node(pod("p2", "beta", "ns1"));
+        state.add_node(pod("p3", "gamma", "ns1"));
+
+        let query = parse_query(
+            "MATCH (p:Pod)\n\
+             WITH p ORDER BY p.metadata.name\n\
+             RETURN collect(p.metadata.name)[0..2] AS names, collect(p.metadata.name)[1] AS second",
+        )
+        .unwrap();
+        validate_query(&query, ValidationMode::Engine).unwrap();
+
+        let mut stats = QueryStats::default();
+        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        assert_eq!(results.len(), 1);
+        let names = results[0]
+            .get("names")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            names,
+            vec![
+                Value::String("alpha".to_string()),
+                Value::String("beta".to_string())
+            ]
+        );
+        assert_eq!(
+            results[0].get("second").and_then(|v| v.as_str()),
+            Some("beta")
         );
     }
 }
