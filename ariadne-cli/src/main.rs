@@ -160,6 +160,8 @@ fn init_logging() -> CliResult<()> {
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")
                 .with_writer(std::io::stderr)
+                .with_file(true)
+                .with_line_number(true)
                 .with_thread_ids(true)
                 .with_thread_names(true)
                 .init();
@@ -168,6 +170,8 @@ fn init_logging() -> CliResult<()> {
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")
                 .with_writer(std::io::stdout)
+                .with_file(true)
+                .with_line_number(true)
                 .with_thread_ids(true)
                 .with_thread_names(true)
                 .init();
@@ -178,6 +182,8 @@ fn init_logging() -> CliResult<()> {
                 .with_env_filter("INFO")
                 .with_writer(file)
                 .with_ansi(false)
+                .with_file(true)
+                .with_line_number(true)
                 .with_thread_ids(true)
                 .with_thread_names(true)
                 .init();
@@ -189,6 +195,8 @@ fn init_logging() -> CliResult<()> {
                         .with_env_filter("INFO")
                         .with_writer(file)
                         .with_ansi(false)
+                        .with_file(true)
+                        .with_line_number(true)
                         .with_thread_ids(true)
                         .with_thread_names(true)
                         .init();
