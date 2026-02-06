@@ -18,7 +18,7 @@ use ariadne_core::state_resolver::ClusterStateResolver;
 
 use crate::error::CliResult;
 use crate::gui::run_gui;
-use crate::llm::{LlmConfig, LlmTranslator, Translator};
+use crate::llm::{context_window_tokens_for_model, LlmConfig, LlmTranslator, Translator};
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
@@ -92,6 +92,7 @@ fn main() -> CliResult<()> {
         resolver.start_diff_loop(backend.clone(), token.clone());
     });
 
+    let context_window_tokens = context_window_tokens_for_model(&cli.llm_model);
     let translator: Arc<dyn Translator> = Arc::new(LlmTranslator::try_new(LlmConfig {
         backend: cli.llm_backend,
         base_url: cli.llm_base_url,
@@ -114,6 +115,7 @@ fn main() -> CliResult<()> {
         cluster_state.clone(),
         token.clone(),
         cluster_label,
+        context_window_tokens,
     );
 
     token.cancel();
@@ -137,12 +139,16 @@ fn init_logging() -> CliResult<()> {
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")
                 .with_writer(std::io::stderr)
+                .with_thread_ids(true)
+                .with_thread_names(true)
                 .init();
         }
         Some("stdout") => {
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")
                 .with_writer(std::io::stdout)
+                .with_thread_ids(true)
+                .with_thread_names(true)
                 .init();
         }
         Some(path) => {
@@ -151,6 +157,8 @@ fn init_logging() -> CliResult<()> {
                 .with_env_filter("INFO")
                 .with_writer(file)
                 .with_ansi(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
                 .init();
         }
         None => {
@@ -160,6 +168,8 @@ fn init_logging() -> CliResult<()> {
                         .with_env_filter("INFO")
                         .with_writer(file)
                         .with_ansi(false)
+                        .with_thread_ids(true)
+                        .with_thread_names(true)
                         .init();
                     return Ok(());
                 }
@@ -167,6 +177,8 @@ fn init_logging() -> CliResult<()> {
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")
                 .with_writer(std::io::sink)
+                .with_thread_ids(true)
+                .with_thread_names(true)
                 .init();
         }
     }

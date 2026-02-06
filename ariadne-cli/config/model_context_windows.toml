@@ -1,0 +1,20 @@
+# Context windows in tokens for supported LLM models.
+[providers.anthropic]
+"claude-sonnet-4.5" = 200000
+"claude-haiku-4.5" = 200000
+"claude-opus-4.5" = 200000
+
+[providers.deepseek]
+"deepseek-r1" = 128000
+
+[providers.openai]
+"gpt-5-mini" = 400000
+"gpt-5-nano" = 400000
+"gpt-5.2" = 400000
+
+[providers.gemini]
+"gemini-2.5-flash-lite" = 1048576
+"gemini-2.5-flash" = 1048576
+"gemini-2.5-pro" = 1048576
+"gemini-3-pro-preview" = 1048576
+"gemini-3-flash-preview" = 1048576

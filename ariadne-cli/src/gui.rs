@@ -6,7 +6,7 @@ use eframe::egui::{
     text::LayoutJob, Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Layout,
     Margin, RichText, ScrollArea, Stroke, TextEdit, TextFormat, TextStyle, Vec2,
 };
-use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use egui_extras::{Column, TableBuilder};
 use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
@@ -17,8 +17,14 @@ use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
 
 use crate::error::CliResult;
-use crate::llm::{LlmUsage, Translator};
+use crate::llm::{ConversationTurn, LlmUsage, Translator};
 use crate::validation::validate_cypher;
+
+const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
+const COMPACT_CONTEXT_LIMIT: usize = 12;
+const CONTEXT_RESERVED_TOKENS: usize = 2048;
+const CONTEXT_MIN_TOKENS: usize = 512;
+const GRAPH_PULSE_HEIGHT: f32 = 40.0;
 
 pub fn run_gui(
     runtime: &tokio::runtime::Runtime,
@@ -27,6 +33,7 @@ pub fn run_gui(
     cluster_state: SharedClusterState,
     token: CancellationToken,
     cluster_label: String,
+    context_window_tokens: Option<usize>,
 ) -> CliResult<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]),
@@ -39,6 +46,7 @@ pub fn run_gui(
         cluster_state,
         token,
         cluster_label,
+        context_window_tokens,
     );
     eframe::run_native(
         "KubeGraph Ops",
@@ -66,28 +74,40 @@ struct Palette {
     bg_elevated: Color32,
     accent: Color32,
     accent_warm: Color32,
+    success: Color32,
     danger: Color32,
     text_primary: Color32,
     text_muted: Color32,
     border: Color32,
     keyword: Color32,
     string: Color32,
+    spark_nodes: Color32,
+    spark_props: Color32,
+    spark_pods: Color32,
+    spark_services: Color32,
+    spark_namespaces: Color32,
 }
 
 impl Default for Palette {
     fn default() -> Self {
         Self {
-            bg_primary: Color32::from_rgb(0x0B, 0x11, 0x17),
-            bg_panel: Color32::from_rgb(0x12, 0x1A, 0x23),
-            bg_elevated: Color32::from_rgb(0x1B, 0x24, 0x30),
-            accent: Color32::from_rgb(0x4C, 0xC9, 0xF0),
-            accent_warm: Color32::from_rgb(0xF4, 0xA2, 0x61),
+            bg_primary: Color32::from_rgb(0x0F, 0x14, 0x1B),
+            bg_panel: Color32::from_rgb(0x14, 0x1C, 0x24),
+            bg_elevated: Color32::from_rgb(0x1B, 0x25, 0x30),
+            accent: Color32::from_rgb(0x4F, 0x9B, 0xD9),
+            accent_warm: Color32::from_rgb(0xE6, 0xA3, 0x6C),
+            success: Color32::from_rgb(0x6A, 0xD3, 0x9F),
             danger: Color32::from_rgb(0xE7, 0x6F, 0x51),
-            text_primary: Color32::from_rgb(0xE6, 0xED, 0xF3),
-            text_muted: Color32::from_rgb(0x8A, 0xA0, 0xB2),
-            border: Color32::from_rgb(0x26, 0x32, 0x41),
-            keyword: Color32::from_rgb(0xF4, 0xA2, 0x61),
-            string: Color32::from_rgb(0xA6, 0xE3, 0xFF),
+            text_primary: Color32::from_rgb(0xE5, 0xEC, 0xF2),
+            text_muted: Color32::from_rgb(0x9A, 0xA8, 0xB7),
+            border: Color32::from_rgb(0x2C, 0x38, 0x46),
+            keyword: Color32::from_rgb(0xE6, 0xA3, 0x6C),
+            string: Color32::from_rgb(0x8B, 0xD3, 0xFF),
+            spark_nodes: Color32::from_rgb(0xE2, 0x8B, 0x8B),
+            spark_props: Color32::from_rgb(0xB8, 0x8B, 0xF5),
+            spark_pods: Color32::from_rgb(0x6B, 0xB5, 0xF5),
+            spark_services: Color32::from_rgb(0x7A, 0xD9, 0xA5),
+            spark_namespaces: Color32::from_rgb(0x7D, 0xC4, 0xFF),
         }
     }
 }
@@ -102,7 +122,7 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = palette.bg_panel;
     visuals.window_fill = palette.bg_primary;
-    visuals.faint_bg_color = lighten_color(palette.bg_panel, 1.05);
+    visuals.faint_bg_color = lighten_color(palette.bg_panel, 1.04);
     visuals.extreme_bg_color = palette.bg_elevated; // Inputs background
     visuals.text_edit_bg_color = Some(palette.bg_elevated);
     visuals.code_bg_color = lighten_color(palette.bg_primary, 1.08);
@@ -110,7 +130,7 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette.border);
     visuals.widgets.inactive.bg_fill = palette.bg_elevated; // Buttons/Cards default
     visuals.widgets.active.bg_fill = lighten_color(palette.bg_elevated, 1.08);
-    visuals.widgets.hovered.bg_fill = lighten_color(palette.bg_elevated, 1.08);
+    visuals.widgets.hovered.bg_fill = lighten_color(palette.bg_elevated, 1.06);
     visuals.selection.bg_fill = palette.accent.gamma_multiply(0.3);
     visuals.selection.stroke = Stroke::new(1.0, palette.accent);
     visuals.override_text_color = Some(palette.text_primary);
@@ -128,7 +148,7 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
     visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
     visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
     visuals.widgets.active.corner_radius = CornerRadius::same(6);
-    visuals.window_corner_radius = CornerRadius::same(12);
+    visuals.window_corner_radius = CornerRadius::same(10);
     visuals.window_stroke = Stroke::new(1.0, palette.border);
     visuals.window_shadow = egui::Shadow {
         offset: [10, 18],
@@ -152,25 +172,25 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
     let mut style = (*ctx.style()).clone();
     style.text_styles.insert(
         TextStyle::Heading,
-        FontId::new(20.0, FontFamily::Proportional),
+        FontId::new(18.0, FontFamily::Proportional),
     );
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+        .insert(TextStyle::Body, FontId::new(13.0, FontFamily::Proportional));
     style.text_styles.insert(
         TextStyle::Small,
-        FontId::new(12.0, FontFamily::Proportional),
+        FontId::new(11.0, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Monospace,
-        FontId::new(13.0, FontFamily::Monospace),
+        FontId::new(12.0, FontFamily::Monospace),
     );
     style.text_styles.insert(
         TextStyle::Button,
-        FontId::new(14.0, FontFamily::Proportional),
+        FontId::new(13.0, FontFamily::Proportional),
     );
     style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-    style.spacing.window_margin = Margin::same(14);
+    style.spacing.window_margin = Margin::same(12);
     style.spacing.button_padding = Vec2::new(8.0, 5.0);
     ctx.set_style(style);
 }
@@ -234,6 +254,7 @@ struct FeedItem {
     llm_usage: Option<LlmUsage>,
     llm_duration_ms: Option<u128>,
     exec_duration_ms: Option<u128>,
+    context_summary: Option<String>,
 }
 
 impl FeedItem {
@@ -247,6 +268,7 @@ impl FeedItem {
             llm_usage: None,
             llm_duration_ms: None,
             exec_duration_ms: None,
+            context_summary: None,
         }
     }
 }
@@ -286,6 +308,15 @@ enum AppEvent {
         cypher: String,
         duration_ms: u128,
     },
+    ContextCompactionStarted,
+    ContextCompactionCompleted {
+        summary: String,
+        usage: Option<LlmUsage>,
+        duration_ms: u128,
+    },
+    ContextCompactionFailed {
+        error: String,
+    },
 }
 
 pub struct GuiApp {
@@ -299,6 +330,7 @@ pub struct GuiApp {
     feed: Vec<FeedItem>,
     next_id: u64,
     input: String,
+    search: String,
     input_rect: Option<egui::Rect>,
     suggestions: Vec<String>,
     filtered_suggestions: Vec<String>,
@@ -307,7 +339,17 @@ pub struct GuiApp {
     inspector: InspectorState,
     pulse_nodes: Vec<f64>,
     pulse_props: Vec<f64>,
+    pulse_pods: Vec<f64>,
+    pulse_services: Vec<f64>,
+    pulse_namespaces: Vec<f64>,
     last_pulse_update: Instant,
+    context_cutoff_id: u64,
+    context_compact_summary: Option<String>,
+    context_compact_usage: Option<LlmUsage>,
+    context_compact_duration_ms: Option<u128>,
+    context_compact_error: Option<String>,
+    context_compacting: bool,
+    context_window_tokens: Option<usize>,
 }
 
 #[derive(Default, Clone)]
@@ -327,6 +369,7 @@ impl GuiApp {
         cluster_state: SharedClusterState,
         token: CancellationToken,
         cluster_label: String,
+        context_window_tokens: Option<usize>,
     ) -> Self {
         let (events_tx, events_rx) = mpsc::channel();
         let suggestions = build_suggestions();
@@ -345,6 +388,7 @@ impl GuiApp {
             feed: Vec::new(),
             next_id: 1,
             input: String::new(),
+            search: String::new(),
             input_rect: None,
             suggestions,
             filtered_suggestions: Vec::new(),
@@ -353,7 +397,17 @@ impl GuiApp {
             inspector: InspectorState::default(),
             pulse_nodes: vec![],
             pulse_props: vec![],
+            pulse_pods: vec![],
+            pulse_services: vec![],
+            pulse_namespaces: vec![],
             last_pulse_update: Instant::now() - Duration::from_secs(10),
+            context_cutoff_id: 0,
+            context_compact_summary: None,
+            context_compact_usage: None,
+            context_compact_duration_ms: None,
+            context_compact_error: None,
+            context_compacting: false,
+            context_window_tokens,
         }
     }
 
@@ -377,11 +431,16 @@ impl GuiApp {
         let translator = self.translator.clone();
         let backend = self.backend.clone();
         let runtime = self.runtime.clone();
+        let context = self.build_context_with_budget();
+        let context_summary = self.context_compact_summary.clone();
 
         runtime.spawn(async move {
             let _ = tx.send(AppEvent::TranslationStarted { id });
             let llm_start = Instant::now();
-            match translator.translate(&question).await {
+            match translator
+                .translate(&question, &context, context_summary.as_deref())
+                .await
+            {
                 Ok(result) => {
                     let llm_ms = llm_start.elapsed().as_millis();
                     let _ = tx.send(AppEvent::TranslationCompleted {
@@ -513,8 +572,10 @@ impl GuiApp {
         false
     }
 
-    fn drain_events(&mut self) {
+    fn drain_events(&mut self) -> bool {
+        let mut handled = false;
         while let Ok(event) = self.events_rx.try_recv() {
+            handled = true;
             match event {
                 AppEvent::TranslationStarted { id } => {
                     if let Some(item) = self.feed_item_mut(id) {
@@ -562,6 +623,7 @@ impl GuiApp {
                         item.result = classify_result(&records);
                         item.state = FeedState::Ready;
                         item.exec_duration_ms = Some(duration_ms);
+                        item.context_summary = Some(summarize_records(&records));
                     }
                 }
                 AppEvent::QueryFailed {
@@ -576,12 +638,156 @@ impl GuiApp {
                         item.exec_duration_ms = Some(duration_ms);
                     }
                 }
+                AppEvent::ContextCompactionStarted => {
+                    self.context_compacting = true;
+                    self.context_compact_error = None;
+                }
+                AppEvent::ContextCompactionCompleted {
+                    summary,
+                    usage,
+                    duration_ms,
+                } => {
+                    self.context_compacting = false;
+                    self.context_compact_summary = Some(summary);
+                    self.context_compact_usage = usage;
+                    self.context_compact_duration_ms = Some(duration_ms);
+                    self.context_compact_error = None;
+                    self.context_cutoff_id = self.next_id;
+                }
+                AppEvent::ContextCompactionFailed { error } => {
+                    self.context_compacting = false;
+                    self.context_compact_error = Some(error);
+                }
             }
         }
+        handled
     }
 
     fn feed_item_mut(&mut self, id: u64) -> Option<&mut FeedItem> {
         self.feed.iter_mut().find(|item| item.id == id)
+    }
+
+    fn context_budget_tokens(&self) -> Option<usize> {
+        let total = self.context_window_tokens?;
+        let budget = total.saturating_sub(CONTEXT_RESERVED_TOKENS);
+        Some(budget.max(CONTEXT_MIN_TOKENS).min(total))
+    }
+
+    fn build_context_with_budget(&self) -> Vec<ConversationTurn> {
+        let Some(budget) = self.context_budget_tokens() else {
+            return self.build_context(SHORT_TERM_CONTEXT_LIMIT);
+        };
+
+        let summary_tokens = self
+            .context_compact_summary
+            .as_deref()
+            .map(estimate_text_tokens)
+            .unwrap_or(0);
+        let mut remaining = budget.saturating_sub(summary_tokens);
+        let mut turns = Vec::new();
+
+        for item in self.feed.iter().rev() {
+            if item.id < self.context_cutoff_id {
+                continue;
+            }
+            if !matches!(item.state, FeedState::Ready) {
+                continue;
+            }
+            let Some(cypher) = &item.cypher else {
+                continue;
+            };
+            let turn = ConversationTurn {
+                question: item.user_text.clone(),
+                cypher: cypher.clone(),
+                result_summary: item.context_summary.clone(),
+            };
+            let turn_tokens = estimate_turn_tokens(&turn);
+            if turn_tokens > remaining && !turns.is_empty() {
+                break;
+            }
+            if turn_tokens <= remaining || turns.is_empty() {
+                remaining = remaining.saturating_sub(turn_tokens);
+                turns.push(turn);
+            }
+        }
+        turns.reverse();
+        turns
+    }
+
+    fn build_context(&self, limit: usize) -> Vec<ConversationTurn> {
+        let mut turns = Vec::new();
+        for item in self.feed.iter().rev() {
+            if turns.len() >= limit {
+                break;
+            }
+            if item.id < self.context_cutoff_id {
+                continue;
+            }
+            if !matches!(item.state, FeedState::Ready) {
+                continue;
+            }
+            let Some(cypher) = &item.cypher else {
+                continue;
+            };
+            turns.push(ConversationTurn {
+                question: item.user_text.clone(),
+                cypher: cypher.clone(),
+                result_summary: item.context_summary.clone(),
+            });
+        }
+        turns.reverse();
+        turns
+    }
+
+    fn build_context_for_compaction(&self, limit: usize) -> Vec<ConversationTurn> {
+        self.build_context(limit)
+    }
+
+    fn reset_context(&mut self) {
+        self.context_cutoff_id = self.next_id;
+        self.context_compact_summary = None;
+        self.context_compact_usage = None;
+        self.context_compact_duration_ms = None;
+        self.context_compact_error = None;
+        self.context_compacting = false;
+    }
+
+    fn start_context_compaction(&mut self) {
+        if self.context_compacting {
+            return;
+        }
+        let context = self.build_context_for_compaction(COMPACT_CONTEXT_LIMIT);
+        if context.is_empty() {
+            self.context_compact_error = Some("No context to compact.".to_string());
+            return;
+        }
+
+        let tx = self.events_tx.clone();
+        let translator = self.translator.clone();
+        let runtime = self.runtime.clone();
+
+        self.context_compacting = true;
+        self.context_compact_error = None;
+
+        runtime.spawn(async move {
+            let _ = tx.send(AppEvent::ContextCompactionStarted);
+            let start = Instant::now();
+            match translator.compact_context(&context).await {
+                Ok(result) => {
+                    let duration_ms = start.elapsed().as_millis();
+                    let _ = tx.send(AppEvent::ContextCompactionCompleted {
+                        summary: result.summary,
+                        usage: result.usage,
+                        duration_ms,
+                    });
+                }
+                Err(err) => {
+                    let _ = tx.send(AppEvent::ContextCompactionFailed {
+                        error: err.to_string(),
+                    });
+                }
+            }
+        });
     }
 
     fn update_pulse(&mut self) {
@@ -589,17 +795,29 @@ impl GuiApp {
         if self.last_pulse_update.elapsed() < interval {
             return;
         }
-        let (node_count, prop_count) = {
+        let (node_count, prop_count, pod_count, service_count, namespace_count) = {
             let guard = self
                 .cluster_state
                 .lock()
                 .expect("cluster state lock poisoned");
             let node_count = guard.get_node_count();
             let prop_count = estimate_property_count(&guard, node_count);
-            (node_count, prop_count)
+            let pod_count = guard.get_nodes_by_type(&ResourceType::Pod).count();
+            let service_count = guard.get_nodes_by_type(&ResourceType::Service).count();
+            let namespace_count = guard.get_nodes_by_type(&ResourceType::Namespace).count();
+            (
+                node_count,
+                prop_count,
+                pod_count,
+                service_count,
+                namespace_count,
+            )
         };
         push_sparkline(&mut self.pulse_nodes, node_count as f64);
         push_sparkline(&mut self.pulse_props, prop_count as f64);
+        push_sparkline(&mut self.pulse_pods, pod_count as f64);
+        push_sparkline(&mut self.pulse_services, service_count as f64);
+        push_sparkline(&mut self.pulse_namespaces, namespace_count as f64);
         self.last_pulse_update = Instant::now();
     }
 
@@ -640,12 +858,13 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain_events();
+        if self.drain_events() {
+            ctx.request_repaint();
+        }
         self.update_pulse();
 
         let screen_width = ctx.available_rect().width();
-        let nav_width = if screen_width < 1100.0 { 72.0 } else { 96.0 };
-        let inspector_width = if screen_width < 1000.0 { 0.0 } else { 340.0 };
+        let inspector_width = if screen_width < 1100.0 { 0.0 } else { 320.0 };
 
         // HEADER
         egui::TopBottomPanel::top("header")
@@ -663,60 +882,56 @@ impl eframe::App for GuiApp {
             )
             .show(ctx, |ui| {
                 ui.set_height(56.0);
-                let pulse_gap = 12.0;
-                let pulse_width = 2.0 * 176.0 + pulse_gap + 16.0;
-                StripBuilder::new(ui)
-                    .size(Size::remainder())
-                    .size(Size::exact(pulse_width))
-                    .horizontal(|mut strip| {
-                        strip.cell(|ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(16.0);
-                                    ui.label(
-                                        RichText::new("KubeGraph Ops")
-                                            .color(self.palette.text_primary)
-                                            .size(18.0)
-                                            .strong(),
-                                    );
-                                    ui.add_space(16.0);
-                                    let status = if self.cluster_meta.connected {
-                                        format!("Connected to: {}", self.cluster_meta.label)
-                                    } else {
-                                        "DISCONNECTED".to_string()
-                                    };
-                                    ui.label(RichText::new(status).color(self.palette.text_muted));
-                                });
-                            });
-                        });
-                        strip.cell(|ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.add_space(16.0);
-                                    pulse_metric(
-                                        ui,
-                                        "Nodes",
-                                        self.pulse_nodes.last().copied().unwrap_or(0.0) as usize,
-                                        &self.pulse_nodes,
-                                        &self.palette,
-                                    );
-                                    ui.add_space(pulse_gap);
-                                    pulse_metric(
-                                        ui,
-                                        "Properties",
-                                        self.pulse_props.last().copied().unwrap_or(0.0) as usize,
-                                        &self.pulse_props,
-                                        &self.palette,
-                                    );
-                                });
-                            });
-                        });
+                ui.horizontal(|ui| {
+                    ui.add_space(16.0);
+                    ui.label(
+                        RichText::new("KubeGraph Ops")
+                            .color(self.palette.text_primary)
+                            .size(18.0)
+                            .strong(),
+                    );
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add_space(16.0);
+                        ui.add_sized(
+                            [28.0, 28.0],
+                            egui::Button::new(
+                                RichText::new("J")
+                                    .color(self.palette.text_primary)
+                                    .size(12.0)
+                                    .strong(),
+                            )
+                            .fill(self.palette.bg_elevated)
+                            .stroke(Stroke::new(1.0, self.palette.border))
+                            .corner_radius(CornerRadius::same(14)),
+                        );
+                        ui.add_space(6.0);
+                        let _ = ui.add_sized(
+                            [28.0, 28.0],
+                            egui::Button::new(
+                                RichText::new("?").color(self.palette.text_muted).size(12.0),
+                            )
+                            .fill(self.palette.bg_elevated)
+                            .stroke(Stroke::new(1.0, self.palette.border))
+                            .corner_radius(CornerRadius::same(14)),
+                        );
+                        ui.add_space(8.0);
+                        let search_width = ui.available_width().clamp(180.0, 320.0);
+                        ui.add_sized(
+                            [search_width, 30.0],
+                            TextEdit::singleline(&mut self.search)
+                                .hint_text("Search")
+                                .font(TextStyle::Body)
+                                .background_color(self.palette.bg_elevated)
+                                .margin(Margin::symmetric(10, 6)),
+                        );
                     });
+                });
             });
 
         // FOOTER
         egui::TopBottomPanel::bottom("footer")
-            .exact_height(72.0)
+            .exact_height(74.0)
             .frame(
                 Frame::new()
                     .fill(self.palette.bg_panel)
@@ -729,26 +944,26 @@ impl eframe::App for GuiApp {
                     }),
             )
             .show(ctx, |ui| {
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 let mut has_focus = false;
+                let mut input_id: Option<egui::Id> = None;
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
-                    ui.label(RichText::new(">_").color(self.palette.accent).size(18.0));
-                    ui.add_space(8.0);
 
-                    let buttons_width = 240.0;
+                    let buttons_width = 140.0;
                     let available = ui.available_width() - buttons_width;
 
                     let response = ui.add_sized(
-                        [available.max(200.0), 40.0],
+                        [available.max(220.0), 40.0],
                         TextEdit::singleline(&mut self.input)
-                            .hint_text("Ask about your cluster...")
+                            .hint_text("Show me the services connected to these OOMing pods...")
                             .font(TextStyle::Monospace)
                             .background_color(self.palette.bg_elevated)
-                            .margin(Margin::same(10)),
+                            .margin(Margin::symmetric(12, 8)),
                     );
                     self.input_rect = Some(response.rect);
                     has_focus = response.has_focus();
+                    input_id = Some(response.id);
 
                     if response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                         self.submit_question();
@@ -758,10 +973,10 @@ impl eframe::App for GuiApp {
                         ui.add_space(16.0);
                         if ui
                             .add_sized(
-                                [100.0, 36.0],
+                                [120.0, 40.0],
                                 egui::Button::new(
-                                    RichText::new("Run Query")
-                                        .color(self.palette.bg_primary)
+                                    RichText::new("RUN QUERY")
+                                        .color(self.palette.text_primary)
                                         .strong(),
                                 )
                                 .fill(self.palette.accent)
@@ -772,18 +987,42 @@ impl eframe::App for GuiApp {
                         {
                             self.submit_question();
                         }
-                        ui.add_space(8.0);
-                        let _ = ui.add_sized([60.0, 32.0], egui::Button::new("Help"));
-                        ui.add_space(4.0);
-                        let _ = ui.add_sized([72.0, 32.0], egui::Button::new("History"));
                     });
                 });
                 self.update_autocomplete();
-                if has_focus && !self.filtered_suggestions.is_empty() {
+                if has_focus
+                    && !self.filtered_suggestions.is_empty()
+                    && ctx.input(|i| i.key_pressed(egui::Key::Tab))
+                {
+                    if let Some(first) = self.filtered_suggestions.first().cloned() {
+                        self.apply_suggestion(&first);
+                        ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+                        if let Some(id) = input_id {
+                            ctx.memory_mut(|mem| mem.request_focus(id));
+                        }
+                    }
+                }
+                let mut show_autocomplete = has_focus;
+                let mut autocomplete_rect = None;
+                if let Some(rect) = self.input_rect {
+                    let row_height = 24.0;
+                    let height = row_height * self.filtered_suggestions.len() as f32 + 18.0;
+                    let pos = rect.left_top() - Vec2::new(0.0, height + 10.0);
+                    autocomplete_rect = Some(egui::Rect::from_min_size(
+                        pos,
+                        Vec2::new(rect.width(), height),
+                    ));
+                }
+                if let Some(rect) = autocomplete_rect {
+                    if ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))) {
+                        show_autocomplete = true;
+                    }
+                }
+                if show_autocomplete && !self.filtered_suggestions.is_empty() {
                     if let Some(rect) = self.input_rect {
                         let row_height = 24.0;
-                        let height = row_height * self.filtered_suggestions.len() as f32 + 12.0;
-                        let pos = rect.left_top() - Vec2::new(0.0, height + 8.0);
+                        let height = row_height * self.filtered_suggestions.len() as f32 + 18.0;
+                        let pos = rect.left_top() - Vec2::new(0.0, height + 10.0);
                         egui::Area::new(egui::Id::new("autocomplete"))
                             .order(egui::Order::Foreground)
                             .fixed_pos(pos)
@@ -791,42 +1030,34 @@ impl eframe::App for GuiApp {
                                 Frame::new()
                                     .fill(self.palette.bg_elevated)
                                     .stroke(Stroke::new(1.0, self.palette.border))
-                                    .corner_radius(CornerRadius::same(6))
-                                    .inner_margin(Margin::same(6))
+                                    .corner_radius(CornerRadius::same(8))
+                                    .inner_margin(Margin::same(8))
                                     .show(ui, |ui| {
                                         ui.set_width(rect.width());
                                         let suggestions = self.filtered_suggestions.clone();
-                                        for suggestion in suggestions {
+                                        for (idx, suggestion) in suggestions.iter().enumerate() {
+                                            let button = egui::Button::new(
+                                                RichText::new(suggestion)
+                                                    .color(self.palette.text_primary)
+                                                    .size(12.0),
+                                            )
+                                            .fill(self.palette.bg_primary)
+                                            .stroke(Stroke::new(1.0, self.palette.border))
+                                            .corner_radius(CornerRadius::same(6));
                                             if ui
-                                                .button(
-                                                    RichText::new(&suggestion)
-                                                        .color(self.palette.text_primary),
-                                                )
+                                                .add_sized([rect.width() - 4.0, 28.0], button)
                                                 .clicked()
                                             {
-                                                self.apply_suggestion(&suggestion);
+                                                self.apply_suggestion(suggestion);
+                                            }
+                                            if idx + 1 < suggestions.len() {
+                                                ui.add_space(4.0);
                                             }
                                         }
                                     });
                             });
                     }
                 }
-            });
-
-        egui::SidePanel::left("nav")
-            .exact_width(nav_width)
-            .frame(
-                Frame::new()
-                    .fill(self.palette.bg_panel)
-                    .stroke(Stroke::new(1.0, self.palette.border)),
-            )
-            .show(ctx, |ui| {
-                ui.add_space(16.0);
-                ui.vertical_centered(|ui| {
-                    nav_button(ui, "H", "History", &self.palette);
-                    nav_button(ui, "S", "Saved", &self.palette);
-                    nav_button(ui, "!", "Alerts", &self.palette);
-                });
             });
 
         if self.inspector.is_open && inspector_width > 0.0 {
@@ -939,50 +1170,148 @@ impl eframe::App for GuiApp {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(self.palette.bg_primary))
             .show(ctx, |ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
+                let context_turns = self.build_context_with_budget();
+                let context_tokens = estimate_context_tokens(
+                    &context_turns,
+                    self.context_compact_summary.as_deref(),
+                );
+                let context_budget = self.context_budget_tokens();
+                let context_label = if let Some(budget) = context_budget {
+                    format!(
+                        "Context: {} • ~{} / ~{} tok",
+                        context_turns.len(),
+                        context_tokens,
+                        budget
+                    )
+                } else {
+                    format!(
+                        "Context: {}/{} • ~{} tok",
+                        context_turns.len(),
+                        SHORT_TERM_CONTEXT_LIMIT,
+                        context_tokens
+                    )
+                };
+                let context_can_compact = !self.context_compacting && !context_turns.is_empty();
+
+                let mut reset_clicked = false;
+                let mut compact_clicked = false;
+                ui.allocate_ui(Vec2::new(ui.available_width(), GRAPH_PULSE_HEIGHT), |ui| {
+                    let (reset, compact) = render_graph_pulse(
+                        ui,
+                        &self.palette,
+                        &mut self.cluster_meta,
+                        &self.pulse_nodes,
+                        &self.pulse_props,
+                        &self.pulse_pods,
+                        &self.pulse_services,
+                        &self.pulse_namespaces,
+                        &context_label,
+                        self.context_compact_summary.is_some(),
+                        self.context_compacting,
+                        context_can_compact,
+                    );
+                    reset_clicked = reset;
+                    compact_clicked = compact;
+                });
+                if reset_clicked {
+                    self.reset_context();
+                }
+                if compact_clicked {
+                    self.start_context_compaction();
+                }
+
+                ui.add_space(12.0);
+
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
-                    .stick_to_bottom(true)
                     .show(ui, |ui| {
-                        if self.feed.is_empty() {
-                            ui.allocate_ui(
-                                Vec2::new(ui.available_width(), ui.available_height() * 0.8),
-                                |ui| {
-                                    ui.centered_and_justified(|ui| {
-                                        ui.label(
-                                            RichText::new("Ask about your cluster...")
-                                                .color(self.palette.text_muted)
-                                                .size(20.0),
-                                        );
-                                    });
-                                },
-                            );
-                        }
+                        Frame::new()
+                            .fill(self.palette.bg_panel)
+                            .stroke(Stroke::new(1.0, self.palette.border))
+                            .corner_radius(CornerRadius::same(12))
+                            .inner_margin(Margin::same(14))
+                            .shadow(egui::Shadow {
+                                offset: [0, 6],
+                                blur: 12,
+                                spread: 0,
+                                color: Color32::from_black_alpha(80),
+                            })
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Investigation Feed")
+                                            .color(self.palette.text_primary)
+                                            .size(14.0)
+                                            .strong(),
+                                    );
+                                });
 
-                        let mut run_request: Option<(u64, String)> = None;
-                        let mut select_request: Option<RowCard> = None;
-                        for item in &self.feed {
-                            render_feed_item(
-                                ui,
-                                item,
-                                &self.palette,
-                                |id, cypher| {
-                                    run_request = Some((id, cypher));
-                                },
-                                |row| {
-                                    select_request = Some(row.clone());
-                                },
-                            );
-                        }
-                        if let Some((id, cypher)) = run_request {
-                            self.rerun_cypher(id, cypher);
-                        }
-                        if let Some(row) = select_request {
-                            self.open_inspector_from_row(&row);
-                        }
+                                ui.add_space(10.0);
+
+                                if let Some(error) = &self.context_compact_error {
+                                    ui.label(
+                                        RichText::new(error).color(self.palette.danger).size(11.0),
+                                    );
+                                    ui.add_space(6.0);
+                                }
+                                if self.context_compact_summary.is_some() {
+                                    if let Some(ms) = self.context_compact_duration_ms {
+                                        let token_hint = self
+                                            .context_compact_usage
+                                            .as_ref()
+                                            .map(|usage| usage.total_tokens);
+                                        let meta = if let Some(tokens) = token_hint {
+                                            format!(
+                                                "Compacted in {} • {} tokens",
+                                                format_duration(ms),
+                                                tokens
+                                            )
+                                        } else {
+                                            format!("Compacted in {}", format_duration(ms))
+                                        };
+                                        ui.label(
+                                            RichText::new(meta)
+                                                .color(self.palette.text_muted)
+                                                .size(11.0),
+                                        );
+                                        ui.add_space(6.0);
+                                    }
+                                }
+
+                                if self.feed.is_empty() {
+                                    ui.label(
+                                        RichText::new("No investigations yet.")
+                                            .color(self.palette.text_muted)
+                                            .italics(),
+                                    );
+                                }
+
+                                let mut run_request: Option<(u64, String)> = None;
+                                let mut select_request: Option<RowCard> = None;
+                                for item in &self.feed {
+                                    render_feed_item(
+                                        ui,
+                                        item,
+                                        &self.palette,
+                                        |id, cypher| {
+                                            run_request = Some((id, cypher));
+                                        },
+                                        |row| {
+                                            select_request = Some(row.clone());
+                                        },
+                                    );
+                                }
+                                if let Some((id, cypher)) = run_request {
+                                    self.rerun_cypher(id, cypher);
+                                }
+                                if let Some(row) = select_request {
+                                    self.open_inspector_from_row(&row);
+                                }
+                            });
 
                         // Pad bottom to not be hidden behind footer
-                        ui.add_space(20.0);
+                        ui.add_space(24.0);
                     });
             });
     }
@@ -992,59 +1321,190 @@ impl eframe::App for GuiApp {
     }
 }
 
-fn nav_button(ui: &mut egui::Ui, label: &str, tooltip: &str, palette: &Palette) {
-    ui.add_space(8.0);
-    ui.add_sized(
-        [48.0, 48.0],
-        egui::Button::new(RichText::new(label).size(16.0).color(palette.text_primary))
-            .fill(lighten_color(palette.bg_elevated, 1.02))
-            .stroke(Stroke::new(1.0, palette.border))
-            .corner_radius(CornerRadius::same(10)),
-    )
-    .on_hover_text(tooltip);
-}
-
-fn pulse_metric(ui: &mut egui::Ui, label: &str, count: usize, series: &[f64], palette: &Palette) {
-    let desired = Vec2::new(176.0, 44.0);
-    ui.allocate_ui_with_layout(desired, Layout::left_to_right(Align::Center), |ui| {
-        Frame::new()
-            .fill(palette.bg_elevated)
-            .stroke(Stroke::new(1.0, palette.border))
-            .corner_radius(CornerRadius::same(6))
-            .inner_margin(Margin::same(6))
-            .shadow(egui::Shadow {
-                offset: [0, 4],
-                blur: 10,
-                spread: 0,
-                color: Color32::from_black_alpha(80),
-            })
-            .show(ui, |ui| {
-                ui.set_min_size(desired);
-                ui.set_max_size(desired);
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(label).color(palette.text_muted).size(10.0),
-                            )
-                            .truncate(),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(format_count(count))
-                                    .color(palette.text_primary)
-                                    .size(14.0)
-                                    .strong(),
-                            )
-                            .truncate(),
-                        );
-                    });
+fn render_graph_pulse(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    cluster_meta: &mut ClusterMeta,
+    nodes: &[f64],
+    props: &[f64],
+    pods: &[f64],
+    services: &[f64],
+    namespaces: &[f64],
+    context_label: &str,
+    context_has_summary: bool,
+    context_compacting: bool,
+    context_can_compact: bool,
+) -> (bool, bool) {
+    let mut reset_clicked = false;
+    let mut compact_clicked = false;
+    Frame::new()
+        .fill(palette.bg_panel)
+        .stroke(Stroke::new(1.0, palette.border))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::same(14))
+        .shadow(egui::Shadow {
+            offset: [0, 6],
+            blur: 12,
+            spread: 0,
+            color: Color32::from_black_alpha(80),
+        })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Graph Pulse")
+                        .color(palette.text_primary)
+                        .size(14.0)
+                        .strong(),
+                );
+                ui.label(RichText::new("v").color(palette.text_muted).size(12.0));
+                let status = if cluster_meta.connected {
+                    "Connected"
+                } else {
+                    "Disconnected"
+                };
+                let status_color = if cluster_meta.connected {
+                    palette.success
+                } else {
+                    palette.danger
+                };
+                ui.add_space(10.0);
+                ui.label(RichText::new(status).color(status_color).size(11.0));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let mut selected = cluster_meta.label.clone();
+                    egui::ComboBox::from_id_salt("cluster-selector")
+                        .selected_text(selected.clone())
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut selected,
+                                cluster_meta.label.clone(),
+                                cluster_meta.label.clone(),
+                            );
+                        });
+                    cluster_meta.label = selected;
                     ui.add_space(6.0);
-                    let spark_size = Vec2::new(60.0, 24.0);
-                    let (response, painter) = ui.allocate_painter(spark_size, egui::Sense::hover());
-                    draw_sparkline(painter, response.rect, series, palette.accent);
+                    ui.label(
+                        RichText::new("Cluster:")
+                            .color(palette.text_muted)
+                            .size(12.0),
+                    );
                 });
             });
+
+            ui.add_space(6.0);
+
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let reset = ui.add_enabled(
+                    !context_compacting,
+                    egui::Button::new(
+                        RichText::new("Reset Context")
+                            .color(palette.text_primary)
+                            .size(11.0),
+                    )
+                    .fill(palette.bg_panel)
+                    .stroke(Stroke::new(1.0, palette.border))
+                    .corner_radius(CornerRadius::same(6)),
+                );
+                if reset.clicked() {
+                    reset_clicked = true;
+                }
+
+                ui.add_space(6.0);
+
+                let compact_label = if context_compacting {
+                    "Compacting..."
+                } else {
+                    "Compact Context"
+                };
+                let compact = ui.add_enabled(
+                    context_can_compact,
+                    egui::Button::new(
+                        RichText::new(compact_label)
+                            .color(palette.text_primary)
+                            .size(11.0),
+                    )
+                    .fill(palette.accent)
+                    .stroke(Stroke::new(1.0, palette.accent))
+                    .corner_radius(CornerRadius::same(6)),
+                );
+                if compact.clicked() {
+                    compact_clicked = true;
+                }
+
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new(context_label)
+                        .color(palette.text_muted)
+                        .size(11.0),
+                );
+                if context_has_summary {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("summary").color(palette.accent).size(11.0));
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            ui.horizontal(|ui| {
+                pulse_metric_cell(ui, "Nodes", nodes, palette, palette.spark_nodes);
+                ui.add(egui::Separator::default().vertical());
+                ui.add_space(6.0);
+                pulse_metric_cell(ui, "Properties", props, palette, palette.spark_props);
+                ui.add(egui::Separator::default().vertical());
+                ui.add_space(6.0);
+                pulse_metric_cell(ui, "Pods", pods, palette, palette.spark_pods);
+                ui.add(egui::Separator::default().vertical());
+                ui.add_space(6.0);
+                pulse_metric_cell(ui, "Services", services, palette, palette.spark_services);
+                ui.add(egui::Separator::default().vertical());
+                ui.add_space(6.0);
+                pulse_metric_cell(
+                    ui,
+                    "Namespaces",
+                    namespaces,
+                    palette,
+                    palette.spark_namespaces,
+                );
+            });
+        });
+    (reset_clicked, compact_clicked)
+}
+
+fn pulse_metric_cell(
+    ui: &mut egui::Ui,
+    label: &str,
+    series: &[f64],
+    palette: &Palette,
+    spark_color: Color32,
+) {
+    let count = series.last().copied().unwrap_or(0.0) as usize;
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(format!("{label}:"))
+                .color(palette.text_muted)
+                .size(12.0),
+        );
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format_count(count))
+                    .color(palette.text_primary)
+                    .size(18.0)
+                    .strong(),
+            );
+            if series.len() >= 2 {
+                let delta = series[series.len() - 1] - series[series.len() - 2];
+                if delta > 0.0 {
+                    ui.label(RichText::new("^").color(palette.success).size(12.0));
+                } else if delta < 0.0 {
+                    ui.label(RichText::new("v").color(palette.danger).size(12.0));
+                }
+            }
+        });
+        let spark_size = Vec2::new(140.0, 24.0);
+        let (response, painter) = ui.allocate_painter(spark_size, egui::Sense::hover());
+        draw_sparkline(painter, response.rect, series, spark_color);
     });
 }
 
@@ -1076,6 +1536,103 @@ fn draw_sparkline(painter: egui::Painter, rect: egui::Rect, series: &[f64], colo
     }
 }
 
+fn skeleton_line(ui: &mut egui::Ui, width: f32, palette: &Palette) {
+    let height = 8.0;
+    let width = width.max(40.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(4),
+        lighten_color(palette.bg_elevated, 1.08),
+    );
+}
+
+fn render_item_stats(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) {
+    if item.llm_duration_ms.is_none() && item.exec_duration_ms.is_none() && item.llm_usage.is_none()
+    {
+        return;
+    }
+
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        if let Some(ms) = item.llm_duration_ms {
+            ui.label(
+                RichText::new(format!("LLM {}", format_duration(ms)))
+                    .color(palette.text_muted)
+                    .size(11.0),
+            );
+        }
+        if let Some(usage) = &item.llm_usage {
+            ui.label(
+                RichText::new(format!(
+                    "tokens {}/{}/{}",
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                ))
+                .color(palette.text_muted)
+                .size(11.0),
+            );
+            if let Some(cached) = usage.cached_tokens {
+                ui.label(
+                    RichText::new(format!("cached {cached}"))
+                        .color(palette.text_muted)
+                        .size(11.0),
+                );
+            }
+            if let Some(reasoning) = usage.reasoning_tokens {
+                ui.label(
+                    RichText::new(format!("reasoning {reasoning}"))
+                        .color(palette.text_muted)
+                        .size(11.0),
+                );
+            }
+        }
+        if let Some(ms) = item.exec_duration_ms {
+            ui.label(
+                RichText::new(format!("exec {}", format_duration(ms)))
+                    .color(palette.text_muted)
+                    .size(11.0),
+            );
+        }
+    });
+}
+
+fn format_duration(ms: u128) -> String {
+    if ms >= 1000 {
+        format!("{:.2}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms} ms")
+    }
+}
+
+fn estimate_text_tokens(text: &str) -> usize {
+    let chars = text.len();
+    if chars == 0 {
+        0
+    } else {
+        (chars / 4).max(1)
+    }
+}
+
+fn estimate_turn_tokens(turn: &ConversationTurn) -> usize {
+    let mut tokens = estimate_text_tokens(&turn.question);
+    tokens += estimate_text_tokens(&turn.cypher);
+    if let Some(summary) = &turn.result_summary {
+        tokens += estimate_text_tokens(summary);
+    }
+    tokens
+}
+
+fn estimate_context_tokens(turns: &[ConversationTurn], summary: Option<&str>) -> usize {
+    let mut tokens = 0usize;
+    for turn in turns {
+        tokens += estimate_turn_tokens(turn);
+    }
+    if let Some(summary) = summary {
+        tokens += estimate_text_tokens(summary);
+    }
+    tokens
+}
+
 fn render_feed_item(
     ui: &mut egui::Ui,
     item: &FeedItem,
@@ -1083,209 +1640,152 @@ fn render_feed_item(
     mut on_run: impl FnMut(u64, String),
     mut on_select: impl FnMut(&RowCard),
 ) {
-    ui.add_space(16.0);
-
-    // User Question Bubble (Left aligned)
-    ui.horizontal(|ui| {
-        let max_width = ui.available_width() * 0.7;
-        Frame::new()
-            .fill(palette.bg_elevated)
-            .stroke(Stroke::new(1.0, palette.border))
-            .corner_radius(CornerRadius::same(14))
-            .inner_margin(Margin::symmetric(14, 10))
-            .shadow(egui::Shadow {
-                offset: [0, 6],
-                blur: 12,
-                spread: 0,
-                color: Color32::from_black_alpha(80),
-            })
-            .show(ui, |ui| {
-                ui.set_max_width(max_width);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&item.user_text)
-                            .color(palette.text_primary)
-                            .size(15.0),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("👤").size(14.0));
+    ui.add_space(10.0);
+    Frame::new()
+        .fill(palette.bg_elevated)
+        .stroke(Stroke::new(1.0, palette.border))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("User").color(palette.accent).size(12.0));
+                ui.label(RichText::new("> ").color(palette.text_muted).size(12.0));
+                ui.label(
+                    RichText::new(&item.user_text)
+                        .color(palette.text_primary)
+                        .size(14.0),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new("...").color(palette.text_muted));
                 });
             });
-    });
 
-    ui.add_space(8.0);
+            if let Some(cypher) = &item.cypher {
+                ui.add_space(8.0);
+                let id = ui.make_persistent_id(format!("cypher-header-{}", item.id));
+                egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    id,
+                    true,
+                )
+                .show_header(ui, |ui| {
+                    ui.label(
+                        RichText::new("Planned Query")
+                            .size(12.0)
+                            .color(palette.text_muted)
+                            .strong(),
+                    );
+                })
+                .body(|ui| {
+                    Frame::new()
+                        .fill(palette.bg_panel)
+                        .stroke(Stroke::new(1.0, palette.border))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let mut job = highlight_cypher(cypher, palette);
+                                job.wrap.max_width = ui.available_width() - 84.0;
+                                job.wrap.break_anywhere = true;
+                                ui.add(egui::Label::new(job).wrap());
 
-    // System Response Block
-    ui.vertical(|ui| {
-        let max_width = ui.available_width();
-        Frame::new()
-            .fill(palette.bg_panel)
-            .stroke(Stroke::new(1.0, palette.border))
-            .corner_radius(CornerRadius::same(12))
-            .inner_margin(Margin::same(14))
-            .shadow(egui::Shadow {
-                offset: [0, 8],
-                blur: 14,
-                spread: 0,
-                color: Color32::from_black_alpha(90),
-            })
-            .show(ui, |ui| {
-                ui.set_max_width(max_width);
-                // 1. Cypher Layer (if present)
-                if let Some(cypher) = &item.cypher {
-                    let id = ui.make_persistent_id(format!("cypher-header-{}", item.id));
-                    egui::collapsing_header::CollapsingState::load_with_default_open(
-                        ui.ctx(),
-                        id,
-                        true,
-                    )
-                    .show_header(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("GENERATED CYPHER")
-                                    .size(12.0)
-                                    .color(palette.text_muted)
-                                    .strong(),
-                            );
-                            ui.add_space(6.0);
-                            ui.label(RichText::new("•").color(palette.accent));
-                        });
-                    })
-                    .body(|ui| {
-                        Frame::new()
-                            .fill(palette.bg_primary)
-                            .stroke(Stroke::new(1.0, palette.border))
-                            .corner_radius(CornerRadius::same(8))
-                            .inner_margin(Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    let mut job = highlight_cypher(cypher, palette);
-                                    job.wrap.max_width = ui.available_width() - 96.0;
-                                    job.wrap.break_anywhere = true;
-                                    ui.add(egui::Label::new(job).wrap());
-
-                                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    RichText::new("Run")
-                                                        .color(palette.bg_primary)
-                                                        .strong(),
-                                                )
-                                                .fill(palette.accent)
-                                                .stroke(Stroke::new(1.0, palette.accent))
-                                                .corner_radius(CornerRadius::same(6)),
+                                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Run")
+                                                    .color(palette.text_primary)
+                                                    .strong(),
                                             )
-                                            .clicked()
-                                        {
-                                            on_run(item.id, cypher.clone());
-                                        }
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    RichText::new("Copy")
-                                                        .color(palette.text_primary),
-                                                )
-                                                .fill(palette.bg_elevated)
-                                                .stroke(Stroke::new(1.0, palette.border))
-                                                .corner_radius(CornerRadius::same(6)),
+                                            .fill(palette.accent)
+                                            .stroke(Stroke::new(1.0, palette.accent))
+                                            .corner_radius(CornerRadius::same(6)),
+                                        )
+                                        .clicked()
+                                    {
+                                        on_run(item.id, cypher.clone());
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Copy").color(palette.text_primary),
                                             )
-                                            .clicked()
-                                        {
-                                            ui.ctx().copy_text(cypher.clone());
-                                        }
-                                    });
+                                            .fill(palette.bg_elevated)
+                                            .stroke(Stroke::new(1.0, palette.border))
+                                            .corner_radius(CornerRadius::same(6)),
+                                        )
+                                        .clicked()
+                                    {
+                                        ui.ctx().copy_text(cypher.clone());
+                                    }
                                 });
                             });
-                    });
-                }
+                        });
+                });
+            }
 
-                if item.llm_duration_ms.is_some()
-                    || item.exec_duration_ms.is_some()
-                    || item.llm_usage.is_some()
-                {
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        if let Some(ms) = item.llm_duration_ms {
-                            ui.label(
-                                RichText::new(format!("LLM {}", format_duration(ms)))
-                                    .color(palette.text_muted),
-                            );
-                        }
-                        if let Some(usage) = &item.llm_usage {
-                            ui.label(
-                                RichText::new(format!(
-                                    "tokens {}/{}/{}",
-                                    usage.prompt_tokens,
-                                    usage.completion_tokens,
-                                    usage.total_tokens
-                                ))
-                                .color(palette.text_muted),
-                            );
-                            if let Some(cached) = usage.cached_tokens {
-                                ui.label(
-                                    RichText::new(format!("cached {cached}"))
-                                        .color(palette.text_muted),
-                                );
-                            }
-                            if let Some(reasoning) = usage.reasoning_tokens {
-                                ui.label(
-                                    RichText::new(format!("reasoning {reasoning}"))
-                                        .color(palette.text_muted),
-                                );
-                            }
-                        }
-                        if let Some(ms) = item.exec_duration_ms {
-                            ui.label(
-                                RichText::new(format!("exec {}", format_duration(ms)))
-                                    .color(palette.text_muted),
-                            );
-                        }
-                    });
-                }
+            render_item_stats(ui, item, palette);
+            if item.llm_duration_ms.is_some()
+                || item.exec_duration_ms.is_some()
+                || item.llm_usage.is_some()
+            {
+                ui.add_space(8.0);
+            }
 
-                ui.add_space(12.0);
+            ui.add_space(10.0);
 
-                // 2. Result / Status Layer
-                Frame::new()
-                    .fill(palette.bg_elevated)
-                    .stroke(Stroke::new(1.0, palette.border))
-                    .corner_radius(CornerRadius::same(10))
-                    .inner_margin(Margin::same(12))
-                    .show(ui, |ui| {
-                        match &item.state {
-                            FeedState::Translating => {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Spinner::new());
-                                    ui.label(RichText::new("Translating to Cypher...").italics());
-                                });
-                            }
-                            FeedState::Validating => {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Spinner::new());
-                                    ui.label(RichText::new("Validating query...").italics());
-                                });
-                            }
-                            FeedState::Running => {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Spinner::new());
-                                    ui.label(
-                                        RichText::new("Executing query on graph...").italics(),
-                                    );
-                                });
-                            }
-                            FeedState::Error(err) => {
-                                ui.colored_label(palette.danger, format!("Error: {err}"));
-                            }
-                            FeedState::Ready => {
-                                render_result(ui, item, palette, &mut on_select);
-                            }
-                        }
-
-                        ui.add_space(12.0);
-                    });
-            });
-    });
+            Frame::new()
+                .fill(palette.bg_panel)
+                .stroke(Stroke::new(1.0, palette.border))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| match &item.state {
+                    FeedState::Translating => {
+                        ui.label(
+                            RichText::new("Translating...")
+                                .color(palette.text_muted)
+                                .italics(),
+                        );
+                        ui.add_space(8.0);
+                        let width = ui.available_width();
+                        skeleton_line(ui, width, palette);
+                        ui.add_space(6.0);
+                        skeleton_line(ui, width * 0.92, palette);
+                        ui.add_space(6.0);
+                        skeleton_line(ui, width * 0.7, palette);
+                    }
+                    FeedState::Validating => {
+                        ui.label(
+                            RichText::new("Validating...")
+                                .color(palette.text_muted)
+                                .italics(),
+                        );
+                        ui.add_space(8.0);
+                        let width = ui.available_width();
+                        skeleton_line(ui, width, palette);
+                        ui.add_space(6.0);
+                        skeleton_line(ui, width * 0.75, palette);
+                    }
+                    FeedState::Running => {
+                        ui.label(
+                            RichText::new("Running...")
+                                .color(palette.text_muted)
+                                .italics(),
+                        );
+                        ui.add_space(8.0);
+                        let width = ui.available_width();
+                        skeleton_line(ui, width, palette);
+                        ui.add_space(6.0);
+                        skeleton_line(ui, width * 0.6, palette);
+                    }
+                    FeedState::Error(err) => {
+                        ui.colored_label(palette.danger, format!("Error: {err}"));
+                    }
+                    FeedState::Ready => {
+                        render_result(ui, item, palette, &mut on_select);
+                    }
+                });
+        });
 }
 
 fn highlight_cypher(text: &str, palette: &Palette) -> LayoutJob {
@@ -1348,8 +1848,6 @@ fn render_result(
                     ui.vertical_centered(|ui| {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("💀").size(32.0));
-                            ui.add_space(12.0);
                             let mut text = value.clone();
                             if let Some(unit) = unit {
                                 text = format!("{text} {unit}");
@@ -1397,9 +1895,13 @@ fn render_result(
                     }
                 }
 
+                let show_title = rows.iter().any(|r| r.title != "Row");
                 let show_namespace = rows.iter().any(|r| r.subtitle.is_some());
                 let show_status = rows.iter().any(|r| r.status.is_some());
-                let mut column_labels = vec!["Name".to_string()];
+                let mut column_labels = Vec::new();
+                if show_title {
+                    column_labels.push("Name".to_string());
+                }
                 if show_namespace {
                     column_labels.push("Namespace".to_string());
                 }
@@ -1409,7 +1911,9 @@ fn render_result(
                 column_labels.extend(extra_keys.clone());
 
                 let mut column_defs = Vec::new();
-                column_defs.push(Column::initial(220.0).at_least(140.0).resizable(true));
+                if show_title {
+                    column_defs.push(Column::initial(220.0).at_least(140.0).resizable(true));
+                }
                 if show_namespace {
                     column_defs.push(Column::initial(160.0).at_least(120.0).resizable(true));
                 }
@@ -1424,6 +1928,7 @@ fn render_result(
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         let mut table = TableBuilder::new(ui)
+                            .id_salt(format!("result-table-{}", item.id))
                             .striped(true)
                             .resizable(true)
                             .cell_layout(Layout::left_to_right(Align::Center))
@@ -1450,30 +1955,60 @@ fn render_result(
                                 body.rows(row_height, rows.len(), |mut row| {
                                     let row_index = row.index();
                                     let row_data = &rows[row_index];
+                                    let mut used_select = false;
 
-                                    row.col(|ui| {
-                                        let response = ui.selectable_label(false, &row_data.title);
-                                        if response.clicked() {
-                                            on_select(row_data);
-                                        }
-                                    });
+                                    if show_title {
+                                        row.col(|ui| {
+                                            let response =
+                                                ui.selectable_label(false, &row_data.title);
+                                            if response.clicked() {
+                                                on_select(row_data);
+                                            }
+                                        });
+                                        used_select = true;
+                                    }
                                     if show_namespace {
                                         let namespace = row_data.subtitle.as_deref().unwrap_or("-");
                                         row.col(|ui| {
-                                            ui.label(namespace);
+                                            if !used_select {
+                                                let response =
+                                                    ui.selectable_label(false, namespace);
+                                                if response.clicked() {
+                                                    on_select(row_data);
+                                                }
+                                                used_select = true;
+                                            } else {
+                                                ui.label(namespace);
+                                            }
                                         });
                                     }
                                     if show_status {
                                         let status = row_data.status.as_deref().unwrap_or("-");
                                         row.col(|ui| {
-                                            ui.label(status);
+                                            if !used_select {
+                                                let response = ui.selectable_label(false, status);
+                                                if response.clicked() {
+                                                    on_select(row_data);
+                                                }
+                                                used_select = true;
+                                            } else {
+                                                ui.label(status);
+                                            }
                                         });
                                     }
                                     for key in &extra_keys {
                                         row.col(|ui| {
-                                            ui.label(
-                                                find_field(&row_data.fields, key).unwrap_or("-"),
-                                            );
+                                            let value =
+                                                find_field(&row_data.fields, key).unwrap_or("-");
+                                            if !used_select {
+                                                let response = ui.selectable_label(false, value);
+                                                if response.clicked() {
+                                                    on_select(row_data);
+                                                }
+                                                used_select = true;
+                                            } else {
+                                                ui.label(value);
+                                            }
                                         });
                                     }
                                 });
@@ -1661,6 +2196,70 @@ fn classify_result(records: &[Value]) -> ResultPayload {
     }
 }
 
+fn summarize_records(records: &[Value]) -> String {
+    if records.is_empty() {
+        return "rows=0".to_string();
+    }
+
+    let rows = records.len();
+    let mut columns: Vec<String> = records
+        .first()
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+    columns.sort();
+
+    let mut summary = format!("rows={rows}");
+    if !columns.is_empty() {
+        summary.push_str(", columns=");
+        summary.push_str(&columns.join(","));
+    }
+
+    let samples: Vec<String> = records
+        .iter()
+        .take(2)
+        .map(|value| summarize_record(value, &columns))
+        .collect();
+    if !samples.is_empty() {
+        summary.push_str("; sample=");
+        summary.push_str(&samples.join(" | "));
+    }
+
+    truncate_text(&summary, 400)
+}
+
+fn summarize_record(value: &Value, columns: &[String]) -> String {
+    if let Some(obj) = value.as_object() {
+        let keys: Vec<String> = if columns.is_empty() {
+            let mut keys: Vec<String> = obj.keys().cloned().collect();
+            keys.sort();
+            keys
+        } else {
+            columns.to_vec()
+        };
+        let mut parts = Vec::new();
+        for key in keys.into_iter().take(6) {
+            let entry = obj
+                .get(&key)
+                .map(format_value)
+                .unwrap_or_else(|| "null".to_string());
+            parts.push(format!("{key}={}", truncate_text(&entry, 60)));
+        }
+        return parts.join(", ");
+    }
+
+    truncate_text(&format_value(value), 120)
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let mut trimmed = text[..max_len.saturating_sub(3)].to_string();
+    trimmed.push_str("...");
+    trimmed
+}
+
 fn parse_graph_payload(records: &[Value]) -> Option<ResultPayload> {
     if records.len() != 1 {
         return None;
@@ -1751,6 +2350,36 @@ fn summarize_row(obj: &Map<String, Value>) -> RowCard {
 }
 
 fn format_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(v) => v.to_string(),
+        Value::Number(v) => v.to_string(),
+        Value::String(v) => v.clone(),
+        Value::Array(arr) => format_array_value(arr),
+        Value::Object(obj) => format!("object({})", obj.len()),
+    }
+}
+
+fn format_array_value(arr: &[Value]) -> String {
+    if arr.is_empty() {
+        return "[]".to_string();
+    }
+
+    let max_items = 6usize;
+    let mut parts = Vec::new();
+    for value in arr.iter().take(max_items) {
+        parts.push(format_array_item(value));
+    }
+
+    let mut out = parts.join(", ");
+    if arr.len() > max_items {
+        out.push_str(&format!(", ... (+{})", arr.len() - max_items));
+    }
+
+    format!("[{out}]")
+}
+
+fn format_array_item(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
         Value::Bool(v) => v.to_string(),
@@ -1856,14 +2485,6 @@ fn format_count(value: usize) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
-}
-
-fn format_duration(ms: u128) -> String {
-    if ms >= 1000 {
-        format!("{:.2}s", ms as f64 / 1000.0)
-    } else {
-        format!("{ms} ms")
-    }
 }
 
 #[cfg(test)]
