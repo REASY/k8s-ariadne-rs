@@ -10,7 +10,7 @@ embedded engine, and renders results in an immediate GUI powered by egui.
 ## Features
 
 - **In-memory graph engine**: no external database required.
-- **Immediate GUI (egui)**: ask questions and browse results in one interactive session.
+- **Immediate GUI (egui or Dioxus)**: ask questions and browse results in one interactive session.
 - **Live or snapshot mode**: connect to a real cluster or a snapshot directory.
 - **Structured LLM output**: enforces JSON output with a single `cypher` field.
 - **Log hygiene**: logs go to a file by default so the UI stays clean.
@@ -60,6 +60,7 @@ Options:
   --llm-api-key <KEY>             LLM API key
   --llm-timeout-secs <SECS>       LLM request timeout (default: 60)
   --llm-structured-output <BOOL>  enforce JSON schema output (default: true)
+  --gui-renderer <RENDERER>       gui renderer: egui | dioxus-desktop | dioxus-native (default: dioxus-desktop)
 ```
 
 ## GUI controls
@@ -85,6 +86,7 @@ LLM_MODEL
 LLM_API_KEY
 LLM_TIMEOUT_SECS
 LLM_STRUCTURED_OUTPUT
+GUI_RENDERER
 ```
 
 ### LLM backends

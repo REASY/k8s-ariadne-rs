@@ -1098,7 +1098,7 @@ impl eframe::App for GuiApp {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     ui.label(
-                        RichText::new("KubeGraph Ops")
+                        RichText::new("KubeGraph Ops (egui)")
                             .color(self.palette.text_primary)
                             .size(18.0)
                             .strong(),
@@ -2390,18 +2390,41 @@ fn render_analysis(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) -> boo
 
             if let Some(analysis) = &item.analysis {
                 ui.label(
-                    RichText::new(&analysis.answer)
+                    RichText::new(&analysis.title)
+                        .color(palette.text_primary)
+                        .size(14.0)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(&analysis.summary)
                         .color(palette.text_primary)
                         .size(13.0),
                 );
-                if let Some(confidence) = &analysis.confidence {
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(format!("Confidence: {confidence}"))
-                            .color(palette.text_muted)
-                            .size(11.0),
-                    );
+
+                if !analysis.bullets.is_empty() {
+                    ui.add_space(8.0);
+                    for bullet in &analysis.bullets {
+                        ui.label(
+                            RichText::new(format!("• {bullet}"))
+                                .color(palette.text_primary)
+                                .size(12.0),
+                        );
+                    }
                 }
+
+                if !analysis.rows.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new("Highlights")
+                            .color(palette.text_muted)
+                            .size(12.0)
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    render_analysis_rows(ui, &analysis.rows, palette);
+                }
+
                 if !analysis.follow_ups.is_empty() {
                     ui.add_space(10.0);
                     ui.label(
@@ -2419,9 +2442,10 @@ fn render_analysis(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) -> boo
                         );
                     }
                 }
+
                 if item.analysis_duration_ms.is_some()
                     || analysis.usage.is_some()
-                    || analysis.confidence.is_some()
+                    || !analysis.confidence.is_empty()
                 {
                     ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
@@ -2432,9 +2456,9 @@ fn render_analysis(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) -> boo
                                     .size(11.0),
                             );
                         }
-                        if let Some(confidence) = &analysis.confidence {
+                        if !analysis.confidence.is_empty() {
                             ui.label(
-                                RichText::new(format!("confidence {confidence}"))
+                                RichText::new(format!("confidence {}", analysis.confidence))
                                     .color(palette.text_muted)
                                     .size(11.0),
                             );
@@ -2470,6 +2494,76 @@ fn render_analysis(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) -> boo
             }
         });
     true
+}
+
+fn render_analysis_rows(ui: &mut egui::Ui, rows: &[Value], palette: &Palette) {
+    let objects: Vec<&Map<String, Value>> = rows.iter().filter_map(|row| row.as_object()).collect();
+    if objects.is_empty() {
+        ui.label(
+            RichText::new("No structured rows to display.")
+                .color(palette.text_muted)
+                .size(11.0),
+        );
+        return;
+    }
+
+    let mut columns: Vec<String> = objects[0].keys().cloned().collect();
+    columns.sort();
+
+    let max_rows = 10usize;
+    let row_count = objects.len().min(max_rows);
+    ScrollArea::horizontal()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            let mut table = TableBuilder::new(ui)
+                .id_salt("analysis-rows")
+                .striped(true)
+                .resizable(true)
+                .cell_layout(Layout::left_to_right(Align::Center))
+                .min_scrolled_height(80.0)
+                .max_scroll_height(180.0);
+            for _ in &columns {
+                table = table.column(Column::initial(150.0).at_least(120.0).resizable(true));
+            }
+            table
+                .header(20.0, |mut header| {
+                    for label in &columns {
+                        header.col(|ui| {
+                            ui.label(
+                                RichText::new(label)
+                                    .color(palette.text_muted)
+                                    .size(11.0)
+                                    .strong(),
+                            );
+                        });
+                    }
+                })
+                .body(|body| {
+                    let row_height = 24.0;
+                    body.rows(row_height, row_count, |mut row| {
+                        let row_index = row.index();
+                        let row_data = objects[row_index];
+                        for key in &columns {
+                            row.col(|ui| {
+                                let value = row_data
+                                    .get(key)
+                                    .map(format_value)
+                                    .unwrap_or_else(|| "-".to_string());
+                                ui.label(value);
+                            });
+                        }
+                    });
+                });
+        });
+
+    if objects.len() > max_rows {
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(format!("Showing {row_count} of {} rows.", objects.len()))
+                .color(palette.text_muted)
+                .size(10.0),
+        );
+    }
 }
 
 fn draw_graph(

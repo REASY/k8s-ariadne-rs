@@ -1,13 +1,14 @@
 mod agent;
 mod error;
 mod gui;
+mod gui_dioxus;
 mod validation;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ::llm::builder::LLMBackend;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use kube::config::KubeConfigOptions;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +23,7 @@ use crate::agent::{
 };
 use crate::error::CliResult;
 use crate::gui::run_gui;
+use crate::gui_dioxus::{run_gui_dioxus, DioxusRenderer};
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
@@ -49,6 +51,15 @@ struct Cli {
     llm_timeout_secs: u64,
     #[arg(long, env = "LLM_STRUCTURED_OUTPUT", default_value_t = true)]
     llm_structured_output: bool,
+    #[arg(long, env = "GUI_RENDERER", default_value = "dioxus-desktop", value_enum)]
+    gui_renderer: GuiRenderer,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum GuiRenderer {
+    Egui,
+    DioxusDesktop,
+    DioxusNative,
 }
 
 fn main() -> CliResult<()> {
@@ -132,17 +143,43 @@ fn main() -> CliResult<()> {
         format!("{} (K8s {})", guard.cluster.name, version)
     };
 
-    let gui_result = run_gui(
-        &runtime,
-        backend.clone(),
-        translator,
-        analyst,
-        cluster_state.clone(),
-        token.clone(),
-        cluster_label,
-        backend_label,
-        context_window_tokens,
-    );
+    let gui_result = match cli.gui_renderer {
+        GuiRenderer::Egui => run_gui(
+            &runtime,
+            backend.clone(),
+            translator,
+            analyst,
+            cluster_state.clone(),
+            token.clone(),
+            cluster_label,
+            backend_label,
+            context_window_tokens,
+        ),
+        GuiRenderer::DioxusDesktop => run_gui_dioxus(
+            &runtime,
+            DioxusRenderer::Desktop,
+            backend.clone(),
+            translator,
+            analyst,
+            cluster_state.clone(),
+            token.clone(),
+            cluster_label,
+            backend_label,
+            context_window_tokens,
+        ),
+        GuiRenderer::DioxusNative => run_gui_dioxus(
+            &runtime,
+            DioxusRenderer::Native,
+            backend.clone(),
+            translator,
+            analyst,
+            cluster_state.clone(),
+            token.clone(),
+            cluster_label,
+            backend_label,
+            context_window_tokens,
+        ),
+    };
 
     token.cancel();
     runtime.block_on(async { backend.shutdown().await });

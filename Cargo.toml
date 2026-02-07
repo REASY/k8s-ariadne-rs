@@ -29,6 +29,9 @@ chrono = { version = "0.4" }
 clap = {  version = "4.5", features = ["derive", "env"] }
 const_format = "0.2"
 crossbeam = "0.8"
+dioxus = "0.7.3"
+dioxus-desktop = "0.7.3"
+dioxus-native = "0.7.3"
 eframe = "0.33.3"
 egui = "0.33.3"
 egui_extras = "0.33.3"

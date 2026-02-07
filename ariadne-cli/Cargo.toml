@@ -12,6 +12,9 @@ ariadne-cypher = { workspace = true }
 ariadne-tools = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
+dioxus = { workspace = true, features = ["fullstack"] }
+dioxus-desktop = { workspace = true }
+dioxus-native = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
