@@ -4,14 +4,14 @@ Export a snapshot from a live cluster:
 
 ```bash
 CLUSTER=<cluster> KUBE_CONTEXT=<context> \
-  cargo run --release -p ariadne-app -- snapshot export --output-dir ./snapshot
+  cargo run --release -p ariadne-mcp -- snapshot export --output-dir ./snapshot
 ```
 
 Load a snapshot instead of talking to K8s:
 
 ```bash
 CLUSTER=<cluster> KUBE_SNAPSHOT_DIR=./snapshot \
-  cargo run --release -p ariadne-app
+  cargo run --release -p ariadne-mcp
 ```
 
 Snapshot directory format (JSON files per kind):

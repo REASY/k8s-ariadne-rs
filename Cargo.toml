@@ -3,7 +3,7 @@ resolver = "2"
 
 members = [
     "ariadne-core",
-    "ariadne-app",
+    "ariadne-mcp",
     "ariadne-tools",
     "ariadne-cli",
     "ariadne-cypher",
@@ -18,7 +18,7 @@ rust-version = "1.93.0"
 version = "0.7.0"
 
 [workspace.dependencies]
-ariadne-app = { path = "ariadne-app" }
+ariadne-mcp = { path = "ariadne-mcp" }
 ariadne-core = { path = "ariadne-core" }
 ariadne-cypher = { path = "ariadne-cypher" }
 ariadne-tools = { path = "ariadne-tools" }

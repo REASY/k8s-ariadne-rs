@@ -137,7 +137,7 @@ ARIADNE_CLI_LOG=/path/to/file.log
 ## Snapshot mode
 
 Use `--snapshot-dir` to load a cluster snapshot from disk. Snapshots can be
-exported using the `ariadne-app` tooling (see repo docs), or you can point to
+exported using the `ariadne-mcp` tooling (see repo docs), or you can point to
 the `snapshot/` directory in this repo.
 
 ## Troubleshooting

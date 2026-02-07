@@ -33,7 +33,7 @@ mod routes;
 shadow!(build);
 
 #[derive(Parser)]
-#[command(name = "ariadne-app")]
+#[command(name = "ariadne-mcp")]
 #[command(about = "Kubernetes graph service and snapshot tools", long_about = None)]
 struct Cli {
     #[command(subcommand)]

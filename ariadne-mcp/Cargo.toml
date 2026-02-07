@@ -1,5 +1,5 @@
 [package]
-name = "ariadne-app"
+name = "ariadne-mcp"
 version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }

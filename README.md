@@ -120,7 +120,7 @@ Memgraph listens on `localhost:7687` and Memgraph Lab on `localhost:3000`.
 ```bash
 CLUSTER=<cluster> \
 KUBE_CONTEXT=<context> \
-cargo run --release -p ariadne-app
+cargo run --release -p ariadne-mcp
 ```
 
 The app:
@@ -154,7 +154,7 @@ k8s-graph-agent --use-adk "What are the pods backing DNS name litmus.qa.agoda.is
 ## Repo structure
 
 - `ariadne-core/` - core graph + Memgraph integration
-- `ariadne-app/` - K8s ingestion + MCP + HTTP server
+- `ariadne-mcp/` - K8s ingestion + MCP + HTTP server
 - `ariadne-tools/` - schema generation tooling
 - `python/agent/` - ADK agent, AST validator, eval harness
 

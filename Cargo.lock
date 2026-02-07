@@ -536,31 +536,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ariadne-app"
-version = "0.7.0"
-dependencies = [
- "ariadne-core",
- "ariadne-tools",
- "axum 0.8.8",
- "axum-prometheus",
- "clap",
- "kube",
- "rmcp",
- "rsmgclient",
- "serde",
- "serde_json",
- "shadow-rs",
- "strum 0.27.2",
- "strum_macros 0.27.2",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tower-http 0.6.8",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "ariadne-cli"
 version = "0.7.0"
 dependencies = [
@@ -622,6 +597,31 @@ dependencies = [
  "thiserror 2.0.18",
  "tree-sitter",
  "tree-sitter-cypher",
+]
+
+[[package]]
+name = "ariadne-mcp"
+version = "0.7.0"
+dependencies = [
+ "ariadne-core",
+ "ariadne-tools",
+ "axum 0.8.8",
+ "axum-prometheus",
+ "clap",
+ "kube",
+ "rmcp",
+ "rsmgclient",
+ "serde",
+ "serde_json",
+ "shadow-rs",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tower-http 0.6.8",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -9,7 +9,7 @@ System(k8s, "Kubernetes Cluster", "Live K8s API")
 System_Ext(llm, "LLM Provider", "OpenAI / Gemini / etc.")
 
 Container_Boundary(ariadne, "k8s-graph-rs") {
-  Container(rust_app, "ariadne-app", "Rust", "Ingests K8s state, exposes MCP + HTTP")
+  Container(rust_app, "ariadne-mcp", "Rust", "Ingests K8s state, exposes MCP + HTTP")
   Container(rust_core, "ariadne-core", "Rust", "Graph modeling + Memgraph integration")
   Container(mcp, "MCP Server", "HTTP/JSON-RPC", "Query + prompt/schema tools")
   Container(py_agent, "k8s-graph-agent", "Python (ADK)", "English -> Cypher w/ AST validation")

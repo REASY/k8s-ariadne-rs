@@ -20,7 +20,7 @@ COPY --from=chef_planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY . .
-RUN cargo build --locked --release -p ariadne-app
+RUN cargo build --locked --release -p ariadne-mcp
 
 
 FROM ubuntu:25.04
@@ -39,9 +39,9 @@ ARG BUILD_DATE
 ARG VERSION
 
 # Copy the built binary from the builder's target dir
-COPY --from=chef_builder /app/target/release/ariadne-app /app/ariadne-app
+COPY --from=chef_builder /app/target/release/ariadne-mcp /app/ariadne-mcp
 
-ENTRYPOINT ["/app/ariadne-app"]
+ENTRYPOINT ["/app/ariadne-mcp"]
 
 LABEL \
     org.opencontainers.image.name="k8s-ariadne-rs" \
