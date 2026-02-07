@@ -118,10 +118,15 @@ impl Analyst for SreAnalyst {
 
 #[derive(Debug, Deserialize)]
 struct AnalysisPayload {
-    answer: String,
+    title: String,
+    summary: String,
+    #[serde(default)]
+    bullets: Vec<String>,
+    #[serde(default)]
+    rows: Vec<Value>,
     #[serde(default)]
     follow_ups: Vec<String>,
-    confidence: Option<String>,
+    confidence: String,
 }
 
 fn parse_structured_analysis(text: &str) -> CliResult<AnalysisResult> {
@@ -129,9 +134,12 @@ fn parse_structured_analysis(text: &str) -> CliResult<AnalysisResult> {
     let payload: AnalysisPayload =
         serde_json::from_str(&cleaned).map_err(|e| format!("Invalid JSON response: {e}"))?;
     Ok(AnalysisResult {
-        answer: payload.answer.trim().to_string(),
+        title: payload.title.trim().to_string(),
+        summary: payload.summary.trim().to_string(),
+        bullets: payload.bullets,
+        rows: payload.rows,
         follow_ups: payload.follow_ups,
-        confidence: payload.confidence.map(|c| c.trim().to_string()),
+        confidence: payload.confidence.trim().to_string(),
         usage: None,
     })
 }
@@ -178,9 +186,12 @@ fn parse_unstructured_analysis(text: &str) -> AnalysisResult {
     };
 
     AnalysisResult {
-        answer,
+        title: "SRE Answer".to_string(),
+        summary: answer,
+        bullets: Vec::new(),
+        rows: Vec::new(),
         follow_ups,
-        confidence,
+        confidence: confidence.unwrap_or_else(|| "unknown".to_string()),
         usage: None,
     }
 }
@@ -271,19 +282,39 @@ fn build_compaction_messages(context: &[ConversationTurn]) -> Vec<ChatMessage> {
 }
 
 fn analysis_schema() -> StructuredOutputFormat {
-    StructuredOutputFormat {
-        name: "SreAnalysis".to_string(),
-        description: Some("SRE analysis of Cypher results".to_string()),
-        schema: Some(serde_json::json!({
+    const SCHEMA: &str = r#"
+    {
+        "name": "SreAnalysis",
+        "description": "SRE analysis of Cypher results",
+        "strict": true,
+        "schema": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "answer": { "type": "string" },
+                "title": { "type": "string" },
+                "summary": { "type": "string" },
+                "bullets": { "type": "array", "items": { "type": "string" } },
+                "rows": {
+                    "type": "array",
+                    "items": { "type": "object", "additionalProperties": false, "properties": {}, "required": [] }
+                },
                 "follow_ups": { "type": "array", "items": { "type": "string" } },
                 "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
             },
-            "required": ["answer", "follow_ups", "confidence"]
-        })),
-        strict: Some(true),
+            "required": ["title", "summary", "bullets", "rows", "follow_ups", "confidence"]
+        }
+    }
+    "#;
+    serde_json::from_str(SCHEMA).expect("invalid SreAnalysis schema JSON")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analysis_schema_parses() {
+        let schema = analysis_schema();
+        assert_eq!(schema.name, "SreAnalysis");
     }
 }

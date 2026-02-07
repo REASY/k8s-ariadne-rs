@@ -1,4 +1,5 @@
 use ::llm::builder::LLMBackend;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct LlmUsage {
@@ -58,8 +59,11 @@ pub struct ContextCompaction {
 
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
-    pub answer: String,
+    pub title: String,
+    pub summary: String,
+    pub bullets: Vec<String>,
+    pub rows: Vec<Value>,
     pub follow_ups: Vec<String>,
-    pub confidence: Option<String>,
+    pub confidence: String,
     pub usage: Option<LlmUsage>,
 }

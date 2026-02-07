@@ -134,17 +134,31 @@ Please correct the Cypher. Return only the fixed query."
 }
 
 fn cypher_schema() -> StructuredOutputFormat {
-    StructuredOutputFormat {
-        name: "CypherQuery".to_string(),
-        description: Some("Cypher query result".to_string()),
-        schema: Some(serde_json::json!({
+    const SCHEMA: &str = r#"
+    {
+        "name": "CypherQuery",
+        "description": "Cypher query result",
+        "strict": true,
+        "schema": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
                 "cypher": { "type": "string" }
             },
             "required": ["cypher"]
-        })),
-        strict: Some(true),
+        }
+    }
+    "#;
+    serde_json::from_str(SCHEMA).expect("invalid CypherQuery schema JSON")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cypher_schema_parses() {
+        let schema = cypher_schema();
+        assert_eq!(schema.name, "CypherQuery");
     }
 }

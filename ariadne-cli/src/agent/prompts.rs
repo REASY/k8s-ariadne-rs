@@ -22,7 +22,7 @@ If the results are empty or insufficient, say so and suggest follow-up questions
 Be concise, actionable, and avoid speculation.";
     if structured {
         format!(
-            "{base}\n\nReturn JSON with keys: answer (string), follow_ups (array of strings, can be empty), confidence (low|medium|high). Always include all keys."
+            "{base}\n\nReturn JSON with keys: title (string), summary (string), bullets (array of strings), rows (array of objects), follow_ups (array of strings), confidence (low|medium|high). Always include all keys. Use empty arrays when needed."
         )
     } else {
         format!("{base}\n\nReturn a short answer followed by a 'Follow-ups:' section if needed.")
