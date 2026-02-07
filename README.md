@@ -128,7 +128,18 @@ The app:
 - builds the graph in Memgraph
 - exposes HTTP endpoints (including MCP)
 
-### 3) Ask questions with the Python agent
+### 3) Query with the GUI CLI (no Memgraph required)
+
+The CLI ships with an in-memory graph backend, so it works without running Memgraph.
+
+```bash
+LLM_BASE_URL=... \
+LLM_MODEL=... \
+LLM_API_KEY=... \
+cargo run --release -p ariadne-cli -- --cluster <cluster>
+```
+
+### 4) Ask questions with the Python agent
 
 ```bash
 cd python/agent
@@ -150,10 +161,12 @@ k8s-graph-agent --use-adk "What are the pods backing DNS name litmus.qa.agoda.is
 - Development & build: [docs/development.md](docs/development.md)
 - Snapshots: [docs/snapshots.md](docs/snapshots.md)
 - Python agent + eval harness: [python/agent/README.md](python/agent/README.md)
+- CLI: [ariadne-cli/README.md](ariadne-cli/README.md)
 
 ## Repo structure
 
 - `ariadne-core/` - core graph + Memgraph integration
+- `ariadne-cli/` - GUI client with in-memory graph backend
 - `ariadne-mcp/` - K8s ingestion + MCP + HTTP server
 - `ariadne-tools/` - schema generation tooling
 - `python/agent/` - ADK agent, AST validator, eval harness
