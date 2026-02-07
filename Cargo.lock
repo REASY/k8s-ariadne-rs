@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ariadne-core",
  "ariadne-cypher",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ariadne-cypher",
  "async-trait",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-cypher"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "thiserror 2.0.18",
  "tree-sitter",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-mcp"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ariadne-core",
  "ariadne-tools",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-tools"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ariadne-core",
  "clap",
