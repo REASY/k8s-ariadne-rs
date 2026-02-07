@@ -16,8 +16,8 @@ use ariadne_core::state::SharedClusterState;
 use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
 
+use crate::agent::{AnalysisResult, Analyst, ConversationTurn, LlmUsage, Translator};
 use crate::error::CliResult;
-use crate::llm::{ConversationTurn, LlmUsage, Translator};
 use crate::validation::validate_cypher;
 
 const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
@@ -32,6 +32,7 @@ pub fn run_gui(
     runtime: &tokio::runtime::Runtime,
     backend: Arc<dyn GraphBackend>,
     translator: Arc<dyn Translator>,
+    analyst: Arc<dyn Analyst>,
     cluster_state: SharedClusterState,
     token: CancellationToken,
     cluster_label: String,
@@ -58,6 +59,7 @@ pub fn run_gui(
                 runtime_handle.clone(),
                 backend.clone(),
                 translator.clone(),
+                analyst.clone(),
                 cluster_state.clone(),
                 token.clone(),
                 cluster_label.clone(),
@@ -266,6 +268,10 @@ struct FeedItem {
     llm_usage: Option<LlmUsage>,
     llm_duration_ms: Option<u128>,
     exec_duration_ms: Option<u128>,
+    analysis: Option<AnalysisResult>,
+    analysis_duration_ms: Option<u128>,
+    analysis_error: Option<String>,
+    analysis_pending: bool,
     context_summary: Option<String>,
 }
 
@@ -280,6 +286,10 @@ impl FeedItem {
             llm_usage: None,
             llm_duration_ms: None,
             exec_duration_ms: None,
+            analysis: None,
+            analysis_duration_ms: None,
+            analysis_error: None,
+            analysis_pending: false,
             context_summary: None,
         }
     }
@@ -320,6 +330,19 @@ enum AppEvent {
         cypher: String,
         duration_ms: u128,
     },
+    AnalysisStarted {
+        id: u64,
+    },
+    AnalysisCompleted {
+        id: u64,
+        analysis: AnalysisResult,
+        duration_ms: u128,
+    },
+    AnalysisFailed {
+        id: u64,
+        error: String,
+        duration_ms: u128,
+    },
     ContextCompactionStarted,
     ContextCompactionCompleted {
         summary: String,
@@ -335,6 +358,7 @@ pub struct GuiApp {
     runtime: Handle,
     backend: Arc<dyn GraphBackend>,
     translator: Arc<dyn Translator>,
+    analyst: Arc<dyn Analyst>,
     cluster_state: SharedClusterState,
     cluster_meta: ClusterMeta,
     token: CancellationToken,
@@ -392,6 +416,7 @@ impl GuiApp {
         runtime: Handle,
         backend: Arc<dyn GraphBackend>,
         translator: Arc<dyn Translator>,
+        analyst: Arc<dyn Analyst>,
         cluster_state: SharedClusterState,
         token: CancellationToken,
         cluster_label: String,
@@ -406,6 +431,7 @@ impl GuiApp {
             runtime,
             backend,
             translator,
+            analyst,
             cluster_state,
             cluster_meta: ClusterMeta {
                 label: cluster_label,
@@ -459,10 +485,11 @@ impl GuiApp {
 
         let tx = self.events_tx.clone();
         let translator = self.translator.clone();
+        let analyst = self.analyst.clone();
         let backend = self.backend.clone();
         let runtime = self.runtime.clone();
-        let context = self.build_context_with_budget();
-        let context_summary = self.context_compact_summary.clone();
+        let analysis_context = self.build_context_with_budget();
+        let analysis_summary = self.context_compact_summary.clone();
         let ctx = self.egui_ctx.clone();
 
         runtime.spawn(async move {
@@ -478,12 +505,7 @@ impl GuiApp {
                 send_event(AppEvent::TranslationStarted { id });
                 let llm_start = Instant::now();
                 let result = translator
-                    .translate(
-                        &question,
-                        &context,
-                        context_summary.as_deref(),
-                        feedback.as_deref(),
-                    )
+                    .translate(&question, &[], None, feedback.as_deref())
                     .await;
                 let llm_ms = llm_start.elapsed().as_millis();
 
@@ -498,6 +520,7 @@ impl GuiApp {
                         return;
                     }
                 };
+                log_llm_call("translator", llm_ms, result.usage.as_ref());
 
                 send_event(AppEvent::TranslationCompleted {
                     id,
@@ -508,20 +531,58 @@ impl GuiApp {
 
                 match validate_cypher(&result.cypher) {
                     Ok(()) => {
+                        let cypher = result.cypher.clone();
                         send_event(AppEvent::QueryStarted {
                             id,
-                            cypher: result.cypher.clone(),
+                            cypher: cypher.clone(),
                         });
                         let exec_start = Instant::now();
-                        match backend.execute_query(result.cypher.clone()).await {
+                        match backend.execute_query(cypher.clone()).await {
                             Ok(records) => {
                                 let exec_ms = exec_start.elapsed().as_millis();
+                                let summary = summarize_records(&records);
                                 send_event(AppEvent::QueryCompleted {
                                     id,
-                                    cypher: result.cypher,
-                                    records,
+                                    cypher: cypher.clone(),
+                                    records: records.clone(),
                                     duration_ms: exec_ms,
                                 });
+                                send_event(AppEvent::AnalysisStarted { id });
+                                let analysis_start = Instant::now();
+                                match analyst
+                                    .analyze(
+                                        &question,
+                                        &cypher,
+                                        &records,
+                                        &summary,
+                                        &analysis_context,
+                                        analysis_summary.as_deref(),
+                                    )
+                                    .await
+                                {
+                                    Ok(analysis) => {
+                                        let analysis_ms = analysis_start.elapsed().as_millis();
+                                        log_llm_call(
+                                            "analysis",
+                                            analysis_ms,
+                                            analysis.usage.as_ref(),
+                                        );
+                                        send_event(AppEvent::AnalysisCompleted {
+                                            id,
+                                            analysis,
+                                            duration_ms: analysis_ms,
+                                        });
+                                    }
+                                    Err(err) => {
+                                        let analysis_ms = analysis_start.elapsed().as_millis();
+                                        tracing::error!("Analysis failed: {err}");
+                                        send_event(AppEvent::AnalysisFailed {
+                                            id,
+                                            error: err.to_string(),
+                                            duration_ms: analysis_ms,
+                                        });
+                                    }
+                                }
                             }
                             Err(err) => {
                                 let exec_ms = exec_start.elapsed().as_millis();
@@ -529,7 +590,7 @@ impl GuiApp {
                                 send_event(AppEvent::QueryFailed {
                                     id,
                                     error: err.to_string(),
-                                    cypher: result.cypher,
+                                    cypher,
                                     duration_ms: exec_ms,
                                 });
                             }
@@ -557,8 +618,17 @@ impl GuiApp {
     fn rerun_cypher(&mut self, id: u64, cypher: String) {
         let tx = self.events_tx.clone();
         let backend = self.backend.clone();
+        let analyst = self.analyst.clone();
         let runtime = self.runtime.clone();
         let ctx = self.egui_ctx.clone();
+        let question = self
+            .feed
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.user_text.clone())
+            .unwrap_or_default();
+        let analysis_context = self.build_context_with_budget();
+        let analysis_summary = self.context_compact_summary.clone();
 
         runtime.spawn(async move {
             let send_event = |event| {
@@ -575,12 +645,45 @@ impl GuiApp {
                     match backend.execute_query(cypher.clone()).await {
                         Ok(records) => {
                             let exec_ms = exec_start.elapsed().as_millis();
+                            let summary = summarize_records(&records);
                             send_event(AppEvent::QueryCompleted {
                                 id,
-                                cypher,
-                                records,
+                                cypher: cypher.clone(),
+                                records: records.clone(),
                                 duration_ms: exec_ms,
                             });
+                            send_event(AppEvent::AnalysisStarted { id });
+                            let analysis_start = Instant::now();
+                            match analyst
+                                .analyze(
+                                    &question,
+                                    &cypher,
+                                    &records,
+                                    &summary,
+                                    &analysis_context,
+                                    analysis_summary.as_deref(),
+                                )
+                                .await
+                            {
+                                Ok(analysis) => {
+                                    let analysis_ms = analysis_start.elapsed().as_millis();
+                                    log_llm_call("analysis", analysis_ms, analysis.usage.as_ref());
+                                    send_event(AppEvent::AnalysisCompleted {
+                                        id,
+                                        analysis,
+                                        duration_ms: analysis_ms,
+                                    });
+                                }
+                                Err(err) => {
+                                    let analysis_ms = analysis_start.elapsed().as_millis();
+                                    tracing::error!("Analysis failed: {err}");
+                                    send_event(AppEvent::AnalysisFailed {
+                                        id,
+                                        error: err.to_string(),
+                                        duration_ms: analysis_ms,
+                                    });
+                                }
+                            }
                         }
                         Err(err) => {
                             let exec_ms = exec_start.elapsed().as_millis();
@@ -588,7 +691,7 @@ impl GuiApp {
                             send_event(AppEvent::QueryFailed {
                                 id,
                                 error: err.to_string(),
-                                cypher,
+                                cypher: cypher.clone(),
                                 duration_ms: exec_ms,
                             });
                         }
@@ -670,6 +773,10 @@ impl GuiApp {
                     if let Some(item) = self.feed_item_mut(id) {
                         item.cypher = Some(cypher);
                         item.state = FeedState::Running;
+                        item.analysis = None;
+                        item.analysis_error = None;
+                        item.analysis_pending = false;
+                        item.analysis_duration_ms = None;
                     }
                 }
                 AppEvent::QueryCompleted {
@@ -696,6 +803,39 @@ impl GuiApp {
                         item.cypher = Some(cypher);
                         item.state = FeedState::Error(error);
                         item.exec_duration_ms = Some(duration_ms);
+                        item.analysis = None;
+                        item.analysis_error = None;
+                        item.analysis_pending = false;
+                        item.analysis_duration_ms = None;
+                    }
+                }
+                AppEvent::AnalysisStarted { id } => {
+                    if let Some(item) = self.feed_item_mut(id) {
+                        item.analysis_pending = true;
+                        item.analysis_error = None;
+                    }
+                }
+                AppEvent::AnalysisCompleted {
+                    id,
+                    analysis,
+                    duration_ms,
+                } => {
+                    if let Some(item) = self.feed_item_mut(id) {
+                        item.analysis = Some(analysis);
+                        item.analysis_duration_ms = Some(duration_ms);
+                        item.analysis_pending = false;
+                        item.analysis_error = None;
+                    }
+                }
+                AppEvent::AnalysisFailed {
+                    id,
+                    error,
+                    duration_ms,
+                } => {
+                    if let Some(item) = self.feed_item_mut(id) {
+                        item.analysis_error = Some(error);
+                        item.analysis_duration_ms = Some(duration_ms);
+                        item.analysis_pending = false;
                     }
                 }
                 AppEvent::ContextCompactionStarted => {
@@ -823,7 +963,7 @@ impl GuiApp {
         }
 
         let tx = self.events_tx.clone();
-        let translator = self.translator.clone();
+        let analyst = self.analyst.clone();
         let runtime = self.runtime.clone();
         let ctx = self.egui_ctx.clone();
 
@@ -837,7 +977,7 @@ impl GuiApp {
             };
             send_event(AppEvent::ContextCompactionStarted);
             let start = Instant::now();
-            match translator.compact_context(&context).await {
+            match analyst.compact_context(&context).await {
                 Ok(result) => {
                     let duration_ms = start.elapsed().as_millis();
                     send_event(AppEvent::ContextCompactionCompleted {
@@ -1667,7 +1807,15 @@ fn skeleton_line(ui: &mut egui::Ui, width: f32, palette: &Palette) {
 }
 
 fn render_item_stats(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) {
-    if item.llm_duration_ms.is_none() && item.exec_duration_ms.is_none() && item.llm_usage.is_none()
+    if item.llm_duration_ms.is_none()
+        && item.exec_duration_ms.is_none()
+        && item.llm_usage.is_none()
+        && item.analysis_duration_ms.is_none()
+        && item
+            .analysis
+            .as_ref()
+            .and_then(|a| a.usage.as_ref())
+            .is_none()
     {
         return;
     }
@@ -1712,6 +1860,41 @@ fn render_item_stats(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) {
                     .size(11.0),
             );
         }
+        if let Some(ms) = item.analysis_duration_ms {
+            ui.label(
+                RichText::new(format!("analysis {}", format_duration(ms)))
+                    .color(palette.text_muted)
+                    .size(11.0),
+            );
+        }
+        if let Some(usage) = item
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.usage.as_ref())
+        {
+            ui.label(
+                RichText::new(format!(
+                    "analysis tokens {}/{}/{}",
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                ))
+                .color(palette.text_muted)
+                .size(11.0),
+            );
+            if let Some(cached) = usage.cached_tokens {
+                ui.label(
+                    RichText::new(format!("analysis cached {cached}"))
+                        .color(palette.text_muted)
+                        .size(11.0),
+                );
+            }
+            if let Some(reasoning) = usage.reasoning_tokens {
+                ui.label(
+                    RichText::new(format!("analysis reasoning {reasoning}"))
+                        .color(palette.text_muted)
+                        .size(11.0),
+                );
+            }
+        }
     });
 }
 
@@ -1720,6 +1903,21 @@ fn format_duration(ms: u128) -> String {
         format!("{:.2}s", ms as f64 / 1000.0)
     } else {
         format!("{ms} ms")
+    }
+}
+
+fn log_llm_call(label: &str, duration_ms: u128, usage: Option<&LlmUsage>) {
+    if let Some(usage) = usage {
+        tracing::info!(
+            "{label} LLM ({duration_ms} ms) tokens prompt={} completion={} total={} cached={:?} reasoning={:?}",
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            usage.cached_tokens,
+            usage.reasoning_tokens
+        );
+    } else {
+        tracing::info!("{label} LLM ({duration_ms} ms)");
     }
 }
 
@@ -1901,6 +2099,9 @@ fn render_feed_item(
                         ui.colored_label(palette.danger, format!("Error: {err}"));
                     }
                     FeedState::Ready => {
+                        if render_analysis(ui, item, palette) {
+                            ui.add_space(10.0);
+                        }
                         render_result(ui, item, palette, &mut on_select);
                     }
                 });
@@ -2145,6 +2346,130 @@ fn render_result(
             );
         }
     }
+}
+
+fn render_analysis(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) -> bool {
+    if !item.analysis_pending && item.analysis.is_none() && item.analysis_error.is_none() {
+        return false;
+    }
+
+    Frame::new()
+        .fill(palette.bg_primary)
+        .stroke(Stroke::new(1.0, palette.border))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("SRE Answer")
+                    .color(palette.text_muted)
+                    .size(12.0)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+
+            if item.analysis_pending {
+                ui.label(
+                    RichText::new("Analyzing results...")
+                        .color(palette.text_muted)
+                        .italics(),
+                );
+                ui.add_space(8.0);
+                let width = ui.available_width();
+                skeleton_line(ui, width, palette);
+                ui.add_space(6.0);
+                skeleton_line(ui, width * 0.85, palette);
+                ui.add_space(6.0);
+                skeleton_line(ui, width * 0.65, palette);
+                return;
+            }
+
+            if let Some(error) = &item.analysis_error {
+                ui.colored_label(palette.danger, format!("Analysis error: {error}"));
+                return;
+            }
+
+            if let Some(analysis) = &item.analysis {
+                ui.label(
+                    RichText::new(&analysis.answer)
+                        .color(palette.text_primary)
+                        .size(13.0),
+                );
+                if let Some(confidence) = &analysis.confidence {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("Confidence: {confidence}"))
+                            .color(palette.text_muted)
+                            .size(11.0),
+                    );
+                }
+                if !analysis.follow_ups.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new("Follow-ups")
+                            .color(palette.text_muted)
+                            .size(12.0)
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    for follow in &analysis.follow_ups {
+                        ui.label(
+                            RichText::new(format!("• {follow}"))
+                                .color(palette.text_primary)
+                                .size(12.0),
+                        );
+                    }
+                }
+                if item.analysis_duration_ms.is_some()
+                    || analysis.usage.is_some()
+                    || analysis.confidence.is_some()
+                {
+                    ui.add_space(10.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(ms) = item.analysis_duration_ms {
+                            ui.label(
+                                RichText::new(format!("analysis {}", format_duration(ms)))
+                                    .color(palette.text_muted)
+                                    .size(11.0),
+                            );
+                        }
+                        if let Some(confidence) = &analysis.confidence {
+                            ui.label(
+                                RichText::new(format!("confidence {confidence}"))
+                                    .color(palette.text_muted)
+                                    .size(11.0),
+                            );
+                        }
+                        if let Some(usage) = analysis.usage.as_ref() {
+                            ui.label(
+                                RichText::new(format!(
+                                    "tokens {}/{}/{}",
+                                    usage.prompt_tokens,
+                                    usage.completion_tokens,
+                                    usage.total_tokens
+                                ))
+                                .color(palette.text_muted)
+                                .size(11.0),
+                            );
+                            if let Some(cached) = usage.cached_tokens {
+                                ui.label(
+                                    RichText::new(format!("cached {cached}"))
+                                        .color(palette.text_muted)
+                                        .size(11.0),
+                                );
+                            }
+                            if let Some(reasoning) = usage.reasoning_tokens {
+                                ui.label(
+                                    RichText::new(format!("reasoning {reasoning}"))
+                                        .color(palette.text_muted)
+                                        .size(11.0),
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    true
 }
 
 fn draw_graph(

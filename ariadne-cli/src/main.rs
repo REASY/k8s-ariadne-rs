@@ -1,6 +1,6 @@
+mod agent;
 mod error;
 mod gui;
-mod llm;
 mod validation;
 
 use std::path::{Path, PathBuf};
@@ -17,9 +17,11 @@ use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
 
+use crate::agent::{
+    context_window_tokens_for_model, Analyst, LlmConfig, LlmTranslator, SreAnalyst, Translator,
+};
 use crate::error::CliResult;
 use crate::gui::run_gui;
-use crate::llm::{context_window_tokens_for_model, LlmConfig, LlmTranslator, Translator};
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
@@ -113,14 +115,16 @@ fn main() -> CliResult<()> {
     });
 
     let context_window_tokens = context_window_tokens_for_model(&cli.llm_model);
-    let translator: Arc<dyn Translator> = Arc::new(LlmTranslator::try_new(LlmConfig {
+    let llm_config = LlmConfig {
         backend: cli.llm_backend,
         base_url: cli.llm_base_url,
         model: cli.llm_model,
         api_key: cli.llm_api_key,
         timeout_secs: cli.llm_timeout_secs,
         structured_output: cli.llm_structured_output,
-    })?);
+    };
+    let translator: Arc<dyn Translator> = Arc::new(LlmTranslator::try_new(llm_config.clone())?);
+    let analyst: Arc<dyn Analyst> = Arc::new(SreAnalyst::try_new(llm_config)?);
 
     let cluster_label = {
         let guard = cluster_state.lock().expect("cluster state lock poisoned");
@@ -132,6 +136,7 @@ fn main() -> CliResult<()> {
         &runtime,
         backend.clone(),
         translator,
+        analyst,
         cluster_state.clone(),
         token.clone(),
         cluster_label,
