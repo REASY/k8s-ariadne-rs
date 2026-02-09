@@ -5,7 +5,6 @@ use dioxus::prelude::*;
 use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 
 use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::state::{ClusterState, SharedClusterState};
@@ -395,6 +394,18 @@ pub enum DioxusRenderer {
     Native,
 }
 
+pub struct DioxusGuiArgs {
+    pub runtime_handle: tokio::runtime::Handle,
+    pub renderer: DioxusRenderer,
+    pub backend: Arc<dyn GraphBackend>,
+    pub translator: Arc<dyn Translator>,
+    pub analyst: Arc<dyn Analyst>,
+    pub cluster_state: SharedClusterState,
+    pub cluster_label: String,
+    pub backend_label: String,
+    pub context_window_tokens: Option<usize>,
+}
+
 #[derive(Clone)]
 struct AppContext {
     runtime: Handle,
@@ -556,26 +567,14 @@ impl SortDirection {
 
 static APP_CONTEXT: OnceLock<AppContext> = OnceLock::new();
 
-#[allow(clippy::too_many_arguments)]
-pub fn run_gui_dioxus(
-    runtime: &tokio::runtime::Runtime,
-    renderer: DioxusRenderer,
-    backend: Arc<dyn GraphBackend>,
-    translator: Arc<dyn Translator>,
-    analyst: Arc<dyn Analyst>,
-    cluster_state: SharedClusterState,
-    _token: CancellationToken,
-    cluster_label: String,
-    backend_label: String,
-    context_window_tokens: Option<usize>,
-) -> CliResult<()> {
+pub fn run_gui_dioxus(args: DioxusGuiArgs) -> CliResult<()> {
     let (notify_tx, notify_rx) = watch::channel(0u64);
     let context = AppContext {
-        runtime: runtime.handle().clone(),
-        backend,
-        translator,
-        analyst,
-        cluster_state,
+        runtime: args.runtime_handle.clone(),
+        backend: args.backend,
+        translator: args.translator,
+        analyst: args.analyst,
+        cluster_state: args.cluster_state,
         shared: Arc::new(Mutex::new(SharedState {
             feed: vec![],
             next_id: 1,
@@ -590,15 +589,15 @@ pub fn run_gui_dioxus(
         })),
         notify_tx,
         notify_rx,
-        cluster_label,
-        backend_label,
-        context_window_tokens,
+        cluster_label: args.cluster_label,
+        backend_label: args.backend_label,
+        context_window_tokens: args.context_window_tokens,
     };
     APP_CONTEXT
         .set(context)
         .map_err(|_| std::io::Error::other("Dioxus app already initialized"))?;
 
-    match renderer {
+    match args.renderer {
         DioxusRenderer::Desktop => {
             dioxus_desktop::launch::launch(app, Vec::new(), Vec::new());
         }

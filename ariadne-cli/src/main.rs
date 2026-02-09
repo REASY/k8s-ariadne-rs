@@ -22,8 +22,8 @@ use crate::agent::{
     context_window_tokens_for_model, Analyst, LlmConfig, LlmTranslator, SreAnalyst, Translator,
 };
 use crate::error::CliResult;
-use crate::gui::run_gui;
-use crate::gui_dioxus::{run_gui_dioxus, DioxusRenderer};
+use crate::gui::{run_gui, GuiArgs};
+use crate::gui_dioxus::{run_gui_dioxus, DioxusGuiArgs, DioxusRenderer};
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
@@ -51,7 +51,12 @@ struct Cli {
     llm_timeout_secs: u64,
     #[arg(long, env = "LLM_STRUCTURED_OUTPUT", default_value_t = true)]
     llm_structured_output: bool,
-    #[arg(long, env = "GUI_RENDERER", default_value = "dioxus-desktop", value_enum)]
+    #[arg(
+        long,
+        env = "GUI_RENDERER",
+        default_value = "dioxus-desktop",
+        value_enum
+    )]
     gui_renderer: GuiRenderer,
 }
 
@@ -144,41 +149,39 @@ fn main() -> CliResult<()> {
     };
 
     let gui_result = match cli.gui_renderer {
-        GuiRenderer::Egui => run_gui(
-            &runtime,
-            backend.clone(),
-            translator,
-            analyst,
-            cluster_state.clone(),
-            token.clone(),
+        GuiRenderer::Egui => run_gui(GuiArgs {
+            runtime_handle: runtime.handle().clone(),
+            backend: backend.clone(),
+            translator: translator.clone(),
+            analyst: analyst.clone(),
+            cluster_state: cluster_state.clone(),
+            token: token.clone(),
             cluster_label,
             backend_label,
             context_window_tokens,
-        ),
-        GuiRenderer::DioxusDesktop => run_gui_dioxus(
-            &runtime,
-            DioxusRenderer::Desktop,
-            backend.clone(),
-            translator,
-            analyst,
-            cluster_state.clone(),
-            token.clone(),
+        }),
+        GuiRenderer::DioxusDesktop => run_gui_dioxus(DioxusGuiArgs {
+            runtime_handle: runtime.handle().clone(),
+            renderer: DioxusRenderer::Desktop,
+            backend: backend.clone(),
+            translator: translator.clone(),
+            analyst: analyst.clone(),
+            cluster_state: cluster_state.clone(),
             cluster_label,
             backend_label,
             context_window_tokens,
-        ),
-        GuiRenderer::DioxusNative => run_gui_dioxus(
-            &runtime,
-            DioxusRenderer::Native,
-            backend.clone(),
-            translator,
-            analyst,
-            cluster_state.clone(),
-            token.clone(),
+        }),
+        GuiRenderer::DioxusNative => run_gui_dioxus(DioxusGuiArgs {
+            runtime_handle: runtime.handle().clone(),
+            renderer: DioxusRenderer::Native,
+            backend: backend.clone(),
+            translator: translator.clone(),
+            analyst: analyst.clone(),
+            cluster_state: cluster_state.clone(),
             cluster_label,
             backend_label,
             context_window_tokens,
-        ),
+        }),
     };
 
     token.cancel();

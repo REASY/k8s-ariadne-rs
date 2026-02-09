@@ -27,28 +27,29 @@ const CONTEXT_MIN_TOKENS: usize = 512;
 const GRAPH_PULSE_HEIGHT: f32 = 40.0;
 const LLM_MAX_RETRIES: usize = 1;
 
-#[allow(clippy::too_many_arguments)]
-pub fn run_gui(
-    runtime: &tokio::runtime::Runtime,
-    backend: Arc<dyn GraphBackend>,
-    translator: Arc<dyn Translator>,
-    analyst: Arc<dyn Analyst>,
-    cluster_state: SharedClusterState,
-    token: CancellationToken,
-    cluster_label: String,
-    backend_label: String,
-    context_window_tokens: Option<usize>,
-) -> CliResult<()> {
+pub struct GuiArgs {
+    pub runtime_handle: tokio::runtime::Handle,
+    pub backend: Arc<dyn GraphBackend>,
+    pub translator: Arc<dyn Translator>,
+    pub analyst: Arc<dyn Analyst>,
+    pub cluster_state: SharedClusterState,
+    pub token: CancellationToken,
+    pub cluster_label: String,
+    pub backend_label: String,
+    pub context_window_tokens: Option<usize>,
+}
+
+pub fn run_gui(args: GuiArgs) -> CliResult<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]),
         ..Default::default()
     };
-    let runtime_handle = runtime.handle().clone();
-    let backend = backend.clone();
-    let translator = translator.clone();
-    let cluster_state = cluster_state.clone();
-    let token = token.clone();
-    let cluster_label = cluster_label.clone();
+    let runtime_handle = args.runtime_handle.clone();
+    let backend = args.backend.clone();
+    let translator = args.translator.clone();
+    let cluster_state = args.cluster_state.clone();
+    let token = args.token.clone();
+    let cluster_label = args.cluster_label.clone();
     eframe::run_native(
         "KubeGraph Ops",
         native_options,
@@ -59,12 +60,12 @@ pub fn run_gui(
                 runtime_handle.clone(),
                 backend.clone(),
                 translator.clone(),
-                analyst.clone(),
+                args.analyst.clone(),
                 cluster_state.clone(),
                 token.clone(),
                 cluster_label.clone(),
-                backend_label.clone(),
-                context_window_tokens,
+                args.backend_label.clone(),
+                args.context_window_tokens,
                 cc.egui_ctx.clone(),
             )))
         }),
