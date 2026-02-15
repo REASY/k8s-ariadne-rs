@@ -51,7 +51,7 @@ pub fn run_gui(args: GuiArgs) -> CliResult<()> {
     let token = args.token.clone();
     let cluster_label = args.cluster_label.clone();
     eframe::run_native(
-        "KubeGraph Ops",
+        "Ariadne",
         native_options,
         Box::new(|cc| {
             let palette = Palette::default();
@@ -1099,7 +1099,7 @@ impl eframe::App for GuiApp {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     ui.label(
-                        RichText::new("KubeGraph Ops (egui)")
+                        RichText::new("Ariadne (egui)")
                             .color(self.palette.text_primary)
                             .size(18.0)
                             .strong(),

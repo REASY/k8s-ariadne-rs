@@ -19,13 +19,6 @@ Ariadne turns natural language questions into **compact, schema-valid graph quer
 
 ---
 
-## Demo
-
-[ariadne.webm](https://github.com/user-attachments/assets/97b6a741-5f4c-4d01-bb22-0e5d1c6019bd)
-
-[ariadne.webm](docs/demo/ariadne.webm)
-
-
 ## The problem: JSON does not scale
 
 Most "LLM + Kubernetes" tools do this:

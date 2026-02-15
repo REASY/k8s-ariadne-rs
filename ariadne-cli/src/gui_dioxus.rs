@@ -701,11 +701,12 @@ fn AppShell() -> Element {
     };
 
     rsx! {
+        document::Title { "Ariadne " }
         style { "{APP_CSS}" }
         div { class: "app",
             header { class: "header",
                 div { class: "header-left",
-                    h1 { "KubeGraph Ops (Dioxus)" }
+                    h1 { "Ariadne (Dioxus)" }
                     div { class: "meta", "{context.cluster_label}" }
                     div { class: "meta", "Backend: {context.backend_label}" }
                 }

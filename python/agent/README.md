@@ -4,6 +4,12 @@ This is a typed Python scaffold for the agent layer that talks to the MCP server
 It supports direct Cypher execution via the MCP tool `execute_cypher_query` and includes an ADK
 translator that uses LiteLLM for provider-agnostic LLM access.
 
+## Demo
+
+[ariadne.webm](https://github.com/user-attachments/assets/97b6a741-5f4c-4d01-bb22-0e5d1c6019bd)
+
+[ariadne.webm](../../docs/demo/ariadne.webm)
+
 ## Setup (uv)
 
 ```bash
