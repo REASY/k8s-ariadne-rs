@@ -2,7 +2,7 @@ pub fn base_prompt(structured: bool) -> String {
     let prompt = ariadne_tools::full_prompt();
     if structured {
         format!(
-            "{prompt}\n\nReturn JSON with a single key `cypher` and no extra fields. Do not include explanations or code fences."
+            "{prompt}\n\nReturn JSON with keys `cypher` and optional `params` (object). Do not include extra fields, explanations, or code fences."
         )
     } else {
         format!("{prompt}\n\nReturn only Cypher. Do not include explanations or code fences.")

@@ -1,5 +1,6 @@
 use ::llm::builder::LLMBackend;
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct LlmUsage {
@@ -31,6 +32,7 @@ impl From<::llm::chat::Usage> for LlmUsage {
 #[derive(Debug, Clone)]
 pub struct TranslationResult {
     pub cypher: String,
+    pub params: Option<HashMap<String, Value>>,
     pub usage: Option<LlmUsage>,
 }
 
@@ -39,6 +41,7 @@ pub struct ConversationTurn {
     pub question: String,
     pub cypher: String,
     pub result_summary: Option<String>,
+    pub bindings: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone)]

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::prelude::Result;
 use crate::state::{ClusterStateDiff, SharedClusterState};
@@ -8,6 +9,10 @@ use crate::state::{ClusterStateDiff, SharedClusterState};
 pub trait GraphBackend: Send + Sync + std::fmt::Debug {
     async fn create(&self, cluster_state: SharedClusterState) -> Result<()>;
     async fn update(&self, diff: ClusterStateDiff) -> Result<()>;
-    async fn execute_query(&self, query: String) -> Result<Vec<Value>>;
+    async fn execute_query(
+        &self,
+        query: String,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<Vec<Value>>;
     async fn shutdown(&self);
 }

@@ -296,10 +296,7 @@ fn validate_engine_expr(expr: &Expr) -> Result<(), CypherError> {
             validate_engine_expr(expr)?;
             validate_engine_expr(list)
         }
-        Expr::Parameter(_) => Err(CypherError::semantic(
-            "parameters are not supported by the in-memory engine",
-            dummy_span(),
-        )),
+        Expr::Parameter(_) => Ok(()),
     }
 }
 

@@ -5,6 +5,7 @@ use crate::prelude::*;
 use crate::state::{ClusterStateDiff, SharedClusterState};
 use rsmgclient::ConnectParams;
 use serde_json::Value;
+use std::collections::HashMap;
 
 impl GraphConnection for Memgraph {
     fn create_from_snapshot(
@@ -19,8 +20,12 @@ impl GraphConnection for Memgraph {
         Memgraph::update_from_diff(self, diff)
     }
 
-    fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
-        Memgraph::execute_query(self, query)
+    fn execute_query(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
+        Memgraph::execute_query_with_params(self, query, params)
     }
 }
 
@@ -86,8 +91,12 @@ impl MemgraphAsync {
         self.actor.update(diff).await
     }
 
-    pub async fn execute_query(&self, query: impl Into<String>) -> Result<Vec<Value>> {
-        self.actor.execute_query(query).await
+    pub async fn execute_query(
+        &self,
+        query: impl Into<String>,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
+        self.actor.execute_query(query, params).await
     }
 
     pub async fn shutdown(&self) {
@@ -105,8 +114,12 @@ impl GraphBackend for MemgraphAsync {
         MemgraphAsync::update(self, diff).await
     }
 
-    async fn execute_query(&self, query: String) -> Result<Vec<Value>> {
-        MemgraphAsync::execute_query(self, query).await
+    async fn execute_query(
+        &self,
+        query: String,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
+        MemgraphAsync::execute_query(self, query, params).await
     }
 
     async fn shutdown(&self) {

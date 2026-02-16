@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -440,6 +441,7 @@ struct FeedItem {
     id: u64,
     user_text: String,
     cypher: Option<String>,
+    params: Option<HashMap<String, Value>>,
     result: ResultPayload,
     state: FeedState,
     llm_usage: Option<LlmUsage>,
@@ -450,6 +452,7 @@ struct FeedItem {
     analysis_error: Option<String>,
     analysis_pending: bool,
     context_summary: Option<String>,
+    context_bindings: Option<HashMap<String, Value>>,
 }
 
 impl FeedItem {
@@ -458,6 +461,7 @@ impl FeedItem {
             id,
             user_text,
             cypher: None,
+            params: None,
             result: ResultPayload::Empty,
             state: FeedState::Translating,
             llm_usage: None,
@@ -468,6 +472,7 @@ impl FeedItem {
             analysis_error: None,
             analysis_pending: false,
             context_summary: None,
+            context_bindings: None,
         }
     }
 }
@@ -1157,7 +1162,12 @@ fn submit_question(context: &AppContext, question: String) {
 
             let llm_start = Instant::now();
             let result = translator
-                .translate(&question, &[], None, feedback.as_deref())
+                .translate(
+                    &question,
+                    &analysis_context,
+                    analysis_summary.as_deref(),
+                    feedback.as_deref(),
+                )
                 .await;
             let llm_ms = llm_start.elapsed().as_millis();
 
@@ -1174,8 +1184,11 @@ fn submit_question(context: &AppContext, question: String) {
             };
             log_llm_call("translator", llm_ms, result.usage.as_ref());
 
+            let params = merge_params(result.params.clone(), &analysis_context);
+
             update_feed_item(&context, id, |item| {
                 item.cypher = Some(result.cypher.clone());
+                item.params = params.clone();
                 item.llm_usage = result.usage.clone();
                 item.llm_duration_ms = Some(llm_ms);
                 item.state = FeedState::Validating;
@@ -1187,11 +1200,12 @@ fn submit_question(context: &AppContext, question: String) {
                     let cypher = result.cypher.clone();
                     update_feed_item(&context, id, |item| {
                         item.state = FeedState::Running;
+                        item.params = params.clone();
                     });
                     notify(&context);
 
                     let exec_start = Instant::now();
-                    match backend.execute_query(cypher.clone()).await {
+                    match backend.execute_query(cypher.clone(), params.clone()).await {
                         Ok(records) => {
                             let exec_ms = exec_start.elapsed().as_millis();
                             let summary = summarize_records(&records);
@@ -1201,6 +1215,7 @@ fn submit_question(context: &AppContext, question: String) {
                                 item.result = classified;
                                 item.exec_duration_ms = Some(exec_ms);
                                 item.context_summary = Some(summary.clone());
+                                item.context_bindings = extract_context_bindings(&records);
                             });
                             notify(&context);
 
@@ -1283,6 +1298,14 @@ fn rerun_cypher(context: &AppContext, id: u64, cypher: String) {
             .map(|item| item.user_text.clone())
             .unwrap_or_default()
     };
+    let params = {
+        let shared = context.shared.lock().expect("shared state lock poisoned");
+        shared
+            .feed
+            .iter()
+            .find(|item| item.id == id)
+            .and_then(|item| item.params.clone())
+    };
     let analysis_context = build_context_with_budget(&context, &read_shared(&context));
     let analysis_summary = read_shared(&context).context_compact_summary.clone();
 
@@ -1291,6 +1314,7 @@ fn rerun_cypher(context: &AppContext, id: u64, cypher: String) {
             Ok(()) => {
                 update_feed_item(&context, id, |item| {
                     item.state = FeedState::Running;
+                    item.params = params.clone();
                     item.analysis = None;
                     item.analysis_error = None;
                     item.analysis_pending = false;
@@ -1298,7 +1322,7 @@ fn rerun_cypher(context: &AppContext, id: u64, cypher: String) {
                 notify(&context);
 
                 let exec_start = Instant::now();
-                match backend.execute_query(cypher.clone()).await {
+                match backend.execute_query(cypher.clone(), params.clone()).await {
                     Ok(records) => {
                         let exec_ms = exec_start.elapsed().as_millis();
                         let summary = summarize_records(&records);
@@ -1308,6 +1332,7 @@ fn rerun_cypher(context: &AppContext, id: u64, cypher: String) {
                             item.result = classified;
                             item.exec_duration_ms = Some(exec_ms);
                             item.context_summary = Some(summary.clone());
+                            item.context_bindings = extract_context_bindings(&records);
                         });
                         notify(&context);
 
@@ -1526,6 +1551,7 @@ fn build_context_with_budget_shared(
             question: item.user_text.clone(),
             cypher: cypher.clone(),
             result_summary: item.context_summary.clone(),
+            bindings: item.context_bindings.clone(),
         };
         let turn_tokens = estimate_turn_tokens(&turn);
         if turn_tokens > remaining && !turns.is_empty() {
@@ -1559,6 +1585,7 @@ fn build_context(shared: &SharedState, limit: usize) -> Vec<ConversationTurn> {
             question: item.user_text.clone(),
             cypher: cypher.clone(),
             result_summary: item.context_summary.clone(),
+            bindings: item.context_bindings.clone(),
         });
     }
     turns.reverse();
@@ -1664,6 +1691,109 @@ fn summarize_records(records: &[Value]) -> String {
     }
 
     truncate_text(&summary, 400)
+}
+
+fn merge_params(
+    params: Option<HashMap<String, Value>>,
+    context: &[ConversationTurn],
+) -> Option<HashMap<String, Value>> {
+    let mut merged = params.unwrap_or_default();
+    if let Some(turn) = context.last() {
+        if let Some(bindings) = &turn.bindings {
+            for (key, value) in bindings {
+                merged.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+    }
+    if merged.is_empty() {
+        None
+    } else {
+        Some(merged)
+    }
+}
+
+fn extract_context_bindings(records: &[Value]) -> Option<HashMap<String, Value>> {
+    if records.is_empty() {
+        return None;
+    }
+    let first = records.first().and_then(|value| value.as_object())?;
+    let columns: std::collections::HashSet<String> = first.keys().cloned().collect();
+    let has_pod = columns.contains("pod") || columns.contains("pod_name");
+    let has_service = columns.contains("service") || columns.contains("service_name");
+
+    let mut bindings = HashMap::new();
+
+    if let Some(value) = extract_uniform_value(records, &["pod", "pod_name"]) {
+        bindings.insert("pod_name".to_string(), value);
+    }
+    if has_pod {
+        if let Some(value) = extract_uniform_value(records, &["pod_namespace", "namespace"]) {
+            bindings.insert("pod_namespace".to_string(), value);
+        }
+    }
+    if let Some(value) = extract_uniform_value(records, &["service", "service_name"]) {
+        bindings.insert("service_name".to_string(), value);
+    }
+    if has_service {
+        if let Some(value) = extract_uniform_value(records, &["service_namespace"]) {
+            bindings.insert("service_namespace".to_string(), value);
+        } else if !has_pod {
+            if let Some(value) = extract_uniform_value(records, &["namespace"]) {
+                bindings.insert("service_namespace".to_string(), value);
+            }
+        }
+    }
+    if let Some(value) = extract_uniform_value(records, &["ingress", "ingress_name"]) {
+        bindings.insert("ingress_name".to_string(), value);
+    }
+    if let Some(value) = extract_uniform_value(records, &["ingress_namespace"]) {
+        bindings.insert("ingress_namespace".to_string(), value);
+    }
+    if let Some(value) = extract_uniform_value(records, &["host", "hostname"]) {
+        bindings.insert("host".to_string(), value);
+    }
+
+    if bindings.is_empty() {
+        None
+    } else {
+        Some(bindings)
+    }
+}
+
+fn extract_uniform_value(records: &[Value], keys: &[&str]) -> Option<Value> {
+    for key in keys {
+        let mut value: Option<Value> = None;
+        let mut count = 0usize;
+        for record in records {
+            let obj = match record.as_object() {
+                Some(obj) => obj,
+                None => return None,
+            };
+            let entry = match obj.get(*key) {
+                Some(entry) => entry,
+                None => {
+                    value = None;
+                    count = 0;
+                    break;
+                }
+            };
+            count += 1;
+            match &value {
+                None => value = Some(entry.clone()),
+                Some(existing) if existing == entry => {}
+                Some(_) => {
+                    value = None;
+                    break;
+                }
+            }
+        }
+        if count == records.len() {
+            if let Some(found) = value {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 fn summarize_record(value: &Value, columns: &[String]) -> String {
@@ -2126,6 +2256,10 @@ fn estimate_turn_tokens(turn: &ConversationTurn) -> usize {
     tokens += estimate_text_tokens(&turn.cypher);
     if let Some(summary) = &turn.result_summary {
         tokens += estimate_text_tokens(summary);
+    }
+    if let Some(bindings) = &turn.bindings {
+        let serialized = serde_json::to_string(bindings).unwrap_or_default();
+        tokens += estimate_text_tokens(&serialized);
     }
     tokens
 }

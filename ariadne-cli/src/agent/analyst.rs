@@ -228,6 +228,14 @@ fn build_analysis_messages(
                     body.push('\n');
                 }
             }
+            if let Some(bindings) = &turn.bindings {
+                let formatted = format_bindings(bindings);
+                if !formatted.is_empty() {
+                    body.push_str("Bindings:\n");
+                    body.push_str(&formatted);
+                    body.push('\n');
+                }
+            }
             body.push('\n');
         }
     }
@@ -277,8 +285,28 @@ fn build_compaction_messages(context: &[ConversationTurn]) -> Vec<ChatMessage> {
                 body.push('\n');
             }
         }
+        if let Some(bindings) = &turn.bindings {
+            let formatted = format_bindings(bindings);
+            if !formatted.is_empty() {
+                body.push_str("Bindings:\n");
+                body.push_str(&formatted);
+                body.push('\n');
+            }
+        }
     }
     vec![ChatMessage::user().content(body).build()]
+}
+
+fn format_bindings(bindings: &std::collections::HashMap<String, Value>) -> String {
+    let mut entries: Vec<String> = bindings
+        .iter()
+        .map(|(key, value)| {
+            let value = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+            format!("{key} = {value}")
+        })
+        .collect();
+    entries.sort();
+    entries.join("\n")
 }
 
 fn analysis_schema() -> StructuredOutputFormat {

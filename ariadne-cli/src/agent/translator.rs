@@ -76,12 +76,16 @@ impl Translator for LlmTranslator {
         let text = response
             .text()
             .ok_or_else(|| "LLM response missing text".to_string())?;
-        let cypher = if self.structured_output {
+        let (cypher, params) = if self.structured_output {
             parse_structured_cypher(&text)?
         } else {
-            extract_cypher(&text)
+            (extract_cypher(&text), None)
         };
-        Ok(TranslationResult { cypher, usage })
+        Ok(TranslationResult {
+            cypher,
+            params,
+            usage,
+        })
     }
 }
 
@@ -114,6 +118,13 @@ fn build_messages(
                 assistant.push_str(summary.trim());
             }
         }
+        if let Some(bindings) = &turn.bindings {
+            let formatted = format_bindings(bindings);
+            if !formatted.is_empty() {
+                assistant.push_str("\nBindings:\n");
+                assistant.push_str(&formatted);
+            }
+        }
         messages.push(ChatMessage::assistant().content(assistant).build());
     }
     if let Some(feedback) = feedback {
@@ -133,6 +144,18 @@ Please correct the Cypher. Return only the fixed query."
     messages
 }
 
+fn format_bindings(bindings: &std::collections::HashMap<String, serde_json::Value>) -> String {
+    let mut entries: Vec<String> = bindings
+        .iter()
+        .map(|(key, value)| {
+            let value = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+            format!("{key} = {value}")
+        })
+        .collect();
+    entries.sort();
+    entries.join("\n")
+}
+
 fn cypher_schema() -> StructuredOutputFormat {
     const SCHEMA: &str = r#"
     {
@@ -143,7 +166,8 @@ fn cypher_schema() -> StructuredOutputFormat {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "cypher": { "type": "string" }
+                "cypher": { "type": "string" },
+                "params": { "type": "object", "additionalProperties": true }
             },
             "required": ["cypher"]
         }

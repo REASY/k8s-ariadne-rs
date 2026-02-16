@@ -20,6 +20,8 @@ use std::sync::{Arc, OnceLock};
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteCypherQueryRequest {
     pub query: String,
+    #[serde(default)]
+    pub params: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema, Default)]
@@ -45,13 +47,15 @@ impl KubeTool {
     #[tool(name = "execute_cypher_query", description = "Execute a Cypher query")]
     async fn execute_cypher_query(
         &self,
-        Parameters(ExecuteCypherQueryRequest { query }): Parameters<ExecuteCypherQueryRequest>,
+        Parameters(ExecuteCypherQueryRequest { query, params }): Parameters<
+            ExecuteCypherQueryRequest,
+        >,
     ) -> Result<CallToolResult, ErrorData> {
         tracing::info!(cypher = %query, "execute_cypher_query");
         let records = {
             let records = self
                 .memgraph
-                .execute_query(query.clone())
+                .execute_query(query.clone(), params.clone())
                 .await
                 .map_err(|e| {
                     tracing::error!(cypher = %query, error = %e, "execute_cypher_query failed");

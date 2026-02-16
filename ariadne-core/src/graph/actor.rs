@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -13,7 +14,11 @@ use tracing::{error, info};
 pub(crate) trait GraphConnection {
     fn create_from_snapshot(&mut self, nodes: &[GenericObject], edges: &[GraphEdge]) -> Result<()>;
     fn update_from_diff(&mut self, diff: &ClusterStateDiff) -> Result<()>;
-    fn execute_query(&mut self, query: &str) -> Result<Vec<Value>>;
+    fn execute_query(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<Vec<Value>>;
 }
 
 enum Command {
@@ -27,6 +32,7 @@ enum Command {
     },
     ExecuteQuery {
         query: String,
+        params: Option<HashMap<String, Value>>,
         resp: oneshot::Sender<Result<Vec<Value>>>,
     },
     Shutdown {
@@ -102,9 +108,9 @@ impl GraphActor {
                             }
                             let _ = resp.send(res);
                         }
-                        Command::ExecuteQuery { query, resp } => {
+                        Command::ExecuteQuery { query, params, resp } => {
                             let started = Instant::now();
-                            let res = connection.execute_query(&query);
+                            let res = connection.execute_query(&query, params.as_ref());
                             let elapsed_ms = started.elapsed().as_millis();
                             info!("{label}: execute_query ({elapsed_ms} ms): {query}");
                             if let Err(err) = &res {
@@ -173,11 +179,16 @@ impl GraphActor {
         })?
     }
 
-    pub(crate) async fn execute_query(&self, query: impl Into<String>) -> Result<Vec<Value>> {
+    pub(crate) async fn execute_query(
+        &self,
+        query: impl Into<String>,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.tx
             .send(Command::ExecuteQuery {
                 query: query.into(),
+                params,
                 resp: resp_tx,
             })
             .map_err(|e| {
@@ -272,7 +283,11 @@ mod tests {
             Ok(())
         }
 
-        fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
+        fn execute_query(
+            &mut self,
+            query: &str,
+            _params: Option<&HashMap<String, Value>>,
+        ) -> Result<Vec<Value>> {
             if matches!(self.fail, FailMode::Query) {
                 return Err(std::io::Error::other("query failed").into());
             }
@@ -343,7 +358,10 @@ mod tests {
         }];
         actor.update(diff).await.unwrap();
 
-        let results = actor.execute_query("MATCH (n) RETURN n").await.unwrap();
+        let results = actor
+            .execute_query("MATCH (n) RETURN n", None)
+            .await
+            .unwrap();
         assert_eq!(results, vec![json!({ "ok": true })]);
 
         actor.shutdown().await;
@@ -394,7 +412,7 @@ mod tests {
         })
         .unwrap();
 
-        assert!(actor.execute_query("MATCH (n)").await.is_err());
+        assert!(actor.execute_query("MATCH (n)", None).await.is_err());
     }
 
     #[tokio::test]
@@ -406,7 +424,7 @@ mod tests {
         })
         .unwrap();
         actor.shutdown().await;
-        assert!(actor.execute_query("MATCH (n)").await.is_err());
+        assert!(actor.execute_query("MATCH (n)", None).await.is_err());
     }
 
     #[test]

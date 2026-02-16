@@ -243,7 +243,10 @@ async fn memgraph_async_create_and_query() {
         .expect("memgraph_async create failed");
 
     let results = mg
-        .execute_query("MATCH (n:Namespace)-[:PartOf]->(c:Cluster) RETURN count(n) AS cnt")
+        .execute_query(
+            "MATCH (n:Namespace)-[:PartOf]->(c:Cluster) RETURN count(n) AS cnt",
+            None,
+        )
         .await
         .expect("memgraph_async execute_query failed");
 

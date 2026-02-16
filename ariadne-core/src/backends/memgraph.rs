@@ -377,8 +377,17 @@ impl Memgraph {
     }
 
     pub fn execute_query(&mut self, query: &str) -> Result<Vec<Value>> {
+        self.execute_query_with_params(query, None)
+    }
+
+    pub fn execute_query_with_params(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
         self.ensure_connected()?;
-        let cols = self.connection.execute(query, None);
+        let query_params = params.map(Self::json_params_to_query_params);
+        let cols = self.connection.execute(query, query_params.as_ref());
         let cols = match cols {
             Ok(cols) => cols,
             Err(err) => {
@@ -402,6 +411,14 @@ impl Memgraph {
             MemgraphError::CommitError(msg)
         })?;
         Ok(result)
+    }
+
+    fn json_params_to_query_params(params: &HashMap<String, Value>) -> HashMap<String, QueryParam> {
+        let mut mapped = HashMap::new();
+        for (key, value) in params {
+            mapped.insert(key.clone(), Self::json_to_query_param(value));
+        }
+        mapped
     }
 
     pub(crate) fn get_create_query(obj: &GenericObject) -> Result<QuerySpec> {

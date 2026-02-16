@@ -1,5 +1,6 @@
 use ::llm::error::LLMError;
 use serde_json::Value;
+use std::collections::HashMap;
 use tracing::error;
 
 use crate::error::CliResult;
@@ -24,7 +25,7 @@ pub fn extract_cypher(text: &str) -> String {
     trimmed.to_string()
 }
 
-pub fn parse_structured_cypher(text: &str) -> CliResult<String> {
+pub fn parse_structured_cypher(text: &str) -> CliResult<(String, Option<HashMap<String, Value>>)> {
     let cleaned = clean_json_response(text);
     let payload: Value =
         serde_json::from_str(&cleaned).map_err(|e| format!("Invalid JSON response: {e}"))?;
@@ -32,7 +33,20 @@ pub fn parse_structured_cypher(text: &str) -> CliResult<String> {
         .get("cypher")
         .and_then(|value| value.as_str())
         .ok_or_else(|| "JSON response missing 'cypher' field".to_string())?;
-    Ok(extract_cypher(cypher))
+    let params = match payload.get("params") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(map)) => {
+            let mut params = HashMap::new();
+            for (key, value) in map {
+                params.insert(key.clone(), value.clone());
+            }
+            Some(params)
+        }
+        Some(_) => {
+            return Err("JSON response 'params' field must be an object".into());
+        }
+    };
+    Ok((extract_cypher(cypher), params))
 }
 
 pub fn clean_json_response(response_text: &str) -> String {
@@ -100,14 +114,25 @@ mod tests {
     #[test]
     fn parse_structured_cypher_from_json() {
         let input = r#"{"cypher":"MATCH (n) RETURN n"}"#;
-        let parsed = parse_structured_cypher(input).unwrap();
+        let (parsed, params) = parse_structured_cypher(input).unwrap();
         assert_eq!(parsed, "MATCH (n) RETURN n");
+        assert!(params.is_none());
     }
 
     #[test]
     fn parse_structured_cypher_from_fenced_json() {
         let input = "```json\n{\"cypher\":\"MATCH (n) RETURN n\"}\n```";
-        let parsed = parse_structured_cypher(input).unwrap();
+        let (parsed, params) = parse_structured_cypher(input).unwrap();
         assert_eq!(parsed, "MATCH (n) RETURN n");
+        assert!(params.is_none());
+    }
+
+    #[test]
+    fn parse_structured_cypher_with_params() {
+        let input = r#"{"cypher":"MATCH (n) RETURN n","params":{"pod_name":"foo"}}"#;
+        let (parsed, params) = parse_structured_cypher(input).unwrap();
+        assert_eq!(parsed, "MATCH (n) RETURN n");
+        let params = params.expect("params");
+        assert_eq!(params.get("pod_name").and_then(|v| v.as_str()), Some("foo"));
     }
 }

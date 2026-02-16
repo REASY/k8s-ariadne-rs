@@ -78,7 +78,11 @@ impl GraphBackend for InMemoryBackend {
         Ok(())
     }
 
-    async fn execute_query(&self, query: String) -> Result<Vec<Value>> {
+    async fn execute_query(
+        &self,
+        query: String,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<Vec<Value>> {
         let started = Instant::now();
         let mut stats = QueryStats::default();
         let result: Result<Vec<Value>> = (|| {
@@ -94,8 +98,9 @@ impl GraphBackend for InMemoryBackend {
             let lock_start = Instant::now();
             let guard = state.lock().expect("cluster state lock poisoned");
             stats.lock_ms = lock_start.elapsed().as_millis();
+            let params = params.unwrap_or_default();
             let exec_start = Instant::now();
-            let output = execute_query_ast(&query_ast, &guard, &mut stats);
+            let output = execute_query_ast(&query_ast, &guard, &params, &mut stats);
             stats.exec_ms = exec_start.elapsed().as_millis();
             output
         })();
@@ -152,6 +157,7 @@ type Row = HashMap<String, Value>;
 fn execute_query_ast(
     query: &Query,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Value>> {
     let mut rows = vec![Row::new()];
@@ -161,28 +167,28 @@ fn execute_query_ast(
             Clause::Match(m) => {
                 stats.match_clauses += 1;
                 let clause_start = Instant::now();
-                rows = apply_match(rows, m, state, stats)?;
+                rows = apply_match(rows, m, state, params, stats)?;
                 stats.match_ms += clause_start.elapsed().as_millis();
                 stats.rows_peak = stats.rows_peak.max(rows.len());
             }
             Clause::Unwind(u) => {
                 stats.unwind_clauses += 1;
                 let clause_start = Instant::now();
-                rows = apply_unwind(rows, u, state, stats)?;
+                rows = apply_unwind(rows, u, state, params, stats)?;
                 stats.unwind_ms += clause_start.elapsed().as_millis();
                 stats.rows_peak = stats.rows_peak.max(rows.len());
             }
             Clause::With(w) => {
                 stats.with_clauses += 1;
                 let clause_start = Instant::now();
-                rows = apply_with(rows, w, state, stats)?;
+                rows = apply_with(rows, w, state, params, stats)?;
                 stats.with_ms += clause_start.elapsed().as_millis();
                 stats.rows_peak = stats.rows_peak.max(rows.len());
             }
             Clause::Return(r) => {
                 stats.return_clauses += 1;
                 let clause_start = Instant::now();
-                let output = finalize_return(rows, r, state, stats);
+                let output = finalize_return(rows, r, state, params, stats);
                 stats.return_ms += clause_start.elapsed().as_millis();
                 return output;
             }
@@ -199,6 +205,7 @@ fn apply_match(
     rows: Vec<Row>,
     clause: &MatchClause,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let mut output = Vec::new();
@@ -213,6 +220,7 @@ fn apply_match(
                 &clause.pattern,
                 clause.where_clause.as_ref(),
                 state,
+                params,
                 stats,
             )?;
             if matched || clause.optional {
@@ -221,7 +229,7 @@ fn apply_match(
             continue;
         }
 
-        let matches = match_pattern(&row, &clause.pattern, state, stats)?;
+        let matches = match_pattern(&row, &clause.pattern, state, params, stats)?;
         if matches.is_empty() {
             if clause.optional {
                 let mut expanded = row.clone();
@@ -243,11 +251,13 @@ fn apply_match(
     if let Some(where_clause) = &clause.where_clause {
         output = output
             .into_iter()
-            .filter_map(|row| match eval_bool(where_clause, &row, state, stats) {
-                Ok(true) => Some(Ok(row)),
-                Ok(false) => None,
-                Err(err) => Some(Err(err)),
-            })
+            .filter_map(
+                |row| match eval_bool(where_clause, &row, state, params, stats) {
+                    Ok(true) => Some(Ok(row)),
+                    Ok(false) => None,
+                    Err(err) => Some(Err(err)),
+                },
+            )
             .collect::<Result<Vec<_>>>()?;
     }
 
@@ -258,11 +268,12 @@ fn apply_unwind(
     rows: Vec<Row>,
     clause: &ariadne_cypher::UnwindClause,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let mut output = Vec::new();
     for row in rows {
-        let value = eval_expr(&clause.expression, &row, state, stats)?;
+        let value = eval_expr(&clause.expression, &row, state, params, stats)?;
         match value {
             Value::Array(items) => {
                 for item in items {
@@ -286,10 +297,11 @@ fn apply_with(
     rows: Vec<Row>,
     clause: &ariadne_cypher::WithClause,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let project_start = Instant::now();
-    let mut projected = project_rows_internal(rows, &clause.items, state, stats)?;
+    let mut projected = project_rows_internal(rows, &clause.items, state, params, stats)?;
     stats.with_project_ms += project_start.elapsed().as_millis();
 
     if clause.distinct {
@@ -302,18 +314,20 @@ fn apply_with(
         let filter_start = Instant::now();
         projected = projected
             .into_iter()
-            .filter_map(|row| match eval_bool(where_clause, &row, state, stats) {
-                Ok(true) => Some(Ok(row)),
-                Ok(false) => None,
-                Err(err) => Some(Err(err)),
-            })
+            .filter_map(
+                |row| match eval_bool(where_clause, &row, state, params, stats) {
+                    Ok(true) => Some(Ok(row)),
+                    Ok(false) => None,
+                    Err(err) => Some(Err(err)),
+                },
+            )
             .collect::<Result<Vec<_>>>()?;
         stats.with_filter_ms += filter_start.elapsed().as_millis();
     }
 
     if let Some(order) = &clause.order {
         let sort_start = Instant::now();
-        projected = sort_rows(projected, order, state, stats)?;
+        projected = sort_rows(projected, order, state, params, stats)?;
         stats.with_sort_ms += sort_start.elapsed().as_millis();
     }
 
@@ -323,6 +337,7 @@ fn apply_with(
         clause.skip.as_ref(),
         clause.limit.as_ref(),
         state,
+        params,
         stats,
     )?;
     stats.with_skip_limit_ms += skip_start.elapsed().as_millis();
@@ -334,10 +349,11 @@ fn finalize_return(
     rows: Vec<Row>,
     clause: &ReturnClause,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Value>> {
     let project_start = Instant::now();
-    let mut projected = project_rows_internal(rows, &clause.items, state, stats)?;
+    let mut projected = project_rows_internal(rows, &clause.items, state, params, stats)?;
     stats.return_project_ms += project_start.elapsed().as_millis();
     if clause.distinct {
         let distinct_start = Instant::now();
@@ -346,7 +362,7 @@ fn finalize_return(
     }
     if let Some(order) = &clause.order {
         let sort_start = Instant::now();
-        projected = sort_rows(projected, order, state, stats)?;
+        projected = sort_rows(projected, order, state, params, stats)?;
         stats.return_sort_ms += sort_start.elapsed().as_millis();
     }
     let skip_start = Instant::now();
@@ -355,6 +371,7 @@ fn finalize_return(
         clause.skip.as_ref(),
         clause.limit.as_ref(),
         state,
+        params,
         stats,
     )?;
     stats.return_skip_limit_ms += skip_start.elapsed().as_millis();
@@ -408,12 +425,13 @@ fn match_pattern(
     row: &Row,
     pattern: &Pattern,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     match pattern {
-        Pattern::Node(node) => match_node_pattern(row, node, state, stats),
-        Pattern::Relationship(rel) => match_relationship_pattern(row, rel, state, stats),
-        Pattern::Path(path) => match_path_pattern(row, path, state, stats),
+        Pattern::Node(node) => match_node_pattern(row, node, state, params, stats),
+        Pattern::Relationship(rel) => match_relationship_pattern(row, rel, state, params, stats),
+        Pattern::Path(path) => match_path_pattern(row, path, state, params, stats),
     }
 }
 
@@ -421,6 +439,7 @@ fn match_node_pattern(
     row: &Row,
     pattern: &ariadne_cypher::NodePattern,
     state: &ClusterState,
+    _params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let var = pattern.variable.as_ref();
@@ -475,6 +494,7 @@ fn match_relationship_pattern(
     row: &Row,
     pattern: &RelationshipPattern,
     state: &ClusterState,
+    _params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let mut results = Vec::new();
@@ -544,6 +564,7 @@ fn match_path_pattern(
     row: &Row,
     pattern: &PathPattern,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let (relationships, internal_vars) = path_relationships_with_internal_vars(pattern, row);
@@ -553,7 +574,8 @@ fn match_path_pattern(
         let mut next = Vec::new();
         for binding in bindings {
             let combined = combine_row_for_match(row, &binding);
-            let matches = match_relationship_pattern(&combined, &rel_pattern, state, stats)?;
+            let matches =
+                match_relationship_pattern(&combined, &rel_pattern, state, params, stats)?;
             for new_binding in matches {
                 let mut merged = binding.clone();
                 for (key, value) in new_binding {
@@ -862,12 +884,13 @@ fn project_rows_internal(
     rows: Vec<Row>,
     items: &[ProjectionItem],
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let has_agg = items.iter().any(|item| contains_aggregate_expr(&item.expr));
 
     if has_agg {
-        return project_rows_aggregate(rows, items, state, stats);
+        return project_rows_aggregate(rows, items, state, params, stats);
     }
 
     let mut output = Vec::with_capacity(rows.len());
@@ -885,7 +908,7 @@ fn project_rows_internal(
                 }
                 _ => {
                     let key = projection_label(item, idx);
-                    let value = eval_expr(&item.expr, &row, state, stats)?;
+                    let value = eval_expr(&item.expr, &row, state, params, stats)?;
                     record.insert(key, value);
                 }
             }
@@ -899,6 +922,7 @@ fn project_rows_aggregate(
     rows: Vec<Row>,
     items: &[ProjectionItem],
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let mut non_agg_indices = Vec::new();
@@ -915,7 +939,7 @@ fn project_rows_aggregate(
     for row in rows {
         let mut key_values = Vec::new();
         for idx in &non_agg_indices {
-            let value = eval_expr(&items[*idx].expr, &row, state, stats)?;
+            let value = eval_expr(&items[*idx].expr, &row, state, params, stats)?;
             key_values.push(value);
         }
         let key = group_key(&key_values);
@@ -932,7 +956,7 @@ fn project_rows_aggregate(
         let mut key_iter = key_values.into_iter();
         for (idx, item) in items.iter().enumerate() {
             let value = if contains_aggregate_expr(&item.expr) {
-                eval_aggregate_expr(&item.expr, &group_rows, state, stats)?
+                eval_aggregate_expr(&item.expr, &group_rows, state, params, stats)?
             } else {
                 key_iter
                     .next()
@@ -950,6 +974,7 @@ fn eval_aggregate(
     expr: &Expr,
     rows: &[Row],
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     match expr {
@@ -961,7 +986,7 @@ fn eval_aggregate(
                     .ok_or_else(|| std::io::Error::other("count requires one argument"))?;
                 let mut count = 0i64;
                 for row in rows {
-                    let value = eval_expr(target, row, state, stats)?;
+                    let value = eval_expr(target, row, state, params, stats)?;
                     if !value.is_null() {
                         count += 1;
                     }
@@ -975,7 +1000,7 @@ fn eval_aggregate(
                 let mut total = 0.0;
                 let mut seen = false;
                 for row in rows {
-                    if let Some(v) = eval_expr(target, row, state, stats)?.as_f64() {
+                    if let Some(v) = eval_expr(target, row, state, params, stats)?.as_f64() {
                         total += v;
                         seen = true;
                     }
@@ -993,7 +1018,7 @@ fn eval_aggregate(
                 let mut total = 0.0;
                 let mut count = 0.0;
                 for row in rows {
-                    if let Some(v) = eval_expr(target, row, state, stats)?.as_f64() {
+                    if let Some(v) = eval_expr(target, row, state, params, stats)?.as_f64() {
                         total += v;
                         count += 1.0;
                     }
@@ -1010,7 +1035,7 @@ fn eval_aggregate(
                     .ok_or_else(|| std::io::Error::other("min/max require one argument"))?;
                 let mut current: Option<Value> = None;
                 for row in rows {
-                    let value = eval_expr(target, row, state, stats)?;
+                    let value = eval_expr(target, row, state, params, stats)?;
                     if value.is_null() {
                         continue;
                     }
@@ -1035,16 +1060,16 @@ fn eval_aggregate(
                     .ok_or_else(|| std::io::Error::other("collect requires one argument"))?;
                 let mut values = Vec::new();
                 for row in rows {
-                    values.push(eval_expr(target, row, state, stats)?);
+                    values.push(eval_expr(target, row, state, params, stats)?);
                 }
                 Ok(Value::Array(values))
             }
             _ => Err(std::io::Error::other("unsupported aggregate function").into()),
         },
         Expr::IndexAccess { expr, index } => {
-            let base = eval_aggregate(expr, rows, state, stats)?;
+            let base = eval_aggregate(expr, rows, state, params, stats)?;
             let sample = rows.first().cloned().unwrap_or_default();
-            let idx = eval_expr(index, &sample, state, stats)?;
+            let idx = eval_expr(index, &sample, state, params, stats)?;
             match (base, idx) {
                 (Value::Array(items), Value::Number(n)) => {
                     let i = n.as_i64().unwrap_or(-1);
@@ -1058,7 +1083,7 @@ fn eval_aggregate(
             }
         }
         Expr::ListSlice { expr, start, end } => {
-            let base = eval_aggregate(expr, rows, state, stats)?;
+            let base = eval_aggregate(expr, rows, state, params, stats)?;
             let sample = rows.first().cloned().unwrap_or_default();
             eval_list_slice(
                 base,
@@ -1066,6 +1091,7 @@ fn eval_aggregate(
                 end.as_deref(),
                 &sample,
                 state,
+                params,
                 stats,
             )
         }
@@ -1144,16 +1170,17 @@ fn eval_aggregate_expr(
     expr: &Expr,
     rows: &[Row],
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     match expr {
         Expr::CountStar
         | Expr::FunctionCall { .. }
         | Expr::IndexAccess { .. }
-        | Expr::ListSlice { .. } => eval_aggregate(expr, rows, state, stats),
-        Expr::Literal(lit) => literal_to_value(lit, &Row::new(), state, stats),
+        | Expr::ListSlice { .. } => eval_aggregate(expr, rows, state, params, stats),
+        Expr::Literal(lit) => literal_to_value(lit, &Row::new(), state, params, stats),
         Expr::UnaryOp { op, expr } => {
-            let value = eval_aggregate_expr(expr, rows, state, stats)?;
+            let value = eval_aggregate_expr(expr, rows, state, params, stats)?;
             match op {
                 ariadne_cypher::UnaryOp::Not => Ok(Value::Bool(!value.as_bool().unwrap_or(false))),
                 ariadne_cypher::UnaryOp::Neg => Ok(Value::from(-value.as_f64().unwrap_or(0.0))),
@@ -1161,10 +1188,13 @@ fn eval_aggregate_expr(
             }
         }
         Expr::BinaryOp { op, left, right } => {
-            let l = eval_aggregate_expr(left, rows, state, stats)?;
-            let r = eval_aggregate_expr(right, rows, state, stats)?;
+            let l = eval_aggregate_expr(left, rows, state, params, stats)?;
+            let r = eval_aggregate_expr(right, rows, state, params, stats)?;
             eval_binary_values(op, l, r)
         }
+        Expr::Parameter(name) => params.get(name).cloned().ok_or_else(|| {
+            std::io::Error::other(format!("parameter not provided: ${name}")).into()
+        }),
         _ => Err(std::io::Error::other("unsupported aggregate expression shape").into()),
     }
 }
@@ -1231,6 +1261,7 @@ fn eval_list_slice(
     end: Option<&Expr>,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     let items = match base {
@@ -1242,7 +1273,7 @@ fn eval_list_slice(
     let mut end_idx = len;
 
     if let Some(start_expr) = start {
-        let value = eval_expr(start_expr, row, state, stats)?;
+        let value = eval_expr(start_expr, row, state, params, stats)?;
         if value.is_null() {
             start_idx = 0;
         } else if let Some(v) = value.as_i64() {
@@ -1252,7 +1283,7 @@ fn eval_list_slice(
         }
     }
     if let Some(end_expr) = end {
-        let value = eval_expr(end_expr, row, state, stats)?;
+        let value = eval_expr(end_expr, row, state, params, stats)?;
         if value.is_null() {
             end_idx = len;
         } else if let Some(v) = value.as_i64() {
@@ -1316,10 +1347,11 @@ fn apply_skip_limit(
     skip: Option<&Expr>,
     limit: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     if let Some(skip_expr) = skip {
-        let skip_count = eval_expr(skip_expr, &Row::new(), state, stats)?
+        let skip_count = eval_expr(skip_expr, &Row::new(), state, params, stats)?
             .as_i64()
             .unwrap_or(0)
             .max(0) as usize;
@@ -1331,7 +1363,7 @@ fn apply_skip_limit(
     }
 
     if let Some(limit_expr) = limit {
-        let limit_count = eval_expr(limit_expr, &Row::new(), state, stats)?
+        let limit_count = eval_expr(limit_expr, &Row::new(), state, params, stats)?
             .as_i64()
             .unwrap_or(0)
             .max(0) as usize;
@@ -1345,13 +1377,14 @@ fn sort_rows(
     rows: Vec<Row>,
     order: &OrderBy,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let mut rows_with_keys = Vec::with_capacity(rows.len());
     for row in rows {
         let mut keys = Vec::new();
         for item in &order.items {
-            keys.push(eval_expr(&item.expr, &row, state, stats)?);
+            keys.push(eval_expr(&item.expr, &row, state, params, stats)?);
         }
         rows_with_keys.push((row, keys));
     }
@@ -1396,14 +1429,15 @@ fn eval_exists(
     pattern: &Pattern,
     where_clause: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<bool> {
     match pattern {
-        Pattern::Node(node) => exists_node_pattern(row, node, where_clause, state, stats),
+        Pattern::Node(node) => exists_node_pattern(row, node, where_clause, state, params, stats),
         Pattern::Relationship(rel) => {
-            exists_relationship_pattern(row, rel, where_clause, state, stats)
+            exists_relationship_pattern(row, rel, where_clause, state, params, stats)
         }
-        Pattern::Path(path) => exists_path_pattern(row, path, where_clause, state, stats),
+        Pattern::Path(path) => exists_path_pattern(row, path, where_clause, state, params, stats),
     }
 }
 
@@ -1412,6 +1446,7 @@ fn exists_node_pattern(
     pattern: &ariadne_cypher::NodePattern,
     where_clause: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<bool> {
     let var = pattern.variable.as_ref();
@@ -1420,7 +1455,7 @@ fn exists_node_pattern(
             if let Some(uid) = node_uid_from_value(bound) {
                 if let Some(node) = state.node_by_uid(uid) {
                     if matches_labels(node, &pattern.labels)? {
-                        return exists_binding(row, Row::new(), where_clause, state, stats);
+                        return exists_binding(row, Row::new(), where_clause, state, params, stats);
                     }
                 }
             }
@@ -1455,7 +1490,7 @@ fn exists_node_pattern(
         if let Some(name) = var {
             binding.insert(name.clone(), node_to_value(node)?);
         }
-        if exists_binding(row, binding, where_clause, state, stats)? {
+        if exists_binding(row, binding, where_clause, state, params, stats)? {
             return Ok(true);
         }
     }
@@ -1468,6 +1503,7 @@ fn exists_relationship_pattern(
     pattern: &RelationshipPattern,
     where_clause: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<bool> {
     let rel_types = &pattern.rel.types;
@@ -1503,7 +1539,7 @@ fn exists_relationship_pattern(
                 right_label_type.as_ref(),
             )? {
                 for binding in rows {
-                    if exists_binding(row, binding, where_clause, state, stats)? {
+                    if exists_binding(row, binding, where_clause, state, params, stats)? {
                         return Ok(true);
                     }
                 }
@@ -1528,7 +1564,7 @@ fn exists_relationship_pattern(
                         right_label_type.as_ref(),
                     )? {
                         for binding in rows {
-                            if exists_binding(row, binding, where_clause, state, stats)? {
+                            if exists_binding(row, binding, where_clause, state, params, stats)? {
                                 return Ok(true);
                             }
                         }
@@ -1546,6 +1582,7 @@ fn exists_path_pattern(
     pattern: &PathPattern,
     where_clause: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<bool> {
     let (relationships, _internal_vars) = path_relationships_with_internal_vars(pattern, row);
@@ -1556,14 +1593,14 @@ fn exists_path_pattern(
         let mut next = Vec::new();
         for binding in bindings {
             let combined = combine_row_for_match(row, &binding);
-            let matches = match_relationship_pattern(&combined, rel_pattern, state, stats)?;
+            let matches = match_relationship_pattern(&combined, rel_pattern, state, params, stats)?;
             for new_binding in matches {
                 let mut merged = binding.clone();
                 for (key, value) in new_binding {
                     merged.insert(key, value);
                 }
                 if is_last {
-                    if exists_binding(row, merged, where_clause, state, stats)? {
+                    if exists_binding(row, merged, where_clause, state, params, stats)? {
                         return Ok(true);
                     }
                 } else {
@@ -1588,20 +1625,27 @@ fn exists_binding(
     binding: Row,
     where_clause: Option<&Expr>,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<bool> {
     let Some(merged) = merge_rows(base, &binding) else {
         return Ok(false);
     };
     if let Some(where_clause) = where_clause {
-        eval_bool(where_clause, &merged, state, stats)
+        eval_bool(where_clause, &merged, state, params, stats)
     } else {
         Ok(true)
     }
 }
 
-fn eval_bool(expr: &Expr, row: &Row, state: &ClusterState, stats: &mut QueryStats) -> Result<bool> {
-    match eval_expr(expr, row, state, stats)? {
+fn eval_bool(
+    expr: &Expr,
+    row: &Row,
+    state: &ClusterState,
+    params: &HashMap<String, Value>,
+    stats: &mut QueryStats,
+) -> Result<bool> {
+    match eval_expr(expr, row, state, params, stats)? {
         Value::Bool(b) => Ok(b),
         _ => Ok(false),
     }
@@ -1611,14 +1655,15 @@ fn eval_expr(
     expr: &Expr,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     match expr {
-        Expr::Literal(lit) => literal_to_value(lit, row, state, stats),
+        Expr::Literal(lit) => literal_to_value(lit, row, state, params, stats),
         Expr::Variable(name) => Ok(row.get(name).cloned().unwrap_or(Value::Null)),
         Expr::Star => Ok(Value::Null),
         Expr::PropertyAccess { expr, key } => {
-            let base = eval_expr(expr, row, state, stats)?;
+            let base = eval_expr(expr, row, state, params, stats)?;
             Ok(base
                 .as_object()
                 .and_then(|obj| obj.get(key))
@@ -1626,8 +1671,8 @@ fn eval_expr(
                 .unwrap_or(Value::Null))
         }
         Expr::IndexAccess { expr, index } => {
-            let base = eval_expr(expr, row, state, stats)?;
-            let idx = eval_expr(index, row, state, stats)?;
+            let base = eval_expr(expr, row, state, params, stats)?;
+            let idx = eval_expr(index, row, state, params, stats)?;
             match (base, idx) {
                 (Value::Array(items), Value::Number(n)) => {
                     let i = n.as_i64().unwrap_or(-1);
@@ -1644,26 +1689,36 @@ fn eval_expr(
             }
         }
         Expr::ListSlice { expr, start, end } => {
-            let base = eval_expr(expr, row, state, stats)?;
-            eval_list_slice(base, start.as_deref(), end.as_deref(), row, state, stats)
+            let base = eval_expr(expr, row, state, params, stats)?;
+            eval_list_slice(
+                base,
+                start.as_deref(),
+                end.as_deref(),
+                row,
+                state,
+                params,
+                stats,
+            )
         }
         Expr::UnaryOp { op, expr } => {
-            let value = eval_expr(expr, row, state, stats)?;
+            let value = eval_expr(expr, row, state, params, stats)?;
             match op {
                 ariadne_cypher::UnaryOp::Not => Ok(Value::Bool(!value.as_bool().unwrap_or(false))),
                 ariadne_cypher::UnaryOp::Neg => Ok(Value::from(-value.as_f64().unwrap_or(0.0))),
                 ariadne_cypher::UnaryOp::Pos => Ok(Value::from(value.as_f64().unwrap_or(0.0))),
             }
         }
-        Expr::BinaryOp { op, left, right } => eval_binary(op, left, right, row, state, stats),
+        Expr::BinaryOp { op, left, right } => {
+            eval_binary(op, left, right, row, state, params, stats)
+        }
         Expr::IsNull { expr, negated } => {
-            let value = eval_expr(expr, row, state, stats)?;
+            let value = eval_expr(expr, row, state, params, stats)?;
             let is_null = value.is_null();
             Ok(Value::Bool(if *negated { !is_null } else { is_null }))
         }
         Expr::In { expr, list } => {
-            let value = eval_expr(expr, row, state, stats)?;
-            let list_value = eval_expr(list, row, state, stats)?;
+            let value = eval_expr(expr, row, state, params, stats)?;
+            let list_value = eval_expr(list, row, state, params, stats)?;
             let contains = match list_value {
                 Value::Array(items) => items.iter().any(|item| item == &value),
                 _ => false,
@@ -1671,7 +1726,7 @@ fn eval_expr(
             Ok(Value::Bool(contains))
         }
         Expr::HasLabel { expr, labels } => {
-            let value = eval_expr(expr, row, state, stats)?;
+            let value = eval_expr(expr, row, state, params, stats)?;
             let label = match value {
                 Value::Object(map) => map
                     .get("kind")
@@ -1691,7 +1746,7 @@ fn eval_expr(
             pattern,
             where_clause,
         } => {
-            let exists = eval_exists(row, pattern, where_clause.as_deref(), state, stats)?;
+            let exists = eval_exists(row, pattern, where_clause.as_deref(), state, params, stats)?;
             Ok(Value::Bool(exists))
         }
         Expr::ListComprehension {
@@ -1706,6 +1761,7 @@ fn eval_expr(
             map,
             row,
             state,
+            params,
             stats,
         ),
         Expr::Quantifier {
@@ -1720,6 +1776,7 @@ fn eval_expr(
             where_clause.as_deref(),
             row,
             state,
+            params,
             stats,
         ),
         Expr::Case {
@@ -1728,35 +1785,34 @@ fn eval_expr(
             else_expr,
         } => {
             if let Some(base) = base {
-                let base_value = eval_expr(base, row, state, stats)?;
+                let base_value = eval_expr(base, row, state, params, stats)?;
                 for (when_expr, then_expr) in alternatives {
-                    let when_value = eval_expr(when_expr, row, state, stats)?;
+                    let when_value = eval_expr(when_expr, row, state, params, stats)?;
                     let matches = compare_values(&base_value, &when_value)
                         .map(|ord| ord == Ordering::Equal)
                         .unwrap_or(false);
                     if matches {
-                        return eval_expr(then_expr, row, state, stats);
+                        return eval_expr(then_expr, row, state, params, stats);
                     }
                 }
             } else {
                 for (when_expr, then_expr) in alternatives {
-                    if eval_bool(when_expr, row, state, stats)? {
-                        return eval_expr(then_expr, row, state, stats);
+                    if eval_bool(when_expr, row, state, params, stats)? {
+                        return eval_expr(then_expr, row, state, params, stats);
                     }
                 }
             }
             if let Some(else_expr) = else_expr {
-                eval_expr(else_expr, row, state, stats)
+                eval_expr(else_expr, row, state, params, stats)
             } else {
                 Ok(Value::Null)
             }
         }
-        Expr::FunctionCall { name, args } => eval_function(name, args, row, state, stats),
+        Expr::FunctionCall { name, args } => eval_function(name, args, row, state, params, stats),
         Expr::CountStar => Err(std::io::Error::other("count(*) not valid here").into()),
-        Expr::Parameter(name) => Err(std::io::Error::other(format!(
-            "parameters not supported in engine: ${name}"
-        ))
-        .into()),
+        Expr::Parameter(name) => params.get(name).cloned().ok_or_else(|| {
+            std::io::Error::other(format!("parameter not provided: ${name}")).into()
+        }),
     }
 }
 
@@ -1767,9 +1823,10 @@ fn eval_list_comprehension(
     map_expr: &Expr,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
-    let list_value = eval_expr(list_expr, row, state, stats)?;
+    let list_value = eval_expr(list_expr, row, state, params, stats)?;
     let items = match list_value {
         Value::Array(items) => items,
         _ => return Ok(Value::Array(Vec::new())),
@@ -1779,11 +1836,11 @@ fn eval_list_comprehension(
         let mut scoped = row.clone();
         scoped.insert(variable.to_string(), item);
         if let Some(where_clause) = where_clause {
-            if !eval_bool(where_clause, &scoped, state, stats)? {
+            if !eval_bool(where_clause, &scoped, state, params, stats)? {
                 continue;
             }
         }
-        output.push(eval_expr(map_expr, &scoped, state, stats)?);
+        output.push(eval_expr(map_expr, &scoped, state, params, stats)?);
     }
     Ok(Value::Array(output))
 }
@@ -1795,9 +1852,10 @@ fn eval_quantifier(
     where_clause: Option<&Expr>,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
-    let list_value = eval_expr(list_expr, row, state, stats)?;
+    let list_value = eval_expr(list_expr, row, state, params, stats)?;
     let items = match list_value {
         Value::Array(items) => items,
         _ => return Ok(Value::Bool(false)),
@@ -1808,7 +1866,7 @@ fn eval_quantifier(
         let mut scoped = row.clone();
         scoped.insert(variable.to_string(), item.clone());
         let passed = if let Some(where_clause) = where_clause {
-            eval_bool(where_clause, &scoped, state, stats)?
+            eval_bool(where_clause, &scoped, state, params, stats)?
         } else {
             item.as_bool().unwrap_or(false)
         };
@@ -1854,6 +1912,7 @@ fn eval_function(
     args: &[Expr],
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     let lower = name.to_ascii_lowercase();
@@ -1862,7 +1921,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("size requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             let size = match value {
                 Value::Array(items) => items.len() as i64,
                 Value::String(s) => s.chars().count() as i64,
@@ -1875,7 +1934,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("lower/upper require one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             let text = value.as_str().unwrap_or_default();
             let out = if lower == "lower" {
                 text.to_ascii_lowercase()
@@ -1886,7 +1945,7 @@ fn eval_function(
         }
         "coalesce" => {
             for arg in args {
-                let value = eval_expr(arg, row, state, stats)?;
+                let value = eval_expr(arg, row, state, params, stats)?;
                 if !value.is_null() {
                     return Ok(value);
                 }
@@ -1897,7 +1956,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("toString requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             Ok(Value::String(match value {
                 Value::String(s) => s,
                 other => other.to_string(),
@@ -1907,7 +1966,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("toInteger requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             let num = match value {
                 Value::Number(n) => n.as_i64().unwrap_or(0),
                 Value::String(s) => s.parse::<i64>().unwrap_or(0),
@@ -1926,7 +1985,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("toFloat requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             let num = match value {
                 Value::Number(n) => n.as_f64().unwrap_or(0.0),
                 Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
@@ -1945,7 +2004,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("labels requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             match value {
                 Value::Object(map) => {
                     if let Some(label) = map
@@ -1971,7 +2030,7 @@ fn eval_function(
             let target = args
                 .first()
                 .ok_or_else(|| std::io::Error::other("keys requires one argument"))?;
-            let value = eval_expr(target, row, state, stats)?;
+            let value = eval_expr(target, row, state, params, stats)?;
             match value {
                 Value::Object(map) => {
                     let mut keys: Vec<String> = map.keys().cloned().collect();
@@ -1986,9 +2045,9 @@ fn eval_function(
             if args.len() < 3 {
                 return Err(std::io::Error::other("replace requires three arguments").into());
             }
-            let value = eval_expr(&args[0], row, state, stats)?;
-            let search = eval_expr(&args[1], row, state, stats)?;
-            let replacement = eval_expr(&args[2], row, state, stats)?;
+            let value = eval_expr(&args[0], row, state, params, stats)?;
+            let search = eval_expr(&args[1], row, state, params, stats)?;
+            let replacement = eval_expr(&args[2], row, state, params, stats)?;
             if value.is_null() || search.is_null() || replacement.is_null() {
                 return Ok(Value::Null);
             }
@@ -2010,22 +2069,26 @@ fn eval_binary(
     right: &Expr,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     use ariadne_cypher::BinaryOp::*;
     match op {
         Or => Ok(Value::Bool(
-            eval_bool(left, row, state, stats)? || eval_bool(right, row, state, stats)?,
+            eval_bool(left, row, state, params, stats)?
+                || eval_bool(right, row, state, params, stats)?,
         )),
         And => Ok(Value::Bool(
-            eval_bool(left, row, state, stats)? && eval_bool(right, row, state, stats)?,
+            eval_bool(left, row, state, params, stats)?
+                && eval_bool(right, row, state, params, stats)?,
         )),
         Xor => Ok(Value::Bool(
-            eval_bool(left, row, state, stats)? ^ eval_bool(right, row, state, stats)?,
+            eval_bool(left, row, state, params, stats)?
+                ^ eval_bool(right, row, state, params, stats)?,
         )),
         Eq | Neq | Lt | Gt | Lte | Gte => {
-            let l = eval_expr(left, row, state, stats)?;
-            let r = eval_expr(right, row, state, stats)?;
+            let l = eval_expr(left, row, state, params, stats)?;
+            let r = eval_expr(right, row, state, params, stats)?;
             let cmp = compare_values(&l, &r);
             let result = match op {
                 Eq => cmp.map(|c| c == Ordering::Equal).unwrap_or(false),
@@ -2039,8 +2102,8 @@ fn eval_binary(
             Ok(Value::Bool(result))
         }
         StartsWith | EndsWith | Contains => {
-            let l = eval_expr(left, row, state, stats)?;
-            let r = eval_expr(right, row, state, stats)?;
+            let l = eval_expr(left, row, state, params, stats)?;
+            let r = eval_expr(right, row, state, params, stats)?;
             if l.is_null() || r.is_null() {
                 return Ok(Value::Bool(false));
             }
@@ -2055,8 +2118,12 @@ fn eval_binary(
             Ok(Value::Bool(result))
         }
         Add | Sub | Mul | Div | Mod | Pow => {
-            let l = eval_expr(left, row, state, stats)?.as_f64().unwrap_or(0.0);
-            let r = eval_expr(right, row, state, stats)?.as_f64().unwrap_or(0.0);
+            let l = eval_expr(left, row, state, params, stats)?
+                .as_f64()
+                .unwrap_or(0.0);
+            let r = eval_expr(right, row, state, params, stats)?
+                .as_f64()
+                .unwrap_or(0.0);
             let value = match op {
                 Add => l + r,
                 Sub => l - r,
@@ -2082,6 +2149,7 @@ fn literal_to_value(
     lit: &Literal,
     row: &Row,
     state: &ClusterState,
+    params: &HashMap<String, Value>,
     stats: &mut QueryStats,
 ) -> Result<Value> {
     match lit {
@@ -2093,14 +2161,14 @@ fn literal_to_value(
         Literal::List(items) => {
             let mut values = Vec::new();
             for expr in items {
-                values.push(eval_expr(expr, row, state, stats)?);
+                values.push(eval_expr(expr, row, state, params, stats)?);
             }
             Ok(Value::Array(values))
         }
         Literal::Map(entries) => {
             let mut map = Map::new();
             for (k, v) in entries {
-                map.insert(k.clone(), eval_expr(v, row, state, stats)?);
+                map.insert(k.clone(), eval_expr(v, row, state, params, stats)?);
             }
             Ok(Value::Object(map))
         }
@@ -2409,7 +2477,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("name").and_then(|v| v.as_str()),
@@ -2427,7 +2495,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(2));
     }
@@ -2454,7 +2522,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("name").and_then(|v| v.as_str()), Some("rs"));
     }
@@ -2501,7 +2569,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("name").and_then(|v| v.as_str()),
@@ -2530,7 +2598,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("kind").and_then(|v| v.as_str()),
@@ -2547,7 +2615,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("total").and_then(|v| v.as_f64()), Some(6.0));
         let items = results[0]
@@ -2568,7 +2636,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(4));
     }
 
@@ -2583,7 +2651,7 @@ mod tests {
         runtime.block_on(async {
             backend.create(shared.clone()).await.unwrap();
             let results = backend
-                .execute_query("MATCH (p:Pod) RETURN count(p) AS total".to_string())
+                .execute_query("MATCH (p:Pod) RETURN count(p) AS total".to_string(), None)
                 .await
                 .unwrap();
             assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
@@ -2603,7 +2671,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("name").and_then(|v| v.as_str()),
@@ -2620,7 +2688,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("v").and_then(|v| v.as_i64()), Some(5));
     }
@@ -2632,7 +2700,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("v").and_then(|v| v.as_str()), Some("250"));
     }
@@ -2646,7 +2714,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         let labels = results[0].get("labels").and_then(|v| v.as_array()).cloned();
         assert_eq!(labels, Some(vec![Value::String("Pod".to_string())]));
     }
@@ -2658,7 +2726,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         let v = results[0].get("v").and_then(|v| v.as_f64()).unwrap();
         let expected = 1000.0 / 1024.0 / 1024.0;
         assert!((v - expected).abs() < 1e-9, "expected {expected}, got {v}");
@@ -2674,7 +2742,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
     }
 
@@ -2690,7 +2758,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(3));
     }
 
@@ -2714,7 +2782,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
     }
 
@@ -2739,7 +2807,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
     }
 
@@ -2763,7 +2831,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results[0].get("total").and_then(|v| v.as_i64()), Some(1));
 
         let query = parse_query(
@@ -2771,7 +2839,7 @@ mod tests {
         )
         .unwrap();
         validate_query(&query, ValidationMode::Engine).unwrap();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert!(results.is_empty());
     }
 
@@ -2804,7 +2872,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         let names: Vec<_> = results
             .into_iter()
             .filter_map(|row| {
@@ -2829,7 +2897,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("any").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(results[0].get("all").and_then(|v| v.as_bool()), Some(true));
@@ -2873,7 +2941,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("pod").and_then(|v| v.as_str()),
@@ -2912,7 +2980,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         let names = results[0]
             .get("names")
@@ -2941,7 +3009,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].get("total").and_then(|v| v.as_f64()),
@@ -2957,7 +3025,7 @@ mod tests {
         validate_query(&query, ValidationMode::Engine).unwrap();
 
         let mut stats = QueryStats::default();
-        let results = execute_query_ast(&query, &state, &mut stats).unwrap();
+        let results = execute_query_ast(&query, &state, &HashMap::new(), &mut stats).unwrap();
         let keys = results[0]
             .get("ks")
             .and_then(|v| v.as_array())
