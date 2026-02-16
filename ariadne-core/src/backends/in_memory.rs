@@ -1754,31 +1754,29 @@ fn eval_expr(
             list,
             where_clause,
             map,
-        } => eval_list_comprehension(
-            variable,
-            list,
-            where_clause.as_deref(),
-            map,
-            row,
-            state,
-            params,
-            stats,
-        ),
+        } => {
+            let mut ctx = EvalContext {
+                row,
+                state,
+                params,
+                stats,
+            };
+            eval_list_comprehension(variable, list, where_clause.as_deref(), map, &mut ctx)
+        }
         Expr::Quantifier {
             kind,
             variable,
             list,
             where_clause,
-        } => eval_quantifier(
-            kind,
-            variable,
-            list,
-            where_clause.as_deref(),
-            row,
-            state,
-            params,
-            stats,
-        ),
+        } => {
+            let mut ctx = EvalContext {
+                row,
+                state,
+                params,
+                stats,
+            };
+            eval_quantifier(kind, variable, list, where_clause.as_deref(), &mut ctx)
+        }
         Expr::Case {
             base,
             alternatives,
@@ -1816,31 +1814,37 @@ fn eval_expr(
     }
 }
 
+struct EvalContext<'a> {
+    row: &'a Row,
+    state: &'a ClusterState,
+    params: &'a HashMap<String, Value>,
+    stats: &'a mut QueryStats,
+}
+
 fn eval_list_comprehension(
     variable: &str,
     list_expr: &Expr,
     where_clause: Option<&Expr>,
     map_expr: &Expr,
-    row: &Row,
-    state: &ClusterState,
-    params: &HashMap<String, Value>,
-    stats: &mut QueryStats,
+    ctx: &mut EvalContext<'_>,
 ) -> Result<Value> {
-    let list_value = eval_expr(list_expr, row, state, params, stats)?;
+    let list_value = eval_expr(list_expr, ctx.row, ctx.state, ctx.params, ctx.stats)?;
     let items = match list_value {
         Value::Array(items) => items,
         _ => return Ok(Value::Array(Vec::new())),
     };
     let mut output = Vec::new();
     for item in items {
-        let mut scoped = row.clone();
+        let mut scoped = ctx.row.clone();
         scoped.insert(variable.to_string(), item);
         if let Some(where_clause) = where_clause {
-            if !eval_bool(where_clause, &scoped, state, params, stats)? {
+            if !eval_bool(where_clause, &scoped, ctx.state, ctx.params, ctx.stats)? {
                 continue;
             }
         }
-        output.push(eval_expr(map_expr, &scoped, state, params, stats)?);
+        output.push(eval_expr(
+            map_expr, &scoped, ctx.state, ctx.params, ctx.stats,
+        )?);
     }
     Ok(Value::Array(output))
 }
@@ -1850,12 +1854,9 @@ fn eval_quantifier(
     variable: &str,
     list_expr: &Expr,
     where_clause: Option<&Expr>,
-    row: &Row,
-    state: &ClusterState,
-    params: &HashMap<String, Value>,
-    stats: &mut QueryStats,
+    ctx: &mut EvalContext<'_>,
 ) -> Result<Value> {
-    let list_value = eval_expr(list_expr, row, state, params, stats)?;
+    let list_value = eval_expr(list_expr, ctx.row, ctx.state, ctx.params, ctx.stats)?;
     let items = match list_value {
         Value::Array(items) => items,
         _ => return Ok(Value::Bool(false)),
@@ -1863,10 +1864,10 @@ fn eval_quantifier(
 
     let mut matches = 0usize;
     for item in items {
-        let mut scoped = row.clone();
+        let mut scoped = ctx.row.clone();
         scoped.insert(variable.to_string(), item.clone());
         let passed = if let Some(where_clause) = where_clause {
-            eval_bool(where_clause, &scoped, state, params, stats)?
+            eval_bool(where_clause, &scoped, ctx.state, ctx.params, ctx.stats)?
         } else {
             item.as_bool().unwrap_or(false)
         };

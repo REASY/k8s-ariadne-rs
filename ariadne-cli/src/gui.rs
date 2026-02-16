@@ -2853,10 +2853,7 @@ fn extract_uniform_value(records: &[Value], keys: &[&str]) -> Option<Value> {
         let mut value: Option<Value> = None;
         let mut count = 0usize;
         for record in records {
-            let obj = match record.as_object() {
-                Some(obj) => obj,
-                None => return None,
-            };
+            let obj = record.as_object()?;
             let entry = match obj.get(*key) {
                 Some(entry) => entry,
                 None => {
