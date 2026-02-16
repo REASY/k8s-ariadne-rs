@@ -42,8 +42,30 @@ pub fn parse_structured_cypher(text: &str) -> CliResult<(String, Option<HashMap<
             }
             Some(params)
         }
+        Some(Value::Array(items)) => {
+            let mut params = HashMap::new();
+            for item in items {
+                let obj = item
+                    .as_object()
+                    .ok_or_else(|| "JSON response 'params' items must be objects".to_string())?;
+                let key = obj
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "JSON response 'params.key' must be a string".to_string())?;
+                let value = obj
+                    .get("value")
+                    .ok_or_else(|| "JSON response 'params.value' is required".to_string())?;
+                let parsed = match value {
+                    Value::String(s) => serde_json::from_str::<Value>(s)
+                        .unwrap_or_else(|_| Value::String(s.clone())),
+                    other => other.clone(),
+                };
+                params.insert(key.to_string(), parsed);
+            }
+            Some(params)
+        }
         Some(_) => {
-            return Err("JSON response 'params' field must be an object".into());
+            return Err("JSON response 'params' field must be an object or array".into());
         }
     };
     Ok((extract_cypher(cypher), params))
@@ -134,5 +156,15 @@ mod tests {
         assert_eq!(parsed, "MATCH (n) RETURN n");
         let params = params.expect("params");
         assert_eq!(params.get("pod_name").and_then(|v| v.as_str()), Some("foo"));
+    }
+
+    #[test]
+    fn parse_structured_cypher_with_params_array() {
+        let input = r#"{"cypher":"MATCH (n) RETURN n","params":[{"key":"pod_name","value":"\"bar\""},{"key":"count","value":"3"}]}"#;
+        let (parsed, params) = parse_structured_cypher(input).unwrap();
+        assert_eq!(parsed, "MATCH (n) RETURN n");
+        let params = params.expect("params");
+        assert_eq!(params.get("pod_name").and_then(|v| v.as_str()), Some("bar"));
+        assert_eq!(params.get("count").and_then(|v| v.as_i64()), Some(3));
     }
 }

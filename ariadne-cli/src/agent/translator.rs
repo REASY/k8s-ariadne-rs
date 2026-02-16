@@ -167,9 +167,20 @@ fn cypher_schema() -> StructuredOutputFormat {
             "additionalProperties": false,
             "properties": {
                 "cypher": { "type": "string" },
-                "params": { "type": "object", "additionalProperties": true }
+                "params": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "key": { "type": "string" },
+                            "value": { "type": "string" }
+                        },
+                        "required": ["key", "value"]
+                    }
+                }
             },
-            "required": ["cypher"]
+            "required": ["cypher", "params"]
         }
     }
     "#;
