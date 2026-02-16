@@ -109,7 +109,12 @@ impl ServerHandler for KubeTool {
 
     fn get_info(&self) -> ServerInfo {
         let instruction = format!(
-            "This MCP server provides a way to extract information about Kubernetes cluster {}",
+            "You are connected to a read-only MCP server for the Kubernetes cluster {}.\n\
+Use the tools to answer questions by querying the graph:\n\
+- Call get_graph_schema first to learn node labels, properties, and relationships.\n\
+- Use execute_cypher_query for Cypher reads. Prefer parameterized queries and pass params when needed.\n\
+- Keep queries focused and return only the fields needed to answer the question.\n\
+- If results are empty or ambiguous, ask a follow-up question or propose a narrower query.",
             self.cluster_name
         );
         ServerInfo {
@@ -123,7 +128,7 @@ impl ServerHandler for KubeTool {
                 name: PROJECT_NAME.to_owned(),
                 title: Some(PROJECT_NAME.to_owned()),
                 description: Some(format!(
-                    "MCP server for Kubernetes cluster {}",
+                    "Read-only MCP server exposing a Cypher graph view of Kubernetes cluster {}",
                     self.cluster_name
                 )),
                 version: APP_VERSION.to_owned(),
