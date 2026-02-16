@@ -37,7 +37,7 @@ pub fn router_prompt() -> String {
 Decide whether a single Cypher query is enough (one_shot) or whether a multi-turn agent loop is needed (multi_turn).\n\
 Choose multi_turn when the question is multi-hop, ambiguous, missing identifiers, or needs exploration.\n\
 Choose one_shot for direct lookups or simple single-hop queries.\n\
-Return JSON with keys: route (one_shot|multi_turn) and confidence (low|medium|high). Do not include extra fields."
+Return JSON with key: route (one_shot|multi_turn). Do not include extra fields."
         .to_string()
 }
 

@@ -17,7 +17,9 @@ use ariadne_core::state::SharedClusterState;
 use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
 
-use crate::agent::{AnalysisResult, Analyst, ConversationTurn, LlmUsage, Translator};
+use crate::agent::{
+    Agentic, AnalysisResult, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
+};
 use crate::error::CliResult;
 use crate::validation::validate_cypher;
 
@@ -32,6 +34,8 @@ pub struct GuiArgs {
     pub runtime_handle: tokio::runtime::Handle,
     pub backend: Arc<dyn GraphBackend>,
     pub translator: Arc<dyn Translator>,
+    pub router: Arc<dyn Router>,
+    pub agentic: Arc<dyn Agentic>,
     pub analyst: Arc<dyn Analyst>,
     pub cluster_state: SharedClusterState,
     pub token: CancellationToken,
@@ -48,6 +52,8 @@ pub fn run_gui(args: GuiArgs) -> CliResult<()> {
     let runtime_handle = args.runtime_handle.clone();
     let backend = args.backend.clone();
     let translator = args.translator.clone();
+    let router = args.router.clone();
+    let agentic = args.agentic.clone();
     let cluster_state = args.cluster_state.clone();
     let token = args.token.clone();
     let cluster_label = args.cluster_label.clone();
@@ -61,6 +67,8 @@ pub fn run_gui(args: GuiArgs) -> CliResult<()> {
                 runtime_handle.clone(),
                 backend.clone(),
                 translator.clone(),
+                router.clone(),
+                agentic.clone(),
                 args.analyst.clone(),
                 cluster_state.clone(),
                 token.clone(),
@@ -277,6 +285,8 @@ struct FeedItem {
     analysis_pending: bool,
     context_summary: Option<String>,
     context_bindings: Option<HashMap<String, Value>>,
+    route: Option<RouteDecision>,
+    agent_steps: Option<usize>,
 }
 
 impl FeedItem {
@@ -297,11 +307,18 @@ impl FeedItem {
             analysis_pending: false,
             context_summary: None,
             context_bindings: None,
+            route: None,
+            agent_steps: None,
         }
     }
 }
 
 enum AppEvent {
+    RouteDecided {
+        id: u64,
+        route: RouteDecision,
+        steps: Option<usize>,
+    },
     TranslationStarted {
         id: u64,
     },
@@ -366,6 +383,8 @@ pub struct GuiApp {
     runtime: Handle,
     backend: Arc<dyn GraphBackend>,
     translator: Arc<dyn Translator>,
+    router: Arc<dyn Router>,
+    agentic: Arc<dyn Agentic>,
     analyst: Arc<dyn Analyst>,
     cluster_state: SharedClusterState,
     cluster_meta: ClusterMeta,
@@ -424,6 +443,8 @@ impl GuiApp {
         runtime: Handle,
         backend: Arc<dyn GraphBackend>,
         translator: Arc<dyn Translator>,
+        router: Arc<dyn Router>,
+        agentic: Arc<dyn Agentic>,
         analyst: Arc<dyn Analyst>,
         cluster_state: SharedClusterState,
         token: CancellationToken,
@@ -439,6 +460,8 @@ impl GuiApp {
             runtime,
             backend,
             translator,
+            router,
+            agentic,
             analyst,
             cluster_state,
             cluster_meta: ClusterMeta {
@@ -493,6 +516,8 @@ impl GuiApp {
 
         let tx = self.events_tx.clone();
         let translator = self.translator.clone();
+        let router = self.router.clone();
+        let agentic = self.agentic.clone();
         let analyst = self.analyst.clone();
         let backend = self.backend.clone();
         let runtime = self.runtime.clone();
@@ -505,6 +530,158 @@ impl GuiApp {
                 let _ = tx.send(event);
                 ctx.request_repaint();
             };
+            let mut usage_acc = UsageAccumulator::default();
+
+            send_event(AppEvent::TranslationStarted { id });
+
+            let mut route = RouteDecision::OneShot;
+            let route_start = Instant::now();
+            match router.classify(&question).await {
+                Ok(route_result) => {
+                    let route_ms = route_start.elapsed().as_millis();
+                    log_llm_call("router", route_ms, route_result.usage.as_ref());
+                    usage_acc.add(route_result.usage.as_ref());
+                    route = route_result.decision;
+                    let steps = if route == RouteDecision::OneShot {
+                        Some(0)
+                    } else {
+                        None
+                    };
+                    send_event(AppEvent::RouteDecided { id, route, steps });
+                }
+                Err(err) => {
+                    tracing::warn!("Router failed, falling back to one-shot: {err}");
+                    send_event(AppEvent::RouteDecided {
+                        id,
+                        route: RouteDecision::OneShot,
+                        steps: Some(0),
+                    });
+                }
+            }
+
+            if route == RouteDecision::MultiTurn {
+                let plan_start = Instant::now();
+                match agentic
+                    .plan(
+                        &question,
+                        &analysis_context,
+                        analysis_summary.as_deref(),
+                        backend.as_ref(),
+                    )
+                    .await
+                {
+                    Ok(plan) => {
+                        let plan_ms = plan_start.elapsed().as_millis();
+                        log_llm_call("agentic", plan_ms, plan.usage.as_ref());
+                        usage_acc.add(plan.usage.as_ref());
+                        let params = merge_params(plan.params.clone(), &analysis_context);
+                        send_event(AppEvent::RouteDecided {
+                            id,
+                            route: RouteDecision::MultiTurn,
+                            steps: Some(plan.steps.len()),
+                        });
+
+                        send_event(AppEvent::TranslationCompleted {
+                            id,
+                            cypher: plan.cypher.clone(),
+                            params: params.clone(),
+                            usage: usage_acc.build(),
+                            duration_ms: plan_ms,
+                        });
+
+                        match validate_cypher(&plan.cypher) {
+                            Ok(()) => {
+                                let cypher = plan.cypher.clone();
+                                send_event(AppEvent::QueryStarted {
+                                    id,
+                                    cypher: cypher.clone(),
+                                    params: params.clone(),
+                                });
+                                let exec_start = Instant::now();
+                                match backend.execute_query(cypher.clone(), params.clone()).await {
+                                    Ok(records) => {
+                                        let exec_ms = exec_start.elapsed().as_millis();
+                                        let summary = summarize_records(&records);
+                                        send_event(AppEvent::QueryCompleted {
+                                            id,
+                                            cypher: cypher.clone(),
+                                            records: records.clone(),
+                                            duration_ms: exec_ms,
+                                        });
+                                        send_event(AppEvent::AnalysisStarted { id });
+                                        let analysis_start = Instant::now();
+                                        match analyst
+                                            .analyze(
+                                                &question,
+                                                &cypher,
+                                                &records,
+                                                &summary,
+                                                &analysis_context,
+                                                analysis_summary.as_deref(),
+                                            )
+                                            .await
+                                        {
+                                            Ok(analysis) => {
+                                                let analysis_ms =
+                                                    analysis_start.elapsed().as_millis();
+                                                log_llm_call(
+                                                    "analysis",
+                                                    analysis_ms,
+                                                    analysis.usage.as_ref(),
+                                                );
+                                                send_event(AppEvent::AnalysisCompleted {
+                                                    id,
+                                                    analysis,
+                                                    duration_ms: analysis_ms,
+                                                });
+                                            }
+                                            Err(err) => {
+                                                let analysis_ms =
+                                                    analysis_start.elapsed().as_millis();
+                                                tracing::error!("Analysis failed: {err}");
+                                                send_event(AppEvent::AnalysisFailed {
+                                                    id,
+                                                    error: err.to_string(),
+                                                    duration_ms: analysis_ms,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        let exec_ms = exec_start.elapsed().as_millis();
+                                        tracing::error!("Query failed: {err}");
+                                        send_event(AppEvent::QueryFailed {
+                                            id,
+                                            error: err.to_string(),
+                                            cypher,
+                                            duration_ms: exec_ms,
+                                        });
+                                    }
+                                }
+                                return;
+                            }
+                            Err(issue) => {
+                                tracing::error!("Validation failed: {issue}");
+                                send_event(AppEvent::ValidationFailed {
+                                    id,
+                                    error: issue.to_string(),
+                                    cypher: plan.cypher,
+                                });
+                                return;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("Agentic planning failed, falling back to one-shot: {err}");
+                        send_event(AppEvent::RouteDecided {
+                            id,
+                            route: RouteDecision::OneShot,
+                            steps: Some(0),
+                        });
+                    }
+                }
+            }
+
             let mut attempt = 0usize;
             let mut feedback: Option<String> = None;
 
@@ -534,6 +711,7 @@ impl GuiApp {
                     }
                 };
                 log_llm_call("translator", llm_ms, result.usage.as_ref());
+                usage_acc.add(result.usage.as_ref());
 
                 let params = merge_params(result.params.clone(), &analysis_context);
 
@@ -541,7 +719,7 @@ impl GuiApp {
                     id,
                     cypher: result.cypher.clone(),
                     params: params.clone(),
-                    usage: result.usage.clone(),
+                    usage: usage_acc.build(),
                     duration_ms: llm_ms,
                 });
 
@@ -763,6 +941,14 @@ impl GuiApp {
         while let Ok(event) = self.events_rx.try_recv() {
             handled = true;
             match event {
+                AppEvent::RouteDecided { id, route, steps } => {
+                    if let Some(item) = self.feed_item_mut(id) {
+                        item.route = Some(route);
+                        if let Some(steps) = steps {
+                            item.agent_steps = Some(steps);
+                        }
+                    }
+                }
                 AppEvent::TranslationStarted { id } => {
                     if let Some(item) = self.feed_item_mut(id) {
                         item.state = FeedState::Translating;
@@ -1845,6 +2031,7 @@ fn render_item_stats(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) {
             .as_ref()
             .and_then(|a| a.usage.as_ref())
             .is_none()
+        && item.route.is_none()
     {
         return;
     }
@@ -1896,6 +2083,13 @@ fn render_item_stats(ui: &mut egui::Ui, item: &FeedItem, palette: &Palette) {
                     .size(11.0),
             );
         }
+        if let Some(route) = item.route {
+            let mut label = format!("route {}", route.as_str());
+            if let Some(steps) = item.agent_steps {
+                label.push_str(&format!(" steps {steps}"));
+            }
+            ui.label(RichText::new(label).color(palette.text_muted).size(11.0));
+        }
         if let Some(usage) = item
             .analysis
             .as_ref()
@@ -1932,6 +2126,69 @@ fn format_duration(ms: u128) -> String {
         format!("{:.2}s", ms as f64 / 1000.0)
     } else {
         format!("{ms} ms")
+    }
+}
+
+#[derive(Default)]
+struct UsageAccumulator {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    reasoning_tokens: Option<u32>,
+    cached_tokens: Option<u32>,
+    seen: bool,
+    reasoning_complete: bool,
+    cached_complete: bool,
+}
+
+impl UsageAccumulator {
+    fn add(&mut self, usage: Option<&LlmUsage>) {
+        let Some(usage) = usage else {
+            return;
+        };
+        if !self.seen {
+            self.seen = true;
+            self.reasoning_complete = true;
+            self.cached_complete = true;
+            self.reasoning_tokens = Some(0);
+            self.cached_tokens = Some(0);
+        }
+        self.prompt_tokens = self.prompt_tokens.saturating_add(usage.prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(usage.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+
+        if !self.reasoning_complete {
+            // Already missing in a prior call; keep None.
+        } else if let Some(tokens) = usage.reasoning_tokens {
+            self.reasoning_tokens = Some(self.reasoning_tokens.unwrap_or(0) + tokens);
+        } else {
+            self.reasoning_tokens = None;
+            self.reasoning_complete = false;
+        }
+
+        if !self.cached_complete {
+            // Already missing in a prior call; keep None.
+        } else if let Some(tokens) = usage.cached_tokens {
+            self.cached_tokens = Some(self.cached_tokens.unwrap_or(0) + tokens);
+        } else {
+            self.cached_tokens = None;
+            self.cached_complete = false;
+        }
+    }
+
+    fn build(&self) -> Option<LlmUsage> {
+        if !self.seen {
+            return None;
+        }
+        Some(LlmUsage {
+            prompt_tokens: self.prompt_tokens,
+            completion_tokens: self.completion_tokens,
+            total_tokens: self.total_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+            cached_tokens: self.cached_tokens,
+        })
     }
 }
 

@@ -12,7 +12,9 @@ use ariadne_core::state::{ClusterState, SharedClusterState};
 use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
 
-use crate::agent::{AnalysisResult, Analyst, ConversationTurn, LlmUsage, Translator};
+use crate::agent::{
+    Agentic, AnalysisResult, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
+};
 use crate::error::CliResult;
 use crate::validation::validate_cypher;
 
@@ -400,6 +402,8 @@ pub struct DioxusGuiArgs {
     pub renderer: DioxusRenderer,
     pub backend: Arc<dyn GraphBackend>,
     pub translator: Arc<dyn Translator>,
+    pub router: Arc<dyn Router>,
+    pub agentic: Arc<dyn Agentic>,
     pub analyst: Arc<dyn Analyst>,
     pub cluster_state: SharedClusterState,
     pub cluster_label: String,
@@ -412,6 +416,8 @@ struct AppContext {
     runtime: Handle,
     backend: Arc<dyn GraphBackend>,
     translator: Arc<dyn Translator>,
+    router: Arc<dyn Router>,
+    agentic: Arc<dyn Agentic>,
     analyst: Arc<dyn Analyst>,
     cluster_state: SharedClusterState,
     shared: Arc<Mutex<SharedState>>,
@@ -453,6 +459,8 @@ struct FeedItem {
     analysis_pending: bool,
     context_summary: Option<String>,
     context_bindings: Option<HashMap<String, Value>>,
+    route: Option<RouteDecision>,
+    agent_steps: Option<usize>,
 }
 
 impl FeedItem {
@@ -473,6 +481,8 @@ impl FeedItem {
             analysis_pending: false,
             context_summary: None,
             context_bindings: None,
+            route: None,
+            agent_steps: None,
         }
     }
 }
@@ -578,6 +588,8 @@ pub fn run_gui_dioxus(args: DioxusGuiArgs) -> CliResult<()> {
         runtime: args.runtime_handle.clone(),
         backend: args.backend,
         translator: args.translator,
+        router: args.router,
+        agentic: args.agentic,
         analyst: args.analyst,
         cluster_state: args.cluster_state,
         shared: Arc::new(Mutex::new(SharedState {
@@ -833,12 +845,23 @@ fn render_feed_card(item: &FeedItem, context: &AppContext) -> Element {
                 div { class: "state", "{render_state}" }
             }
             {cypher_block}
-            if item.llm_duration_ms.is_some() || item.exec_duration_ms.is_some() || item.llm_usage.is_some() {
+            if item.llm_duration_ms.is_some()
+                || item.exec_duration_ms.is_some()
+                || item.llm_usage.is_some()
+                || item.route.is_some()
+            {
                 div { class: "meta",
                     if let Some(ms) = item.llm_duration_ms { span { "llm {format_duration(ms)}" } }
                     if let Some(ms) = item.exec_duration_ms { span { " · query {format_duration(ms)}" } }
                     if let Some(usage) = item.llm_usage.as_ref() {
                         span { " · tokens {usage.prompt_tokens}/{usage.completion_tokens}/{usage.total_tokens}" }
+                    }
+                    if let Some(route) = item.route {
+                        if let Some(steps) = item.agent_steps {
+                            span { " · route {route.as_str()} steps {steps}" }
+                        } else {
+                            span { " · route {route.as_str()}" }
+                        }
                     }
                 }
             }
@@ -1142,11 +1165,177 @@ fn submit_question(context: &AppContext, question: String) {
     let runtime = context.runtime.clone();
     let backend = context.backend.clone();
     let translator = context.translator.clone();
+    let router = context.router.clone();
+    let agentic = context.agentic.clone();
     let analyst = context.analyst.clone();
     let analysis_context = build_context_with_budget(&context, &read_shared(&context));
     let analysis_summary = read_shared(&context).context_compact_summary.clone();
 
     runtime.spawn(async move {
+        let mut usage_acc = UsageAccumulator::default();
+
+        update_feed_item(&context, id, |item| {
+            item.state = FeedState::Translating;
+            item.analysis = None;
+            item.analysis_error = None;
+            item.analysis_pending = false;
+        });
+        notify(&context);
+
+        let mut route = RouteDecision::OneShot;
+        let route_start = Instant::now();
+        match router.classify(&question).await {
+            Ok(route_result) => {
+                let route_ms = route_start.elapsed().as_millis();
+                log_llm_call("router", route_ms, route_result.usage.as_ref());
+                usage_acc.add(route_result.usage.as_ref());
+                route = route_result.decision;
+                update_feed_item(&context, id, |item| {
+                    item.route = Some(route);
+                    if route == RouteDecision::OneShot {
+                        item.agent_steps = Some(0);
+                    }
+                });
+                notify(&context);
+            }
+            Err(err) => {
+                tracing::warn!("Router failed, falling back to one-shot: {err}");
+                update_feed_item(&context, id, |item| {
+                    item.route = Some(RouteDecision::OneShot);
+                    item.agent_steps = Some(0);
+                });
+                notify(&context);
+            }
+        }
+
+        if route == RouteDecision::MultiTurn {
+            let plan_start = Instant::now();
+            match agentic
+                .plan(
+                    &question,
+                    &analysis_context,
+                    analysis_summary.as_deref(),
+                    backend.as_ref(),
+                )
+                .await
+            {
+                Ok(plan) => {
+                    let plan_ms = plan_start.elapsed().as_millis();
+                    log_llm_call("agentic", plan_ms, plan.usage.as_ref());
+                    usage_acc.add(plan.usage.as_ref());
+                    let params = merge_params(plan.params.clone(), &analysis_context);
+                    update_feed_item(&context, id, |item| {
+                        item.route = Some(RouteDecision::MultiTurn);
+                        item.agent_steps = Some(plan.steps.len());
+                    });
+                    notify(&context);
+
+                    update_feed_item(&context, id, |item| {
+                        item.cypher = Some(plan.cypher.clone());
+                        item.params = params.clone();
+                        item.llm_usage = usage_acc.build();
+                        item.llm_duration_ms = Some(plan_ms);
+                        item.state = FeedState::Validating;
+                    });
+                    notify(&context);
+
+                    match validate_cypher(&plan.cypher) {
+                        Ok(()) => {
+                            let cypher = plan.cypher.clone();
+                            update_feed_item(&context, id, |item| {
+                                item.state = FeedState::Running;
+                                item.params = params.clone();
+                            });
+                            notify(&context);
+
+                            let exec_start = Instant::now();
+                            match backend.execute_query(cypher.clone(), params.clone()).await {
+                                Ok(records) => {
+                                    let exec_ms = exec_start.elapsed().as_millis();
+                                    let summary = summarize_records(&records);
+                                    let classified = classify_result(&records);
+                                    update_feed_item(&context, id, |item| {
+                                        item.state = FeedState::Ready;
+                                        item.result = classified;
+                                        item.exec_duration_ms = Some(exec_ms);
+                                        item.context_summary = Some(summary.clone());
+                                        item.context_bindings = extract_context_bindings(&records);
+                                    });
+                                    notify(&context);
+
+                                    update_feed_item(&context, id, |item| {
+                                        item.analysis_pending = true;
+                                    });
+                                    notify(&context);
+
+                                    let analysis_start = Instant::now();
+                                    match analyst
+                                        .analyze(
+                                            &question,
+                                            &cypher,
+                                            &records,
+                                            &summary,
+                                            &analysis_context,
+                                            analysis_summary.as_deref(),
+                                        )
+                                        .await
+                                    {
+                                        Ok(analysis) => {
+                                            let analysis_ms = analysis_start.elapsed().as_millis();
+                                            log_llm_call(
+                                                "analysis",
+                                                analysis_ms,
+                                                analysis.usage.as_ref(),
+                                            );
+                                            update_feed_item(&context, id, |item| {
+                                                item.analysis = Some(analysis);
+                                                item.analysis_duration_ms = Some(analysis_ms);
+                                                item.analysis_pending = false;
+                                                item.analysis_error = None;
+                                            });
+                                        }
+                                        Err(err) => {
+                                            let analysis_ms = analysis_start.elapsed().as_millis();
+                                            update_feed_item(&context, id, |item| {
+                                                item.analysis_error = Some(err.to_string());
+                                                item.analysis_duration_ms = Some(analysis_ms);
+                                                item.analysis_pending = false;
+                                            });
+                                        }
+                                    }
+                                    notify(&context);
+                                }
+                                Err(err) => {
+                                    let exec_ms = exec_start.elapsed().as_millis();
+                                    update_feed_item(&context, id, |item| {
+                                        item.state = FeedState::Error(err.to_string());
+                                        item.exec_duration_ms = Some(exec_ms);
+                                    });
+                                    notify(&context);
+                                }
+                            }
+                            return;
+                        }
+                        Err(issue) => {
+                            update_feed_item(&context, id, |item| {
+                                item.state = FeedState::Error(issue.to_string());
+                            });
+                            notify(&context);
+                            return;
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("Agentic planning failed, falling back to one-shot: {err}");
+                    update_feed_item(&context, id, |item| {
+                        item.route = Some(RouteDecision::OneShot);
+                        item.agent_steps = Some(0);
+                    });
+                    notify(&context);
+                }
+            }
+        }
+
         let mut attempt = 0usize;
         let mut feedback: Option<String> = None;
 
@@ -1183,13 +1372,14 @@ fn submit_question(context: &AppContext, question: String) {
                 }
             };
             log_llm_call("translator", llm_ms, result.usage.as_ref());
+            usage_acc.add(result.usage.as_ref());
 
             let params = merge_params(result.params.clone(), &analysis_context);
 
             update_feed_item(&context, id, |item| {
                 item.cypher = Some(result.cypher.clone());
                 item.params = params.clone();
-                item.llm_usage = result.usage.clone();
+                item.llm_usage = usage_acc.build();
                 item.llm_duration_ms = Some(llm_ms);
                 item.state = FeedState::Validating;
             });
@@ -2197,6 +2387,69 @@ fn format_duration(ms: u128) -> String {
         format!("{:.2}s", ms as f64 / 1000.0)
     } else {
         format!("{ms} ms")
+    }
+}
+
+#[derive(Default)]
+struct UsageAccumulator {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    reasoning_tokens: Option<u32>,
+    cached_tokens: Option<u32>,
+    seen: bool,
+    reasoning_complete: bool,
+    cached_complete: bool,
+}
+
+impl UsageAccumulator {
+    fn add(&mut self, usage: Option<&LlmUsage>) {
+        let Some(usage) = usage else {
+            return;
+        };
+        if !self.seen {
+            self.seen = true;
+            self.reasoning_complete = true;
+            self.cached_complete = true;
+            self.reasoning_tokens = Some(0);
+            self.cached_tokens = Some(0);
+        }
+        self.prompt_tokens = self.prompt_tokens.saturating_add(usage.prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(usage.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+
+        if !self.reasoning_complete {
+            // Already missing in a prior call; keep None.
+        } else if let Some(tokens) = usage.reasoning_tokens {
+            self.reasoning_tokens = Some(self.reasoning_tokens.unwrap_or(0) + tokens);
+        } else {
+            self.reasoning_tokens = None;
+            self.reasoning_complete = false;
+        }
+
+        if !self.cached_complete {
+            // Already missing in a prior call; keep None.
+        } else if let Some(tokens) = usage.cached_tokens {
+            self.cached_tokens = Some(self.cached_tokens.unwrap_or(0) + tokens);
+        } else {
+            self.cached_tokens = None;
+            self.cached_complete = false;
+        }
+    }
+
+    fn build(&self) -> Option<LlmUsage> {
+        if !self.seen {
+            return None;
+        }
+        Some(LlmUsage {
+            prompt_tokens: self.prompt_tokens,
+            completion_tokens: self.completion_tokens,
+            total_tokens: self.total_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+            cached_tokens: self.cached_tokens,
+        })
     }
 }
 

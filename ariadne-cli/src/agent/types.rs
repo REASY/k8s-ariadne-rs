@@ -70,3 +70,56 @@ pub struct AnalysisResult {
     pub confidence: String,
     pub usage: Option<LlmUsage>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteDecision {
+    OneShot,
+    MultiTurn,
+}
+
+impl RouteDecision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RouteDecision::OneShot => "one_shot",
+            RouteDecision::MultiTurn => "multi_turn",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteResult {
+    pub decision: RouteDecision,
+    pub usage: Option<LlmUsage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentAction {
+    Query,
+    Final,
+}
+
+impl AgentAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentAction::Query => "query",
+            AgentAction::Final => "final",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentStep {
+    pub action: AgentAction,
+    pub cypher: String,
+    pub params: Option<HashMap<String, Value>>,
+    pub result_summary: Option<String>,
+    pub usage: Option<LlmUsage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentPlan {
+    pub cypher: String,
+    pub params: Option<HashMap<String, Value>>,
+    pub steps: Vec<AgentStep>,
+    pub usage: Option<LlmUsage>,
+}

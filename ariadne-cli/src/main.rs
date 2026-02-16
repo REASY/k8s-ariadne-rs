@@ -19,7 +19,8 @@ use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
 
 use crate::agent::{
-    context_window_tokens_for_model, Analyst, LlmConfig, LlmTranslator, SreAnalyst, Translator,
+    context_window_tokens_for_model, Agentic, Analyst, LlmAgentic, LlmConfig, LlmRouter,
+    LlmTranslator, Router, SreAnalyst, Translator,
 };
 use crate::error::CliResult;
 use crate::gui::{run_gui, GuiArgs};
@@ -140,6 +141,8 @@ fn main() -> CliResult<()> {
         structured_output: cli.llm_structured_output,
     };
     let translator: Arc<dyn Translator> = Arc::new(LlmTranslator::try_new(llm_config.clone())?);
+    let router: Arc<dyn Router> = Arc::new(LlmRouter::try_new(llm_config.clone())?);
+    let agentic: Arc<dyn Agentic> = Arc::new(LlmAgentic::try_new(llm_config.clone())?);
     let analyst: Arc<dyn Analyst> = Arc::new(SreAnalyst::try_new(llm_config)?);
 
     let cluster_label = {
@@ -153,6 +156,8 @@ fn main() -> CliResult<()> {
             runtime_handle: runtime.handle().clone(),
             backend: backend.clone(),
             translator: translator.clone(),
+            router: router.clone(),
+            agentic: agentic.clone(),
             analyst: analyst.clone(),
             cluster_state: cluster_state.clone(),
             token: token.clone(),
@@ -165,6 +170,8 @@ fn main() -> CliResult<()> {
             renderer: DioxusRenderer::Desktop,
             backend: backend.clone(),
             translator: translator.clone(),
+            router: router.clone(),
+            agentic: agentic.clone(),
             analyst: analyst.clone(),
             cluster_state: cluster_state.clone(),
             cluster_label,
@@ -176,6 +183,8 @@ fn main() -> CliResult<()> {
             renderer: DioxusRenderer::Native,
             backend: backend.clone(),
             translator: translator.clone(),
+            router: router.clone(),
+            agentic: agentic.clone(),
             analyst: analyst.clone(),
             cluster_state: cluster_state.clone(),
             cluster_label,
