@@ -122,6 +122,10 @@ impl ServerHandler for KubeTool {
             server_info: Implementation {
                 name: PROJECT_NAME.to_owned(),
                 title: Some(PROJECT_NAME.to_owned()),
+                description: Some(format!(
+                    "MCP server for Kubernetes cluster {}",
+                    self.cluster_name
+                )),
                 version: APP_VERSION.to_owned(),
                 icons: None,
                 website_url: None,
