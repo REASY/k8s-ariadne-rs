@@ -24,9 +24,9 @@ The Rust MCP server is the primary product surface. The Rust CLI and Python agen
 
 ## Demo
 
-https://github.com/user-attachments/assets/820065c6-191f-4fdf-9e3a-53f3d32b7ee6
+https://github.com/user-attachments/assets/c73a521e-612d-4cad-9dc2-a22acd431baf
 
-[cli.mp4](docs/demo/cli.mp4)
+[mcp.mp4](docs/demo/mcp.mp4)
 
 ## Why Ariadne
 
