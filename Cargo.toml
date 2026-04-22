@@ -23,15 +23,15 @@ ariadne-core = { path = "ariadne-core" }
 ariadne-cypher = { path = "ariadne-cypher" }
 ariadne-tools = { path = "ariadne-tools" }
 async-trait = "0.1"
-axum = "0.8.8"
+axum = "0.8.9"
 axum-prometheus = "0.10"
 chrono = { version = "0.4" }
 clap = {  version = "4.6", features = ["derive", "env"] }
 const_format = "0.2"
 crossbeam = "0.8"
-dioxus = "0.7.4"
-dioxus-desktop = "0.7.4"
-dioxus-native = "0.7.4"
+dioxus = "0.7.6"
+dioxus-desktop = "0.7.6"
+dioxus-native = "0.7.6"
 eframe = "0.34.1"
 egui = "0.34.1"
 egui_extras = "0.34.1"
@@ -39,11 +39,11 @@ futures = {  version = "0.3" }
 http = "1"
 k8s-openapi = { version = "0.27.1", features = ["v1_32", "schemars"] }
 kube = { version = "3.1.0", features = ["runtime"] }
-llm = { version = "1.3.7", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "google", "groq"]}
+llm = { version = "1.3.8", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "google", "groq"]}
 metrics = "0.24"
 petgraph = { version = "0.8.3", features = ["serde-1"] }
 reqwest = { version = "0.13", features = ["json", "rustls-tls"] }
-rmcp = { version = "1.3.0", features = ["server", "transport-streamable-http-server", "macros", "transport-worker"] }
+rmcp = { version = "1.5.0", features = ["server", "transport-streamable-http-server", "macros", "transport-worker"] }
 rsmgclient = { version = "3.0.0" }
 rustls = "0.23"
 schemars = { version = "1.2.1", features = ["derive"] }
@@ -57,13 +57,13 @@ testcontainers = { version = "0.27", features = ["watchdog", "blocking"] }
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
-toml = "1.1.0"
+toml = "1.1.2"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "compression-br", "propagate-header", "sensitive-headers", "cors", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = "0.26"
-tree-sitter-cypher = { git="https://github.com/taekwombo/tree-sitter-cypher.git", rev = "ae03ad90204521ffeab7930df27fa73bd49e8cd4" }
+tree-sitter-cypher = { git="https://github.com/taekwombo/tree-sitter-cypher.git", rev = "fd6c44af569431e51f251a15e2ebb2efb11ff983" }
 
 [profile.profiling]
 inherits = "release"
