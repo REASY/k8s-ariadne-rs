@@ -124,14 +124,13 @@ impl ClusterState {
                     .id_to_node
                     .get(&id)
                     .map(|existing| existing.resource_type.clone())
+                    && existing_type != node.resource_type
                 {
-                    if existing_type != node.resource_type {
-                        self.remove_node_index(&existing_type, id);
-                        self.nodes_by_type
-                            .entry(node.resource_type.clone())
-                            .or_default()
-                            .push(id);
-                    }
+                    self.remove_node_index(&existing_type, id);
+                    self.nodes_by_type
+                        .entry(node.resource_type.clone())
+                        .or_default()
+                        .push(id);
                 }
                 self.id_to_node.insert(id, node);
             }
@@ -181,7 +180,9 @@ impl ClusterState {
                 }
             }
             (from_id, to_id) => {
-                trace!("Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}")
+                trace!(
+                    "Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}"
+                )
             }
         }
     }
@@ -274,18 +275,18 @@ impl ClusterState {
     }
 
     fn remove_node_index(&mut self, node_type: &ResourceType, node_id: NodeId) {
-        if let Some(list) = self.nodes_by_type.get_mut(node_type) {
-            if let Some(pos) = list.iter().position(|id| *id == node_id) {
-                list.swap_remove(pos);
-            }
+        if let Some(list) = self.nodes_by_type.get_mut(node_type)
+            && let Some(pos) = list.iter().position(|id| *id == node_id)
+        {
+            list.swap_remove(pos);
         }
     }
 
     fn remove_edge_index(&mut self, edge: &Edge, from: NodeId, to: NodeId) {
-        if let Some(list) = self.edges_by_type.get_mut(edge) {
-            if let Some(pos) = list.iter().position(|(s, t)| *s == from && *t == to) {
-                list.swap_remove(pos);
-            }
+        if let Some(list) = self.edges_by_type.get_mut(edge)
+            && let Some(pos) = list.iter().position(|(s, t)| *s == from && *t == to)
+        {
+            list.swap_remove(pos);
         }
     }
 
@@ -318,34 +319,34 @@ impl ClusterState {
             processed: &mut HashSet<String>,
         ) {
             for item in &resource_diff.added {
-                if let Some(uid) = item.meta().uid.as_deref() {
-                    if processed.insert(uid.to_string()) {
-                        match new_state.node_by_uid(uid) {
-                            Some(node) => out.added_nodes.push(node.clone()),
-                            None => warn!("Added resource {uid} missing from new state"),
-                        }
+                if let Some(uid) = item.meta().uid.as_deref()
+                    && processed.insert(uid.to_string())
+                {
+                    match new_state.node_by_uid(uid) {
+                        Some(node) => out.added_nodes.push(node.clone()),
+                        None => warn!("Added resource {uid} missing from new state"),
                     }
                 }
             }
 
             for item in &resource_diff.removed {
-                if let Some(uid) = item.meta().uid.as_deref() {
-                    if processed.insert(uid.to_string()) {
-                        match prev_state.node_by_uid(uid) {
-                            Some(node) => out.removed_nodes.push(node.clone()),
-                            None => warn!("Removed resource {uid} missing from previous state"),
-                        }
+                if let Some(uid) = item.meta().uid.as_deref()
+                    && processed.insert(uid.to_string())
+                {
+                    match prev_state.node_by_uid(uid) {
+                        Some(node) => out.removed_nodes.push(node.clone()),
+                        None => warn!("Removed resource {uid} missing from previous state"),
                     }
                 }
             }
 
             for item in &resource_diff.modified {
-                if let Some(uid) = item.meta().uid.as_deref() {
-                    if processed.insert(uid.to_string()) {
-                        match new_state.node_by_uid(uid) {
-                            Some(node) => out.modified_nodes.push(node.clone()),
-                            None => warn!("Modified resource {uid} missing from new state"),
-                        }
+                if let Some(uid) = item.meta().uid.as_deref()
+                    && processed.insert(uid.to_string())
+                {
+                    match new_state.node_by_uid(uid) {
+                        Some(node) => out.modified_nodes.push(node.clone()),
+                        None => warn!("Modified resource {uid} missing from new state"),
                     }
                 }
             }

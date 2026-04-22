@@ -14,5 +14,18 @@ pub trait GraphBackend: Send + Sync + std::fmt::Debug {
         query: String,
         params: Option<HashMap<String, Value>>,
     ) -> Result<Vec<Value>>;
+    async fn execute_query_with_columns(
+        &self,
+        query: String,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        let rows = self.execute_query(query, params).await?;
+        let columns = rows
+            .first()
+            .and_then(Value::as_object)
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default();
+        Ok((columns, rows))
+    }
     async fn shutdown(&self);
 }

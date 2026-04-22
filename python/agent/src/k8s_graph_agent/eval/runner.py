@@ -12,13 +12,19 @@ from typing import Any, Iterable, Mapping, cast
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..adk_translate import AdkCypherTranslator, TranslationOutcome, TranslationAttempt
+from ..adk_translate import (
+    AdkCypherTranslator,
+    TokenUsage,
+    TranslationAttempt,
+    TranslationOutcome,
+)
 from ..agent import GraphMcpClient
 from ..config import AdkConfig, AgentConfig
-from ..mcp_client import StreamableHttpMcpClient
+from ..mcp_client import JsonRpcError, StreamableHttpMcpClient
 from ..models import JsonValue
 from ..logging_utils import format_java_like
 from .loader import load_dataset
+from .matching import MatchType, evaluate_expected_match
 from .models import EvalQuestion, ExpectedResult
 
 logger = logging.getLogger(__name__)
@@ -34,6 +40,15 @@ class EvalRecord:
     attempts: list[dict[str, Any]]
     final: dict[str, Any]
     metrics: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class QueryFailureClassification:
+    match_type: str
+    error_field: str
+    error_message: str
+    issue_kind: str | None = None
+    issue_source: str | None = None
 
 
 def run_evaluation(
@@ -173,7 +188,6 @@ def _run_question(
         )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
-    attempts_payload = [_attempt_payload(a) for a in outcome.attempts]
     final_payload: dict[str, Any] = {
         "valid": outcome.cypher is not None,
         "error": outcome.error,
@@ -181,25 +195,70 @@ def _run_question(
     }
     result_match: bool | None = None
     execution_error: str | None = None
+    query_failure: QueryFailureClassification | None = None
+    attempts = list(outcome.attempts)
+    total_usage = TokenUsage()
+    total_usage.add(outcome.total_usage)
     if outcome.cypher:
         try:
             result = graph.execute_cypher(outcome.cypher)
             if question.expected:
-                result_match = _match_expected(result, question.expected)
+                match_eval = evaluate_expected_match(result, question.expected)
+                result_match = match_eval.matched
+                final_payload["match_type"] = match_eval.match_type.value
+                final_payload["match_details"] = match_eval.as_dict()
             final_payload["rows"] = _count_rows(result)
         except Exception as exc:
             execution_error = str(exc)
+            repaired = _attempt_execution_repair(
+                translator=translator,
+                graph=graph,
+                question=question,
+                mode=mode,
+                original_cypher=outcome.cypher,
+                execution_error=execution_error,
+            )
+            if repaired is not None:
+                repair_outcome, result = repaired
+                attempts.extend(repair_outcome.attempts)
+                total_usage.add(repair_outcome.total_usage)
+                final_payload.update(
+                    {
+                        "valid": repair_outcome.cypher is not None,
+                        "error": repair_outcome.error,
+                        "cypher": repair_outcome.cypher,
+                    }
+                )
+                execution_error = None
+                if question.expected:
+                    match_eval = evaluate_expected_match(result, question.expected)
+                    result_match = match_eval.matched
+                    final_payload["match_type"] = match_eval.match_type.value
+                    final_payload["match_details"] = match_eval.as_dict()
+                final_payload["rows"] = _count_rows(result)
+            else:
+                query_failure = _classify_query_failure(exc)
     if execution_error:
-        final_payload["execution_error"] = execution_error
+        assert query_failure is not None
+        final_payload[query_failure.error_field] = query_failure.error_message
+        if query_failure.issue_kind is not None:
+            final_payload["query_issue_kind"] = query_failure.issue_kind
+        if query_failure.issue_source is not None:
+            final_payload["query_issue_source"] = query_failure.issue_source
+        final_payload["match_type"] = query_failure.match_type
     if question.expected is not None:
         final_payload["result_match"] = result_match
+        if "match_type" not in final_payload:
+            final_payload["match_type"] = (
+                MatchType.INVALID.value if not outcome.cypher else None
+            )
 
     metrics = {
-        "attempts": len(outcome.attempts),
+        "attempts": len(attempts),
         "latency_ms": elapsed_ms,
-        "total_tokens": outcome.total_usage.total_tokens,
-        "total_prompt_tokens": outcome.total_usage.prompt_tokens,
-        "total_output_tokens": outcome.total_usage.output_tokens,
+        "total_tokens": total_usage.total_tokens,
+        "total_prompt_tokens": total_usage.prompt_tokens,
+        "total_output_tokens": total_usage.output_tokens,
     }
 
     return EvalRecord(
@@ -207,7 +266,7 @@ def _run_question(
         question_id=question.id,
         run_index=run_index,
         mode=mode,
-        attempts=attempts_payload,
+        attempts=[_attempt_payload(a) for a in attempts],
         final=final_payload,
         metrics=metrics,
     )
@@ -375,42 +434,85 @@ def _attempt_payload(attempt: TranslationAttempt) -> dict[str, Any]:
     }
 
 
-def _match_expected(result: JsonValue, expected: ExpectedResult) -> bool:
-    if not isinstance(result, list):
-        return False
-    if not all(isinstance(row, Mapping) for row in result):
-        return False
-    normalized = _normalize_rows(
-        cast(Iterable[Mapping[str, Any]], result), expected.columns
+def _attempt_execution_repair(
+    translator: AdkCypherTranslator,
+    graph: GraphMcpClient,
+    question: EvalQuestion,
+    mode: str,
+    original_cypher: str,
+    execution_error: str,
+) -> tuple[TranslationOutcome, JsonValue] | None:
+    if mode != "retry":
+        return None
+    retry_fn = getattr(translator, "translate_with_execution_error", None)
+    if not callable(retry_fn):
+        return None
+    logger.warning(
+        "execution failed for %s; attempting repair: %s",
+        question.id,
+        execution_error,
     )
-    if normalized is None:
-        return False
-    expected_rows = [tuple(row) for row in expected.rows]
-    if expected.ordered:
-        return normalized == expected_rows
-    return _multiset_equal(normalized, expected_rows)
-
-
-def _normalize_rows(
-    rows: Iterable[Mapping[str, Any]], columns: list[str]
-) -> list[tuple[Any, ...]] | None:
-    normalized: list[tuple[Any, ...]] = []
-    for row in rows:
-        if not isinstance(row, Mapping):
-            return None
-        if any(col not in row for col in columns):
-            return None
-        normalized.append(tuple(row[col] for col in columns))
-    return normalized
-
-
-def _multiset_equal(left: list[tuple[Any, ...]], right: list[tuple[Any, ...]]) -> bool:
-    from collections import Counter
-
-    return Counter(left) == Counter(right)
+    try:
+        repair_outcome = retry_fn(
+            question.question,
+            original_cypher,
+            execution_error,
+            max_attempts=1,
+        )
+    except Exception as exc:
+        logger.warning(
+            "execution-guided repair failed for %s\n%s",
+            question.id,
+            format_java_like(exc),
+        )
+        return None
+    if repair_outcome.cypher is None:
+        return None
+    try:
+        result = graph.execute_cypher(repair_outcome.cypher)
+    except Exception:
+        return None
+    return repair_outcome, result
 
 
 def _count_rows(result: JsonValue) -> int | None:
     if isinstance(result, list):
         return len(result)
     return None
+
+
+def _classify_query_failure(exc: Exception) -> QueryFailureClassification:
+    issue_kind: str | None = None
+    issue_source: str | None = None
+    if isinstance(exc, JsonRpcError):
+        data = exc.error.get("data")
+        if isinstance(data, dict):
+            raw_kind = data.get("kind")
+            raw_source = data.get("source")
+            if isinstance(raw_kind, str) and raw_kind:
+                issue_kind = raw_kind
+            if isinstance(raw_source, str) and raw_source:
+                issue_source = raw_source
+        if issue_source == "validator":
+            return QueryFailureClassification(
+                match_type=_validator_match_type(issue_kind),
+                error_field="validator_error",
+                error_message=str(exc),
+                issue_kind=issue_kind,
+                issue_source=issue_source,
+            )
+    return QueryFailureClassification(
+        match_type=MatchType.EXECUTION_ERROR.value,
+        error_field="execution_error",
+        error_message=str(exc),
+        issue_kind=issue_kind,
+        issue_source=issue_source,
+    )
+
+
+def _validator_match_type(issue_kind: str | None) -> str:
+    if issue_kind is None:
+        return "validator_error"
+    if issue_kind.startswith("validator_"):
+        return issue_kind
+    return f"validator_{issue_kind}"

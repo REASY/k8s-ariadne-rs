@@ -3,12 +3,12 @@ use crate::prelude::Result;
 use crate::state::{ClusterState, ClusterStateDiff, SharedClusterState};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
 use ariadne_cypher::{
-    parse_query, validate_query, Clause, Expr, Literal, MatchClause, OrderBy, PathPattern, Pattern,
-    ProjectionItem, Query, RelationshipDirection, RelationshipPattern, ReturnClause,
-    ValidationMode,
+    Clause, Expr, Literal, MatchClause, OrderBy, PathPattern, Pattern, ProjectionItem, Query,
+    RelationshipDirection, RelationshipPattern, ReturnClause, ValidationMode, parse_query,
+    validate_query,
 };
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::Metadata;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -443,17 +443,16 @@ fn match_node_pattern(
     stats: &mut QueryStats,
 ) -> Result<Vec<Row>> {
     let var = pattern.variable.as_ref();
-    if let Some(name) = var {
-        if let Some(bound) = row.get(name) {
-            if let Some(uid) = node_uid_from_value(bound) {
-                if let Some(node) = state.node_by_uid(uid) {
-                    if matches_labels(node, &pattern.labels)? {
-                        return Ok(vec![Row::new()]);
-                    }
-                }
-            }
-            return Ok(Vec::new());
+    if let Some(name) = var
+        && let Some(bound) = row.get(name)
+    {
+        if let Some(uid) = node_uid_from_value(bound)
+            && let Some(node) = state.node_by_uid(uid)
+            && matches_labels(node, &pattern.labels)?
+        {
+            return Ok(vec![Row::new()]);
         }
+        return Ok(Vec::new());
     }
 
     let mut results = Vec::new();
@@ -725,47 +724,44 @@ fn match_edge_row(
             continue;
         }
 
-        if let Some(var) = &pattern.left.variable {
-            if let Some(bound) = row.get(var) {
-                if !node_value_matches(bound, left_node) {
-                    continue;
-                }
-            }
+        if let Some(var) = &pattern.left.variable
+            && let Some(bound) = row.get(var)
+            && !node_value_matches(bound, left_node)
+        {
+            continue;
         }
-        if let Some(var) = &pattern.right.variable {
-            if let Some(bound) = row.get(var) {
-                if !node_value_matches(bound, right_node) {
-                    continue;
-                }
-            }
+        if let Some(var) = &pattern.right.variable
+            && let Some(bound) = row.get(var)
+            && !node_value_matches(bound, right_node)
+        {
+            continue;
         }
 
-        if let Some(rel_var) = &pattern.rel.variable {
-            if let Some(bound) = row.get(rel_var) {
-                if !relationship_value_matches(bound, edge, &left_uid, &right_uid) {
-                    continue;
-                }
-            }
+        if let Some(rel_var) = &pattern.rel.variable
+            && let Some(bound) = row.get(rel_var)
+            && !relationship_value_matches(bound, edge, &left_uid, &right_uid)
+        {
+            continue;
         }
 
         let mut binding = Row::new();
-        if let Some(var) = &pattern.left.variable {
-            if !row.contains_key(var) {
-                binding.insert(var.clone(), node_to_value(left_node)?);
-            }
+        if let Some(var) = &pattern.left.variable
+            && !row.contains_key(var)
+        {
+            binding.insert(var.clone(), node_to_value(left_node)?);
         }
-        if let Some(var) = &pattern.right.variable {
-            if !row.contains_key(var) {
-                binding.insert(var.clone(), node_to_value(right_node)?);
-            }
+        if let Some(var) = &pattern.right.variable
+            && !row.contains_key(var)
+        {
+            binding.insert(var.clone(), node_to_value(right_node)?);
         }
-        if let Some(rel_var) = &pattern.rel.variable {
-            if !row.contains_key(rel_var) {
-                binding.insert(
-                    rel_var.clone(),
-                    relationship_to_value(edge, &left_uid, &right_uid),
-                );
-            }
+        if let Some(rel_var) = &pattern.rel.variable
+            && !row.contains_key(rel_var)
+        {
+            binding.insert(
+                rel_var.clone(),
+                relationship_to_value(edge, &left_uid, &right_uid),
+            );
         }
 
         results.push(binding);
@@ -806,10 +802,10 @@ fn node_uid_from_value(value: &Value) -> Option<&str> {
     if let Some(uid) = obj.get("metadata_uid").and_then(|v| v.as_str()) {
         return Some(uid);
     }
-    if let Some(Value::Object(metadata)) = obj.get("metadata") {
-        if let Some(uid) = metadata.get("uid").and_then(|v| v.as_str()) {
-            return Some(uid);
-        }
+    if let Some(Value::Object(metadata)) = obj.get("metadata")
+        && let Some(uid) = metadata.get("uid").and_then(|v| v.as_str())
+    {
+        return Some(uid);
     }
     None
 }
@@ -849,20 +845,20 @@ fn relationship_value_matches(
         Some(obj) => obj,
         None => return false,
     };
-    if let Some(edge_type) = obj.get("type").and_then(|v| v.as_str()) {
-        if !edge_type.eq_ignore_ascii_case(&format!("{:?}", edge.edge_type)) {
-            return false;
-        }
+    if let Some(edge_type) = obj.get("type").and_then(|v| v.as_str())
+        && !edge_type.eq_ignore_ascii_case(&format!("{:?}", edge.edge_type))
+    {
+        return false;
     }
-    if let Some(source) = obj.get("source").and_then(|v| v.as_str()) {
-        if source != left_uid {
-            return false;
-        }
+    if let Some(source) = obj.get("source").and_then(|v| v.as_str())
+        && source != left_uid
+    {
+        return false;
     }
-    if let Some(target) = obj.get("target").and_then(|v| v.as_str()) {
-        if target != right_uid {
-            return false;
-        }
+    if let Some(target) = obj.get("target").and_then(|v| v.as_str())
+        && target != right_uid
+    {
+        return false;
     }
     true
 }
@@ -1450,17 +1446,16 @@ fn exists_node_pattern(
     stats: &mut QueryStats,
 ) -> Result<bool> {
     let var = pattern.variable.as_ref();
-    if let Some(name) = var {
-        if let Some(bound) = row.get(name) {
-            if let Some(uid) = node_uid_from_value(bound) {
-                if let Some(node) = state.node_by_uid(uid) {
-                    if matches_labels(node, &pattern.labels)? {
-                        return exists_binding(row, Row::new(), where_clause, state, params, stats);
-                    }
-                }
-            }
-            return Ok(false);
+    if let Some(name) = var
+        && let Some(bound) = row.get(name)
+    {
+        if let Some(uid) = node_uid_from_value(bound)
+            && let Some(node) = state.node_by_uid(uid)
+            && matches_labels(node, &pattern.labels)?
+        {
+            return exists_binding(row, Row::new(), where_clause, state, params, stats);
         }
+        return Ok(false);
     }
 
     let label_type =
@@ -1837,10 +1832,10 @@ fn eval_list_comprehension(
     for item in items {
         let mut scoped = ctx.row.clone();
         scoped.insert(variable.to_string(), item);
-        if let Some(where_clause) = where_clause {
-            if !eval_bool(where_clause, &scoped, ctx.state, ctx.params, ctx.stats)? {
-                continue;
-            }
+        if let Some(where_clause) = where_clause
+            && !eval_bool(where_clause, &scoped, ctx.state, ctx.params, ctx.stats)?
+        {
+            continue;
         }
         output.push(eval_expr(
             map_expr, &scoped, ctx.state, ctx.params, ctx.stats,
@@ -2283,7 +2278,6 @@ fn node_to_value(obj: &GenericObject) -> Result<Value> {
         ResourceAttributes::Endpoint { endpoint } => serde_json::to_value(endpoint.as_ref())?,
         ResourceAttributes::Host { host } => serde_json::to_value(host.as_ref())?,
         ResourceAttributes::Cluster { cluster } => serde_json::to_value(cluster.as_ref())?,
-        ResourceAttributes::Logs { logs } => serde_json::to_value(logs.as_ref())?,
         ResourceAttributes::Container { container } => serde_json::to_value(container.as_ref())?,
     };
 

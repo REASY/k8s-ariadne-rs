@@ -19,6 +19,19 @@ pub(crate) trait GraphConnection {
         query: &str,
         params: Option<&HashMap<String, Value>>,
     ) -> Result<Vec<Value>>;
+    fn execute_query_with_columns(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        let rows = self.execute_query(query, params)?;
+        let columns = rows
+            .first()
+            .and_then(Value::as_object)
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default();
+        Ok((columns, rows))
+    }
 }
 
 enum Command {
@@ -34,6 +47,11 @@ enum Command {
         query: String,
         params: Option<HashMap<String, Value>>,
         resp: oneshot::Sender<Result<Vec<Value>>>,
+    },
+    ExecuteQueryWithColumns {
+        query: String,
+        params: Option<HashMap<String, Value>>,
+        resp: oneshot::Sender<Result<(Vec<String>, Vec<Value>)>>,
     },
     Shutdown {
         resp: oneshot::Sender<()>,
@@ -118,6 +136,18 @@ impl GraphActor {
                             }
                             let _ = resp.send(res);
                         }
+                        Command::ExecuteQueryWithColumns { query, params, resp } => {
+                            let started = Instant::now();
+                            let res = connection.execute_query_with_columns(&query, params.as_ref());
+                            let elapsed_ms = started.elapsed().as_millis();
+                            info!(
+                                "{label}: execute_query_with_columns ({elapsed_ms} ms): {query}"
+                            );
+                            if let Err(err) = &res {
+                                error!("{label}: execute_query_with_columns failed: {err}");
+                            }
+                            let _ = resp.send(res);
+                        }
                         Command::Shutdown { resp } => {
                             let _ = resp.send(());
                             break;
@@ -187,6 +217,32 @@ impl GraphActor {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.tx
             .send(Command::ExecuteQuery {
+                query: query.into(),
+                params,
+                resp: resp_tx,
+            })
+            .map_err(|e| {
+                std::io::Error::other(format!(
+                    "{label} actor is not available: {e}",
+                    label = self.label
+                ))
+            })?;
+        resp_rx.await.map_err(|e| {
+            std::io::Error::other(format!(
+                "{label} actor response dropped: {e}",
+                label = self.label
+            ))
+        })?
+    }
+
+    pub(crate) async fn execute_query_with_columns(
+        &self,
+        query: impl Into<String>,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.tx
+            .send(Command::ExecuteQueryWithColumns {
                 query: query.into(),
                 params,
                 resp: resp_tx,
@@ -296,6 +352,15 @@ mod tests {
             state.last_query = Some(query.to_string());
             Ok(vec![json!({ "ok": true })])
         }
+
+        fn execute_query_with_columns(
+            &mut self,
+            query: &str,
+            params: Option<&HashMap<String, Value>>,
+        ) -> Result<(Vec<String>, Vec<Value>)> {
+            let rows = self.execute_query(query, params)?;
+            Ok((vec!["ok".to_string()], rows))
+        }
     }
 
     fn build_cluster(uid: &str, name: &str) -> Cluster {
@@ -364,10 +429,17 @@ mod tests {
             .unwrap();
         assert_eq!(results, vec![json!({ "ok": true })]);
 
+        let (columns, rows) = actor
+            .execute_query_with_columns("MATCH (n) RETURN n", None)
+            .await
+            .unwrap();
+        assert_eq!(columns, vec!["ok"]);
+        assert_eq!(rows, vec![json!({ "ok": true })]);
+
         actor.shutdown().await;
 
         let recorded = state.lock().unwrap();
-        assert_eq!(recorded.calls, vec!["create", "update", "query"]);
+        assert_eq!(recorded.calls, vec!["create", "update", "query", "query"]);
         assert_eq!(recorded.create_nodes, 2);
         assert_eq!(recorded.create_edges, 1);
         assert_eq!(recorded.update_added, 1);

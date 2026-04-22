@@ -1,5 +1,5 @@
-use crate::ast::*;
 use crate::CypherError;
+use crate::ast::*;
 use tree_sitter::{Node, Tree};
 
 pub fn parse_query(input: &str) -> Result<Query, CypherError> {
@@ -465,6 +465,7 @@ fn parse_pattern_element(node: Node, input: &str) -> Result<Pattern, CypherError
 fn parse_node_pattern(node: Node, input: &str) -> Result<NodePattern, CypherError> {
     let mut variable = None;
     let mut labels = Vec::new();
+    let mut has_inline_properties = false;
     for child in named_children(node) {
         match child.kind() {
             "variable" => variable = Some(parse_identifier(child, input)?),
@@ -476,10 +477,7 @@ fn parse_node_pattern(node: Node, input: &str) -> Result<NodePattern, CypherErro
                 }
             }
             "properties" => {
-                return Err(CypherError::unsupported(
-                    "node properties in patterns",
-                    Span::from_node(child),
-                ));
+                has_inline_properties = true;
             }
             _ => {}
         }
@@ -488,6 +486,7 @@ fn parse_node_pattern(node: Node, input: &str) -> Result<NodePattern, CypherErro
     Ok(NodePattern {
         variable,
         labels,
+        has_inline_properties,
         span: Span::from_node(node),
     })
 }

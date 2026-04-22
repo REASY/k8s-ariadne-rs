@@ -1,18 +1,20 @@
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 use eframe::egui::{
-    text::LayoutJob, Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Layout,
-    Margin, RichText, ScrollArea, Stroke, TextEdit, TextFormat, TextStyle, Vec2,
+    Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Layout, Margin, RichText,
+    ScrollArea, Stroke, TextEdit, TextFormat, TextStyle, Vec2, text::LayoutJob,
 };
 use egui_extras::{Column, TableBuilder};
 use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
+use ariadne_core::cypher_validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
+use ariadne_core::query_issue::classify_ariadne_error;
 use ariadne_core::state::SharedClusterState;
 use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
@@ -21,7 +23,6 @@ use crate::agent::{
     Agentic, AnalysisResult, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
 };
 use crate::error::CliResult;
-use crate::validation::validate_cypher;
 
 const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
 const COMPACT_CONTEXT_LIMIT: usize = 12;
@@ -192,7 +193,7 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
 
     ctx.set_visuals(visuals);
 
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.text_styles.insert(
         TextStyle::Heading,
         FontId::new(18.0, FontFamily::Proportional),
@@ -215,7 +216,7 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
     style.spacing.item_spacing = Vec2::new(10.0, 10.0);
     style.spacing.window_margin = Margin::same(12);
     style.spacing.button_padding = Vec2::new(8.0, 5.0);
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 #[derive(Debug, Clone)]
@@ -649,10 +650,11 @@ impl GuiApp {
                                     }
                                     Err(err) => {
                                         let exec_ms = exec_start.elapsed().as_millis();
+                                        let issue = classify_ariadne_error(&err);
                                         tracing::error!("Query failed: {err}");
                                         send_event(AppEvent::QueryFailed {
                                             id,
-                                            error: err.to_string(),
+                                            error: issue.to_string(),
                                             cypher,
                                             duration_ms: exec_ms,
                                         });
@@ -781,10 +783,15 @@ impl GuiApp {
                             }
                             Err(err) => {
                                 let exec_ms = exec_start.elapsed().as_millis();
+                                let issue = classify_ariadne_error(&err);
+                                if attempt <= LLM_MAX_RETRIES && issue.repairable() {
+                                    feedback = Some(issue.feedback());
+                                    continue;
+                                }
                                 tracing::error!("Query failed: {err}");
                                 send_event(AppEvent::QueryFailed {
                                     id,
-                                    error: err.to_string(),
+                                    error: issue.to_string(),
                                     cypher,
                                     duration_ms: exec_ms,
                                 });
@@ -794,7 +801,7 @@ impl GuiApp {
                     }
                     Err(issue) => {
                         tracing::error!("Validation failed: {issue}");
-                        if attempt <= LLM_MAX_RETRIES && issue.retriable() {
+                        if attempt <= LLM_MAX_RETRIES && issue.repairable() {
                             feedback = Some(issue.feedback());
                             continue;
                         }
@@ -888,10 +895,11 @@ impl GuiApp {
                         }
                         Err(err) => {
                             let exec_ms = exec_start.elapsed().as_millis();
+                            let issue = classify_ariadne_error(&err);
                             tracing::error!("Query failed: {err}");
                             send_event(AppEvent::QueryFailed {
                                 id,
-                                error: err.to_string(),
+                                error: issue.to_string(),
                                 cypher: cypher.clone(),
                                 duration_ms: exec_ms,
                             });
@@ -1285,18 +1293,19 @@ impl GuiApp {
 }
 
 impl eframe::App for GuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         if self.drain_events() {
             ctx.request_repaint();
         }
         self.update_pulse();
 
-        let screen_width = ctx.available_rect().width();
+        let screen_width = ctx.content_rect().width();
         let inspector_width = if screen_width < 1100.0 { 0.0 } else { 320.0 };
 
         // HEADER
-        egui::TopBottomPanel::top("header")
-            .exact_height(56.0)
+        egui::Panel::top("header")
+            .exact_size(56.0)
             .frame(
                 Frame::new()
                     .fill(self.palette.bg_panel)
@@ -1308,7 +1317,7 @@ impl eframe::App for GuiApp {
                         color: Color32::from_black_alpha(80),
                     }),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.set_height(56.0);
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
@@ -1358,8 +1367,8 @@ impl eframe::App for GuiApp {
             });
 
         // FOOTER
-        egui::TopBottomPanel::bottom("footer")
-            .exact_height(74.0)
+        egui::Panel::bottom("footer")
+            .exact_size(74.0)
             .frame(
                 Frame::new()
                     .fill(self.palette.bg_panel)
@@ -1371,7 +1380,7 @@ impl eframe::App for GuiApp {
                         color: Color32::from_black_alpha(80),
                     }),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.add_space(10.0);
                 let mut has_focus = false;
                 let mut input_id: Option<egui::Id> = None;
@@ -1421,13 +1430,12 @@ impl eframe::App for GuiApp {
                 if has_focus
                     && !self.filtered_suggestions.is_empty()
                     && ctx.input(|i| i.key_pressed(egui::Key::Tab))
+                    && let Some(first) = self.filtered_suggestions.first().cloned()
                 {
-                    if let Some(first) = self.filtered_suggestions.first().cloned() {
-                        self.apply_suggestion(&first);
-                        ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
-                        if let Some(id) = input_id {
-                            ctx.memory_mut(|mem| mem.request_focus(id));
-                        }
+                    self.apply_suggestion(&first);
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+                    if let Some(id) = input_id {
+                        ctx.memory_mut(|mem| mem.request_focus(id));
                     }
                 }
                 let mut show_autocomplete = has_focus;
@@ -1441,62 +1449,63 @@ impl eframe::App for GuiApp {
                         Vec2::new(rect.width(), height),
                     ));
                 }
-                if let Some(rect) = autocomplete_rect {
-                    if ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))) {
-                        show_autocomplete = true;
-                    }
+                if let Some(rect) = autocomplete_rect
+                    && ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p)))
+                {
+                    show_autocomplete = true;
                 }
-                if show_autocomplete && !self.filtered_suggestions.is_empty() {
-                    if let Some(rect) = self.input_rect {
-                        let row_height = 24.0;
-                        let height = row_height * self.filtered_suggestions.len() as f32 + 18.0;
-                        let pos = rect.left_top() - Vec2::new(0.0, height + 10.0);
-                        egui::Area::new(egui::Id::new("autocomplete"))
-                            .order(egui::Order::Foreground)
-                            .fixed_pos(pos)
-                            .show(ctx, |ui| {
-                                Frame::new()
-                                    .fill(self.palette.bg_elevated)
-                                    .stroke(Stroke::new(1.0, self.palette.border))
-                                    .corner_radius(CornerRadius::same(8))
-                                    .inner_margin(Margin::same(8))
-                                    .show(ui, |ui| {
-                                        ui.set_width(rect.width());
-                                        let suggestions = self.filtered_suggestions.clone();
-                                        for (idx, suggestion) in suggestions.iter().enumerate() {
-                                            let button = egui::Button::new(
-                                                RichText::new(suggestion)
-                                                    .color(self.palette.text_primary)
-                                                    .size(12.0),
-                                            )
-                                            .fill(self.palette.bg_primary)
-                                            .stroke(Stroke::new(1.0, self.palette.border))
-                                            .corner_radius(CornerRadius::same(6));
-                                            if ui
-                                                .add_sized([rect.width() - 4.0, 28.0], button)
-                                                .clicked()
-                                            {
-                                                self.apply_suggestion(suggestion);
-                                            }
-                                            if idx + 1 < suggestions.len() {
-                                                ui.add_space(4.0);
-                                            }
+                if show_autocomplete
+                    && !self.filtered_suggestions.is_empty()
+                    && let Some(rect) = self.input_rect
+                {
+                    let row_height = 24.0;
+                    let height = row_height * self.filtered_suggestions.len() as f32 + 18.0;
+                    let pos = rect.left_top() - Vec2::new(0.0, height + 10.0);
+                    egui::Area::new(egui::Id::new("autocomplete"))
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(pos)
+                        .show(&ctx, |ui| {
+                            Frame::new()
+                                .fill(self.palette.bg_elevated)
+                                .stroke(Stroke::new(1.0, self.palette.border))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(Margin::same(8))
+                                .show(ui, |ui| {
+                                    ui.set_width(rect.width());
+                                    let suggestions = self.filtered_suggestions.clone();
+                                    for (idx, suggestion) in suggestions.iter().enumerate() {
+                                        let button = egui::Button::new(
+                                            RichText::new(suggestion)
+                                                .color(self.palette.text_primary)
+                                                .size(12.0),
+                                        )
+                                        .fill(self.palette.bg_primary)
+                                        .stroke(Stroke::new(1.0, self.palette.border))
+                                        .corner_radius(CornerRadius::same(6));
+                                        if ui
+                                            .add_sized([rect.width() - 4.0, 28.0], button)
+                                            .clicked()
+                                        {
+                                            self.apply_suggestion(suggestion);
                                         }
-                                    });
-                            });
-                    }
+                                        if idx + 1 < suggestions.len() {
+                                            ui.add_space(4.0);
+                                        }
+                                    }
+                                });
+                        });
                 }
             });
 
         if self.inspector.is_open && inspector_width > 0.0 {
-            egui::SidePanel::right("inspector")
-                .exact_width(inspector_width)
+            egui::Panel::right("inspector")
+                .exact_size(inspector_width)
                 .frame(
                     Frame::new()
                         .fill(self.palette.bg_panel)
                         .stroke(Stroke::new(1.0, self.palette.border)),
                 )
-                .show(ctx, |ui| {
+                .show_inside(ui, |ui| {
                     ui.add_space(8.0);
                     Frame::new()
                         .fill(self.palette.bg_panel)
@@ -1627,7 +1636,7 @@ impl eframe::App for GuiApp {
 
         egui::CentralPanel::default()
             .frame(Frame::new().fill(self.palette.bg_primary))
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.add_space(12.0);
                 let context_turns = self.build_context_with_budget();
                 let context_tokens = estimate_context_tokens(
@@ -1713,28 +1722,28 @@ impl eframe::App for GuiApp {
                                     );
                                     ui.add_space(6.0);
                                 }
-                                if self.context_compact_summary.is_some() {
-                                    if let Some(ms) = self.context_compact_duration_ms {
-                                        let token_hint = self
-                                            .context_compact_usage
-                                            .as_ref()
-                                            .map(|usage| usage.total_tokens);
-                                        let meta = if let Some(tokens) = token_hint {
-                                            format!(
-                                                "Compacted in {} • {} tokens",
-                                                format_duration(ms),
-                                                tokens
-                                            )
-                                        } else {
-                                            format!("Compacted in {}", format_duration(ms))
-                                        };
-                                        ui.label(
-                                            RichText::new(meta)
-                                                .color(self.palette.text_muted)
-                                                .size(11.0),
-                                        );
-                                        ui.add_space(6.0);
-                                    }
+                                if self.context_compact_summary.is_some()
+                                    && let Some(ms) = self.context_compact_duration_ms
+                                {
+                                    let token_hint = self
+                                        .context_compact_usage
+                                        .as_ref()
+                                        .map(|usage| usage.total_tokens);
+                                    let meta = if let Some(tokens) = token_hint {
+                                        format!(
+                                            "Compacted in {} • {} tokens",
+                                            format_duration(ms),
+                                            tokens
+                                        )
+                                    } else {
+                                        format!("Compacted in {}", format_duration(ms))
+                                    };
+                                    ui.label(
+                                        RichText::new(meta)
+                                            .color(self.palette.text_muted)
+                                            .size(11.0),
+                                    );
+                                    ui.add_space(6.0);
                                 }
 
                                 if self.feed.is_empty() {
@@ -1774,7 +1783,7 @@ impl eframe::App for GuiApp {
             });
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self) {
         self.token.cancel();
     }
 }
@@ -2209,11 +2218,7 @@ fn log_llm_call(label: &str, duration_ms: u128, usage: Option<&LlmUsage>) {
 
 fn estimate_text_tokens(text: &str) -> usize {
     let chars = text.len();
-    if chars == 0 {
-        0
-    } else {
-        (chars / 4).max(1)
-    }
+    if chars == 0 { 0 } else { (chars / 4).max(1) }
 }
 
 fn estimate_turn_tokens(turn: &ConversationTurn) -> usize {
@@ -2977,19 +2982,17 @@ fn classify_result(records: &[Value]) -> ResultPayload {
         return graph;
     }
 
-    if records.len() == 1 {
-        if let Some(obj) = records[0].as_object() {
-            if obj.len() == 1 {
-                if let Some((label, value)) = obj.iter().next() {
-                    let value_str = format_value(value);
-                    return ResultPayload::Metric {
-                        label: label.clone(),
-                        value: value_str,
-                        unit: None,
-                    };
-                }
-            }
-        }
+    if records.len() == 1
+        && let Some(obj) = records[0].as_object()
+        && obj.len() == 1
+        && let Some((label, value)) = obj.iter().next()
+    {
+        let value_str = format_value(value);
+        return ResultPayload::Metric {
+            label: label.clone(),
+            value: value_str,
+            unit: None,
+        };
     }
 
     if records.iter().all(|value| value.is_object()) {
@@ -3043,11 +3046,11 @@ fn merge_params(
     context: &[ConversationTurn],
 ) -> Option<HashMap<String, Value>> {
     let mut merged = params.unwrap_or_default();
-    if let Some(turn) = context.last() {
-        if let Some(bindings) = &turn.bindings {
-            for (key, value) in bindings {
-                merged.entry(key.clone()).or_insert_with(|| value.clone());
-            }
+    if let Some(turn) = context.last()
+        && let Some(bindings) = &turn.bindings
+    {
+        for (key, value) in bindings {
+            merged.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
     if merged.is_empty() {
@@ -3071,10 +3074,9 @@ fn extract_context_bindings(records: &[Value]) -> Option<HashMap<String, Value>>
     if let Some(value) = extract_uniform_value(records, &["pod", "pod_name"]) {
         bindings.insert("pod_name".to_string(), value);
     }
-    if has_pod {
-        if let Some(value) = extract_uniform_value(records, &["pod_namespace", "namespace"]) {
-            bindings.insert("pod_namespace".to_string(), value);
-        }
+    if has_pod && let Some(value) = extract_uniform_value(records, &["pod_namespace", "namespace"])
+    {
+        bindings.insert("pod_namespace".to_string(), value);
     }
     if let Some(value) = extract_uniform_value(records, &["service", "service_name"]) {
         bindings.insert("service_name".to_string(), value);
@@ -3082,10 +3084,8 @@ fn extract_context_bindings(records: &[Value]) -> Option<HashMap<String, Value>>
     if has_service {
         if let Some(value) = extract_uniform_value(records, &["service_namespace"]) {
             bindings.insert("service_namespace".to_string(), value);
-        } else if !has_pod {
-            if let Some(value) = extract_uniform_value(records, &["namespace"]) {
-                bindings.insert("service_namespace".to_string(), value);
-            }
+        } else if !has_pod && let Some(value) = extract_uniform_value(records, &["namespace"]) {
+            bindings.insert("service_namespace".to_string(), value);
         }
     }
     if let Some(value) = extract_uniform_value(records, &["ingress", "ingress_name"]) {
@@ -3129,10 +3129,10 @@ fn extract_uniform_value(records: &[Value], keys: &[&str]) -> Option<Value> {
                 }
             }
         }
-        if count == records.len() {
-            if let Some(found) = value {
-                return Some(found);
-            }
+        if count == records.len()
+            && let Some(found) = value
+        {
+            return Some(found);
         }
     }
     None

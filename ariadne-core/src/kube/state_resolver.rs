@@ -4,16 +4,17 @@ use crate::create_generic_object;
 use crate::graph_backend::GraphBackend;
 use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::snapshot::{
-    write_json_to_dir, write_list_to_dir, SNAPSHOT_CLUSTER_FILE, SNAPSHOT_CONFIG_MAPS_FILE,
-    SNAPSHOT_DAEMON_SETS_FILE, SNAPSHOT_DEPLOYMENTS_FILE, SNAPSHOT_ENDPOINT_SLICES_FILE,
-    SNAPSHOT_EVENTS_FILE, SNAPSHOT_INGRESSES_FILE, SNAPSHOT_JOBS_FILE, SNAPSHOT_NAMESPACES_FILE,
-    SNAPSHOT_NETWORK_POLICIES_FILE, SNAPSHOT_NODES_FILE, SNAPSHOT_PERSISTENT_VOLUMES_FILE,
-    SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE, SNAPSHOT_PODS_FILE, SNAPSHOT_REPLICA_SETS_FILE,
-    SNAPSHOT_SERVICES_FILE, SNAPSHOT_SERVICE_ACCOUNTS_FILE, SNAPSHOT_STATEFUL_SETS_FILE,
-    SNAPSHOT_STORAGE_CLASSES_FILE,
+    SNAPSHOT_CLUSTER_FILE, SNAPSHOT_CONFIG_MAPS_FILE, SNAPSHOT_DAEMON_SETS_FILE,
+    SNAPSHOT_DEPLOYMENTS_FILE, SNAPSHOT_ENDPOINT_SLICES_FILE, SNAPSHOT_EVENTS_FILE,
+    SNAPSHOT_INGRESSES_FILE, SNAPSHOT_JOBS_FILE, SNAPSHOT_NAMESPACES_FILE,
+    SNAPSHOT_NETWORK_POLICIES_FILE, SNAPSHOT_NODES_FILE, SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE,
+    SNAPSHOT_PERSISTENT_VOLUMES_FILE, SNAPSHOT_PODS_FILE, SNAPSHOT_REPLICA_SETS_FILE,
+    SNAPSHOT_SERVICE_ACCOUNTS_FILE, SNAPSHOT_SERVICES_FILE, SNAPSHOT_STATEFUL_SETS_FILE,
+    SNAPSHOT_STORAGE_CLASSES_FILE, write_json_to_dir, write_list_to_dir,
 };
-use crate::state::ClusterState;
+use crate::state::{ClusterState, ClusterStateDiff};
 use crate::types::*;
+use k8s_openapi::Resource;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
@@ -25,16 +26,16 @@ use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use k8s_openapi::Resource;
-use kube::config::KubeConfigOptions;
 use kube::ResourceExt;
+use kube::config::KubeConfigOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -43,11 +44,108 @@ use tracing::{info, trace, warn};
 type IngressDerived = (Vec<Arc<Host>>, Vec<Arc<IngressServiceBackend>>);
 type EndpointSliceDerived = (Vec<Arc<Endpoint>>, Vec<Arc<EndpointAddress>>);
 
+pub const SOURCE_SYNC_POLL_INTERVAL_ENV: &str = "SOURCE_SYNC_POLL_INTERVAL_SECONDS";
+pub const DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS: u64 = 2;
+
+pub fn configured_source_sync_poll_interval() -> Duration {
+    match std::env::var(SOURCE_SYNC_POLL_INTERVAL_ENV) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => {
+                warn!(
+                    env_var = SOURCE_SYNC_POLL_INTERVAL_ENV,
+                    value = %raw,
+                    default_seconds = DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS,
+                    "Invalid source sync poll interval; expected a positive integer, using default"
+                );
+                Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS)
+            }
+            Ok(seconds) => Duration::from_secs(seconds),
+            Err(err) => {
+                warn!(
+                    env_var = SOURCE_SYNC_POLL_INTERVAL_ENV,
+                    value = %raw,
+                    error = %err,
+                    default_seconds = DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS,
+                    "Failed to parse source sync poll interval; using default"
+                );
+                Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS)
+            }
+        },
+        Err(_) => Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StateDiffSummary {
+    pub added_nodes: usize,
+    pub removed_nodes: usize,
+    pub modified_nodes: usize,
+    pub added_edges: usize,
+    pub removed_edges: usize,
+}
+
+impl StateDiffSummary {
+    fn from_diff(diff: &ClusterStateDiff) -> Self {
+        Self {
+            added_nodes: diff.added_nodes.len(),
+            removed_nodes: diff.removed_nodes.len(),
+            modified_nodes: diff.modified_nodes.len(),
+            added_edges: diff.added_edges.len(),
+            removed_edges: diff.removed_edges.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceSyncStage {
+    KubeFetch,
+    Diff,
+    GraphWrite,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceSyncOutcome {
+    pub fetch_duration: Duration,
+    pub diff_duration: Duration,
+    pub write_duration: Option<Duration>,
+    pub diff: StateDiffSummary,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceSyncError {
+    pub stage: SourceSyncStage,
+    pub message: String,
+    pub fetch_duration: Option<Duration>,
+    pub diff_duration: Option<Duration>,
+    pub write_duration: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildStage {
+    StateRead,
+    GraphWrite,
+}
+
+#[derive(Debug, Clone)]
+pub struct RebuildOutcome {
+    pub fetch_duration: Duration,
+    pub write_duration: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub struct RebuildError {
+    pub stage: RebuildStage,
+    pub message: String,
+    pub fetch_duration: Option<Duration>,
+    pub write_duration: Option<Duration>,
+}
+
 pub struct ClusterStateResolver {
     cluster: Cluster,
     kube_client: Arc<Box<dyn KubeClient>>,
     last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
     last_state: Arc<Mutex<ClusterState>>,
+    refresh_lock: Arc<AsyncMutex<()>>,
     #[allow(unused)]
     should_export_snapshot: bool,
 }
@@ -144,6 +242,7 @@ impl ClusterStateResolver {
         cluster_name: String,
         kube_client: Box<dyn KubeClient>,
     ) -> Result<Self> {
+        let bootstrap_started = Instant::now();
         let cluster_url = kube_client.get_cluster_url().await?;
         let info = kube_client.apiserver_version().await?;
         let cluster: Cluster = Cluster::new(
@@ -160,11 +259,16 @@ impl ClusterStateResolver {
         let augmented = Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
 
         let last_state = Arc::new(Mutex::new(Self::create_state(&augmented)));
+        info!(
+            bootstrap_ms = bootstrap_started.elapsed().as_millis(),
+            "Initialized cluster state resolver"
+        );
         Ok(ClusterStateResolver {
             cluster,
             kube_client,
             last_snapshot: Arc::new(Mutex::new(augmented)),
             last_state,
+            refresh_lock: Arc::new(AsyncMutex::new(())),
             should_export_snapshot: false,
         })
     }
@@ -173,13 +277,27 @@ impl ClusterStateResolver {
         cluster: &Cluster,
         kube_client: Arc<Box<dyn KubeClient>>,
     ) -> Result<AugmentedClusterSnapshot> {
+        let observed_started = Instant::now();
         let last_snapshot =
             Self::get_observed_snapshot(cluster.clone(), kube_client.clone()).await?;
+        let observed_duration = observed_started.elapsed();
+        let derived_started = Instant::now();
         let derived_snapshot = Self::get_derived_snapshot(&last_snapshot)?;
+        let derived_duration = derived_started.elapsed();
         let augmented = AugmentedClusterSnapshot {
             observed: last_snapshot,
             derived: derived_snapshot,
         };
+        info!(
+            snapshot_read_ms = observed_duration.as_millis(),
+            derive_ms = derived_duration.as_millis(),
+            containers = augmented.derived.containers.len(),
+            hosts = augmented.derived.hosts.len(),
+            ingress_service_backends = augmented.derived.ingress_service_backends.len(),
+            endpoints = augmented.derived.endpoints.len(),
+            endpoint_addresses = augmented.derived.endpoint_addresses.len(),
+            "Built augmented cluster snapshot"
+        );
         Ok(augmented)
     }
 
@@ -187,12 +305,17 @@ impl ClusterStateResolver {
         cluster: Cluster,
         client: Arc<Box<dyn KubeClient>>,
     ) -> Result<ObservedClusterSnapshot> {
+        let fetch_started = Instant::now();
         let namespaces = client.get_namespaces().await?;
         let events: Vec<Arc<Event>> = client.get_events().await?;
-        let nodes = client
-            .get_nodes()
-            .await
-            .or_else(|_err| Result::Ok(vec![]))?;
+        let nodes = client.get_nodes().await.or_else(|_err| {
+            client
+                .degraded_resource_kinds_handle()
+                .lock()
+                .expect("degraded_resource_kinds lock poisoned")
+                .insert("Node".to_string());
+            Result::Ok(vec![])
+        })?;
         let pods = client.get_pods().await?;
         let deployments = client.get_deployments().await?;
         let stateful_sets = client.get_stateful_sets().await?;
@@ -207,14 +330,22 @@ impl ClusterStateResolver {
 
         let config_maps = client.get_config_maps().await?;
 
-        let storage_classes = client
-            .get_storage_classes()
-            .await
-            .or_else(|_err| Result::Ok(vec![]))?;
-        let persistent_volumes = client
-            .get_persistent_volumes()
-            .await
-            .or_else(|_err| Result::Ok(vec![]))?;
+        let storage_classes = client.get_storage_classes().await.or_else(|_err| {
+            client
+                .degraded_resource_kinds_handle()
+                .lock()
+                .expect("degraded_resource_kinds lock poisoned")
+                .insert("StorageClass".to_string());
+            Result::Ok(vec![])
+        })?;
+        let persistent_volumes = client.get_persistent_volumes().await.or_else(|_err| {
+            client
+                .degraded_resource_kinds_handle()
+                .lock()
+                .expect("degraded_resource_kinds lock poisoned")
+                .insert("PersistentVolume".to_string());
+            Result::Ok(vec![])
+        })?;
         let persistent_volume_claims = client
             .get_persistent_volume_claims()
             .await
@@ -243,6 +374,28 @@ impl ClusterStateResolver {
             service_accounts,
             events,
         };
+        info!(
+            snapshot_read_ms = fetch_started.elapsed().as_millis(),
+            namespaces = snapshot.namespaces.len(),
+            pods = snapshot.pods.len(),
+            deployments = snapshot.deployments.len(),
+            stateful_sets = snapshot.stateful_sets.len(),
+            replica_sets = snapshot.replica_sets.len(),
+            daemon_sets = snapshot.daemon_sets.len(),
+            jobs = snapshot.jobs.len(),
+            ingresses = snapshot.ingresses.len(),
+            services = snapshot.services.len(),
+            endpoint_slices = snapshot.endpoint_slices.len(),
+            network_policies = snapshot.network_policies.len(),
+            config_maps = snapshot.config_maps.len(),
+            storage_classes = snapshot.storage_classes.len(),
+            persistent_volumes = snapshot.persistent_volumes.len(),
+            persistent_volume_claims = snapshot.persistent_volume_claims.len(),
+            nodes = snapshot.nodes.len(),
+            service_accounts = snapshot.service_accounts.len(),
+            events = snapshot.events.len(),
+            "Fetched observed cluster snapshot from source"
+        );
         Ok(snapshot)
     }
 
@@ -272,20 +425,21 @@ impl ClusterStateResolver {
         let kube_client = self.kube_client.clone();
         let last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>> = self.last_snapshot.clone();
         let last_state: Arc<Mutex<ClusterState>> = self.last_state.clone();
-        let task = tokio::spawn(async move {
+        let refresh_lock = self.refresh_lock.clone();
+
+        tokio::spawn(async move {
             Self::diff_loop(
                 cluster,
                 kube_client,
                 last_snapshot,
                 last_state,
+                refresh_lock,
                 backend,
                 token,
             )
             .await
             .expect("Diff loop failed");
-        });
-
-        task
+        })
     }
 
     async fn diff_loop(
@@ -293,10 +447,11 @@ impl ClusterStateResolver {
         kube_client: Arc<Box<dyn KubeClient>>,
         last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
         last_state: Arc<Mutex<ClusterState>>,
+        refresh_lock: Arc<AsyncMutex<()>>,
         backend: Arc<dyn GraphBackend>,
         token: CancellationToken,
     ) -> Result<()> {
-        let poll_interval: Duration = Duration::from_secs(5);
+        let poll_interval = configured_source_sync_poll_interval();
         let mut id: usize = 0;
         loop {
             tokio::select! {
@@ -304,58 +459,16 @@ impl ClusterStateResolver {
                     break;
                 },
                 _ = sleep(poll_interval) => {
-
-                    let current_snapshot =
-                        Self::get_augmented_snapshot(&cluster, kube_client.clone()).await?;
-
-                    let new_cluster_state = Self::create_state(&current_snapshot);
-
-                    let previous_snapshot = {
-                        let last_snapshot_guard = last_snapshot
-                            .lock()
-                            .expect("Failed to lock last_snapshot for diff computation");
-                        last_snapshot_guard.observed.clone()
-                    };
-
-                    let state_diff = {
-                        let last_state_guard = last_state
-                            .lock()
-                            .expect("Failed to lock last_state for diff computation");
-                        last_state_guard.diff(
-                            &new_cluster_state,
-                            &previous_snapshot,
-                            &current_snapshot.observed,
-                        )
-                    };
-
-                    if !state_diff.is_empty() {
-                        info!(
-                            "Applying diff loop iteration {id}: +{} nodes, -{} nodes, ~{} nodes, +{} edges, -{} edges",
-                            state_diff.added_nodes.len(),
-                            state_diff.removed_nodes.len(),
-                            state_diff.modified_nodes.len(),
-                            state_diff.added_edges.len(),
-                            state_diff.removed_edges.len(),
-                        );
-                        backend.update(state_diff).await?;
-                    } else {
-                        trace!("Diff loop iteration {id}: no changes detected");
-                    }
-
-                    {
-                        let mut last_state_guard = last_state
-                            .lock()
-                            .expect("Failed to lock last_state for update");
-                        *last_state_guard = new_cluster_state;
-                    }
-
-                    {
-                        let mut last_snapshot_guard = last_snapshot
-                            .lock()
-                            .expect("Failed to lock last_snapshot for update");
-                        *last_snapshot_guard = current_snapshot;
-                    }
-
+                    Self::sync_from_source_impl(
+                        cluster.clone(),
+                        kube_client.clone(),
+                        last_snapshot.clone(),
+                        last_state.clone(),
+                        refresh_lock.clone(),
+                        backend.clone(),
+                    )
+                    .await
+                    .map_err(|err| std::io::Error::other(err.message))?;
                     id += 1;
                 },
             }
@@ -364,41 +477,170 @@ impl ClusterStateResolver {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    async fn get_logs(
-        client: &Arc<Box<dyn KubeClient>>,
-        containers: &[Arc<Container>],
-    ) -> Vec<Logs> {
-        let mut all_logs: Vec<Logs> = Vec::with_capacity(containers.len());
-        let mut handles = Vec::new();
+    pub async fn sync_from_source(
+        &self,
+        backend: Arc<dyn GraphBackend>,
+    ) -> std::result::Result<SourceSyncOutcome, SourceSyncError> {
+        Self::sync_from_source_impl(
+            self.cluster.clone(),
+            self.kube_client.clone(),
+            self.last_snapshot.clone(),
+            self.last_state.clone(),
+            self.refresh_lock.clone(),
+            backend,
+        )
+        .await
+    }
 
-        for c in containers {
-            if let (Some(ns), Some(name)) =
-                (c.metadata.namespace.as_deref(), c.metadata.name.as_deref())
-            {
-                let ns = ns.to_string();
-                let pod_name = c.pod_name.to_string();
-                let container_name = name.to_string();
-                let container_uid = c.metadata.uid.as_ref().unwrap().to_string();
+    async fn sync_from_source_impl(
+        cluster: Cluster,
+        kube_client: Arc<Box<dyn KubeClient>>,
+        last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
+        last_state: Arc<Mutex<ClusterState>>,
+        refresh_lock: Arc<AsyncMutex<()>>,
+        backend: Arc<dyn GraphBackend>,
+    ) -> std::result::Result<SourceSyncOutcome, SourceSyncError> {
+        let _refresh_guard = refresh_lock.lock().await;
 
-                let client = client.clone();
-                handles.push(tokio::spawn(async move {
-                    match client.get_pod_logs(&ns, pod_name.as_str(), Some(container_name.clone())).await {
-                        Ok(content) => Some(Logs::new(&ns, &container_name, &container_uid, content)),
-                        Err(err) => {
-                            trace!("Unable to fetch the logs for pod {ns}/{pod_name} and container {container_name}: {}", err);
-                            None
-                        }
-                    }
-                }));
-            }
+        let fetch_started = Instant::now();
+        let current_snapshot = Self::get_augmented_snapshot(&cluster, kube_client.clone())
+            .await
+            .map_err(|err| SourceSyncError {
+                stage: SourceSyncStage::KubeFetch,
+                message: err.to_string(),
+                fetch_duration: Some(fetch_started.elapsed()),
+                diff_duration: None,
+                write_duration: None,
+            })?;
+        let fetch_duration = fetch_started.elapsed();
+
+        let diff_started = Instant::now();
+        let new_cluster_state = Self::create_state(&current_snapshot);
+
+        let previous_snapshot = {
+            let last_snapshot_guard = last_snapshot
+                .lock()
+                .expect("Failed to lock last_snapshot for diff computation");
+            last_snapshot_guard.observed.clone()
+        };
+
+        let state_diff = {
+            let last_state_guard = last_state
+                .lock()
+                .expect("Failed to lock last_state for diff computation");
+            last_state_guard.diff(
+                &new_cluster_state,
+                &previous_snapshot,
+                &current_snapshot.observed,
+            )
+        };
+        let diff_duration = diff_started.elapsed();
+        let diff_summary = StateDiffSummary::from_diff(&state_diff);
+
+        let write_duration = if !state_diff.is_empty() {
+            info!(
+                "Applying source sync diff: +{} nodes, -{} nodes, ~{} nodes, +{} edges, -{} edges",
+                diff_summary.added_nodes,
+                diff_summary.removed_nodes,
+                diff_summary.modified_nodes,
+                diff_summary.added_edges,
+                diff_summary.removed_edges,
+            );
+            let write_started = Instant::now();
+            backend
+                .update(state_diff)
+                .await
+                .map_err(|err| SourceSyncError {
+                    stage: SourceSyncStage::GraphWrite,
+                    message: err.to_string(),
+                    fetch_duration: Some(fetch_duration),
+                    diff_duration: Some(diff_duration),
+                    write_duration: Some(write_started.elapsed()),
+                })?;
+            Some(write_started.elapsed())
+        } else {
+            trace!("Source sync: no changes detected");
+            None
+        };
+
+        {
+            let mut last_state_guard = last_state
+                .lock()
+                .expect("Failed to lock last_state for update");
+            *last_state_guard = new_cluster_state;
         }
-        for handle in handles {
-            if let Ok(Some(logs)) = handle.await {
-                all_logs.push(logs);
-            }
+
+        {
+            let mut last_snapshot_guard = last_snapshot
+                .lock()
+                .expect("Failed to lock last_snapshot for update");
+            *last_snapshot_guard = current_snapshot;
         }
-        all_logs
+
+        Ok(SourceSyncOutcome {
+            fetch_duration,
+            diff_duration,
+            write_duration,
+            diff: diff_summary,
+        })
+    }
+
+    pub async fn rebuild_from_source(
+        &self,
+        backend: Arc<dyn GraphBackend>,
+    ) -> std::result::Result<RebuildOutcome, RebuildError> {
+        let _refresh_guard = self.refresh_lock.lock().await;
+        let fetch_started = Instant::now();
+        let current_snapshot =
+            Self::get_augmented_snapshot(&self.cluster, self.kube_client.clone())
+                .await
+                .map_err(|err| RebuildError {
+                    stage: RebuildStage::StateRead,
+                    message: err.to_string(),
+                    fetch_duration: Some(fetch_started.elapsed()),
+                    write_duration: None,
+                })?;
+        let fetch_duration = fetch_started.elapsed();
+
+        // Build Memgraph from a fresh source snapshot, not the cached shared state.
+        let rebuild_state = Arc::new(Mutex::new(Self::create_state(&current_snapshot)));
+        let write_started = Instant::now();
+        backend
+            .create(rebuild_state)
+            .await
+            .map_err(|err| RebuildError {
+                stage: RebuildStage::GraphWrite,
+                message: err.to_string(),
+                fetch_duration: Some(fetch_duration),
+                write_duration: Some(write_started.elapsed()),
+            })?;
+        let write_duration = write_started.elapsed();
+
+        let refreshed_state = Self::create_state(&current_snapshot);
+        {
+            let mut last_state_guard = self
+                .last_state
+                .lock()
+                .expect("Failed to lock last_state for full rebuild");
+            *last_state_guard = refreshed_state;
+        }
+
+        {
+            let mut last_snapshot_guard = self
+                .last_snapshot
+                .lock()
+                .expect("Failed to lock last_snapshot for full rebuild");
+            *last_snapshot_guard = current_snapshot;
+        }
+
+        Ok(RebuildOutcome {
+            fetch_duration,
+            write_duration,
+        })
+    }
+
+    pub fn degraded_resource_kinds_handle(&self) -> Arc<Mutex<std::collections::BTreeSet<String>>> {
+        self.kube_client.degraded_resource_kinds_handle()
     }
 
     pub async fn resolve(&self) -> Result<Arc<Mutex<ClusterState>>> {
@@ -968,7 +1210,7 @@ impl ClusterStateResolver {
                             );
                         }
                         Err(err) => {
-                            warn!(
+                            trace!(
                                 "Unable to parse resource type of {:?} from owner reference: {}",
                                 owner, err
                             );
@@ -1202,34 +1444,22 @@ impl ClusterStateResolver {
     fn get_containers(pods: &[Arc<Pod>]) -> Result<Vec<Arc<Container>>> {
         let mut containers: Vec<Arc<Container>> = Vec::new();
         for pod in pods {
-            if let Some(name) = pod.metadata.name.as_ref() {
-                if let Some(ns) = pod.metadata.namespace.as_ref() {
-                    if let Some(uid) = pod.metadata.uid.as_ref() {
-                        if let Some(spec) = pod.spec.as_ref() {
-                            if let Some(inits) = spec.init_containers.as_ref() {
-                                for c in inits {
-                                    let container = Container::new(
-                                        ns,
-                                        name,
-                                        uid,
-                                        c.clone(),
-                                        ContainerType::Init,
-                                    );
-                                    containers.push(Arc::new(container));
-                                }
-                            }
-                            for c in &spec.containers {
-                                let container = Container::new(
-                                    ns,
-                                    name,
-                                    uid,
-                                    c.clone(),
-                                    ContainerType::Standard,
-                                );
-                                containers.push(Arc::new(container));
-                            }
-                        }
+            if let Some(name) = pod.metadata.name.as_ref()
+                && let Some(ns) = pod.metadata.namespace.as_ref()
+                && let Some(uid) = pod.metadata.uid.as_ref()
+                && let Some(spec) = pod.spec.as_ref()
+            {
+                if let Some(inits) = spec.init_containers.as_ref() {
+                    for c in inits {
+                        let container =
+                            Container::new(ns, name, uid, c.clone(), ContainerType::Init);
+                        containers.push(Arc::new(container));
                     }
+                }
+                for c in &spec.containers {
+                    let container =
+                        Container::new(ns, name, uid, c.clone(), ContainerType::Standard);
+                    containers.push(Arc::new(container));
                 }
             }
         }
@@ -1399,5 +1629,700 @@ impl ClusterStateResolver {
         }
 
         Ok((endpoints, endpoint_addresss))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
+    use k8s_openapi::apimachinery::pkg::version::Info;
+    use serde_json::Value;
+    use std::collections::BTreeSet;
+    use std::sync::OnceLock;
+
+    #[derive(Debug, Clone, Default)]
+    struct SnapshotFrame {
+        namespaces: Vec<Arc<Namespace>>,
+        pods: Vec<Arc<Pod>>,
+        deployments: Vec<Arc<Deployment>>,
+        stateful_sets: Vec<Arc<StatefulSet>>,
+        replica_sets: Vec<Arc<ReplicaSet>>,
+        daemon_sets: Vec<Arc<DaemonSet>>,
+        jobs: Vec<Arc<Job>>,
+        ingresses: Vec<Arc<Ingress>>,
+        services: Vec<Arc<Service>>,
+        endpoint_slices: Vec<Arc<EndpointSlice>>,
+        network_policies: Vec<Arc<NetworkPolicy>>,
+        config_maps: Vec<Arc<ConfigMap>>,
+        storage_classes: Vec<Arc<StorageClass>>,
+        persistent_volumes: Vec<Arc<PersistentVolume>>,
+        persistent_volume_claims: Vec<Arc<PersistentVolumeClaim>>,
+        nodes: Vec<Arc<Node>>,
+        service_accounts: Vec<Arc<ServiceAccount>>,
+        events: Vec<Arc<Event>>,
+    }
+
+    #[derive(Debug, Clone, Copy, Default)]
+    struct FailureConfig {
+        namespaces: bool,
+        namespaces_after_first_round: bool,
+        nodes: bool,
+        nodes_after_first_round: bool,
+        storage_classes: bool,
+        persistent_volumes: bool,
+    }
+
+    #[derive(Debug)]
+    struct MockKubeClient {
+        snapshots: Vec<SnapshotFrame>,
+        round_index: Mutex<usize>,
+        failures: FailureConfig,
+        degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+    }
+
+    impl MockKubeClient {
+        fn new(
+            snapshots: Vec<SnapshotFrame>,
+            failures: FailureConfig,
+            degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+        ) -> Self {
+            assert!(
+                !snapshots.is_empty(),
+                "MockKubeClient requires at least one snapshot"
+            );
+            Self {
+                snapshots,
+                round_index: Mutex::new(0),
+                failures,
+                degraded_resource_kinds,
+            }
+        }
+
+        fn snapshot_for_round(&self, round: usize) -> SnapshotFrame {
+            self.snapshots
+                .get(round)
+                .cloned()
+                .unwrap_or_else(|| self.snapshots.last().expect("snapshot exists").clone())
+        }
+
+        fn begin_round(&self) -> SnapshotFrame {
+            let mut round = self.round_index.lock().expect("round_index lock poisoned");
+            let snapshot = self.snapshot_for_round(*round);
+            *round += 1;
+            snapshot
+        }
+
+        fn current_round_snapshot(&self) -> SnapshotFrame {
+            let round = *self.round_index.lock().expect("round_index lock poisoned");
+            let index = round.saturating_sub(1);
+            self.snapshot_for_round(index)
+        }
+    }
+
+    #[async_trait]
+    impl KubeClient for MockKubeClient {
+        async fn get_namespaces(&self) -> Result<Vec<Arc<Namespace>>> {
+            let snapshot = self.begin_round();
+            let round = *self.round_index.lock().expect("round_index lock poisoned");
+            if self.failures.namespaces || (self.failures.namespaces_after_first_round && round > 1)
+            {
+                return Err(std::io::Error::other("mock namespace failure").into());
+            }
+            Ok(snapshot.namespaces)
+        }
+
+        async fn get_pods(&self) -> Result<Vec<Arc<Pod>>> {
+            Ok(self.current_round_snapshot().pods)
+        }
+
+        async fn get_deployments(&self) -> Result<Vec<Arc<Deployment>>> {
+            Ok(self.current_round_snapshot().deployments)
+        }
+
+        async fn get_stateful_sets(&self) -> Result<Vec<Arc<StatefulSet>>> {
+            Ok(self.current_round_snapshot().stateful_sets)
+        }
+
+        async fn get_replica_sets(&self) -> Result<Vec<Arc<ReplicaSet>>> {
+            Ok(self.current_round_snapshot().replica_sets)
+        }
+
+        async fn get_daemon_sets(&self) -> Result<Vec<Arc<DaemonSet>>> {
+            Ok(self.current_round_snapshot().daemon_sets)
+        }
+
+        async fn get_jobs(&self) -> Result<Vec<Arc<Job>>> {
+            Ok(self.current_round_snapshot().jobs)
+        }
+
+        async fn get_ingresses(&self) -> Result<Vec<Arc<Ingress>>> {
+            Ok(self.current_round_snapshot().ingresses)
+        }
+
+        async fn get_services(&self) -> Result<Vec<Arc<Service>>> {
+            Ok(self.current_round_snapshot().services)
+        }
+
+        async fn get_endpoint_slices(&self) -> Result<Vec<Arc<EndpointSlice>>> {
+            Ok(self.current_round_snapshot().endpoint_slices)
+        }
+
+        async fn get_network_policies(&self) -> Result<Vec<Arc<NetworkPolicy>>> {
+            Ok(self.current_round_snapshot().network_policies)
+        }
+
+        async fn get_config_maps(&self) -> Result<Vec<Arc<ConfigMap>>> {
+            Ok(self.current_round_snapshot().config_maps)
+        }
+
+        async fn get_storage_classes(&self) -> Result<Vec<Arc<StorageClass>>> {
+            if self.failures.storage_classes {
+                return Err(std::io::Error::other("mock storage class failure").into());
+            }
+            Ok(self.current_round_snapshot().storage_classes)
+        }
+
+        async fn get_persistent_volumes(&self) -> Result<Vec<Arc<PersistentVolume>>> {
+            if self.failures.persistent_volumes {
+                return Err(std::io::Error::other("mock persistent volume failure").into());
+            }
+            Ok(self.current_round_snapshot().persistent_volumes)
+        }
+
+        async fn get_persistent_volume_claims(&self) -> Result<Vec<Arc<PersistentVolumeClaim>>> {
+            Ok(self.current_round_snapshot().persistent_volume_claims)
+        }
+
+        async fn get_nodes(&self) -> Result<Vec<Arc<Node>>> {
+            let round = *self.round_index.lock().expect("round_index lock poisoned");
+            if self.failures.nodes || (self.failures.nodes_after_first_round && round > 1) {
+                return Err(std::io::Error::other("mock node failure").into());
+            }
+            Ok(self.current_round_snapshot().nodes)
+        }
+
+        async fn get_service_accounts(&self) -> Result<Vec<Arc<ServiceAccount>>> {
+            Ok(self.current_round_snapshot().service_accounts)
+        }
+
+        async fn apiserver_version(&self) -> Result<Info> {
+            Ok(Info {
+                major: "1".to_string(),
+                minor: "32".to_string(),
+                ..Default::default()
+            })
+        }
+
+        async fn get_cluster_url(&self) -> Result<String> {
+            Ok("https://example.test".to_string())
+        }
+
+        async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
+            Ok(self.current_round_snapshot().events)
+        }
+
+        fn degraded_resource_kinds_handle(&self) -> Arc<Mutex<BTreeSet<String>>> {
+            self.degraded_resource_kinds.clone()
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct CapturedDiffSummary {
+        added_nodes: usize,
+        removed_nodes: usize,
+        modified_nodes: usize,
+        added_edges: usize,
+        removed_edges: usize,
+    }
+
+    impl From<&ClusterStateDiff> for CapturedDiffSummary {
+        fn from(diff: &ClusterStateDiff) -> Self {
+            Self {
+                added_nodes: diff.added_nodes.len(),
+                removed_nodes: diff.removed_nodes.len(),
+                modified_nodes: diff.modified_nodes.len(),
+                added_edges: diff.added_edges.len(),
+                removed_edges: diff.removed_edges.len(),
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct MockGraphBackend {
+        fail_create: bool,
+        fail_update: bool,
+        create_counts: Mutex<Vec<(usize, usize)>>,
+        update_summaries: Mutex<Vec<CapturedDiffSummary>>,
+    }
+
+    impl MockGraphBackend {
+        fn fail_update() -> Self {
+            Self {
+                fail_update: true,
+                ..Default::default()
+            }
+        }
+
+        fn fail_create() -> Self {
+            Self {
+                fail_create: true,
+                ..Default::default()
+            }
+        }
+
+        fn create_counts(&self) -> Vec<(usize, usize)> {
+            self.create_counts
+                .lock()
+                .expect("create_counts lock poisoned")
+                .clone()
+        }
+
+        fn update_summaries(&self) -> Vec<CapturedDiffSummary> {
+            self.update_summaries
+                .lock()
+                .expect("update_summaries lock poisoned")
+                .clone()
+        }
+    }
+
+    #[async_trait]
+    impl GraphBackend for MockGraphBackend {
+        async fn create(&self, cluster_state: Arc<Mutex<ClusterState>>) -> Result<()> {
+            if self.fail_create {
+                return Err(std::io::Error::other("mock create failure").into());
+            }
+            let state = cluster_state.lock().expect("cluster_state lock poisoned");
+            self.create_counts
+                .lock()
+                .expect("create_counts lock poisoned")
+                .push((state.get_node_count(), state.get_edge_count()));
+            Ok(())
+        }
+
+        async fn update(&self, diff: ClusterStateDiff) -> Result<()> {
+            if self.fail_update {
+                return Err(std::io::Error::other("mock update failure").into());
+            }
+            self.update_summaries
+                .lock()
+                .expect("update_summaries lock poisoned")
+                .push(CapturedDiffSummary::from(&diff));
+            Ok(())
+        }
+
+        async fn execute_query(
+            &self,
+            _query: String,
+            _params: Option<HashMap<String, Value>>,
+        ) -> Result<Vec<Value>> {
+            Ok(Vec::new())
+        }
+
+        async fn shutdown(&self) {}
+    }
+
+    fn owner_reference(kind: &str, name: &str, uid: &str) -> OwnerReference {
+        OwnerReference {
+            api_version: "apps/v1".to_string(),
+            block_owner_deletion: None,
+            controller: Some(true),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            uid: uid.to_string(),
+        }
+    }
+
+    fn namespace(name: &str, uid: &str) -> Arc<Namespace> {
+        Arc::new(Namespace {
+            metadata: ObjectMeta {
+                name: Some(name.to_string()),
+                uid: Some(uid.to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+    }
+
+    fn pod(name: &str, namespace: &str, uid: &str, owners: Vec<OwnerReference>) -> Arc<Pod> {
+        Arc::new(Pod {
+            metadata: ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                uid: Some(uid.to_string()),
+                owner_references: (!owners.is_empty()).then_some(owners),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+    }
+
+    fn base_snapshot() -> SnapshotFrame {
+        SnapshotFrame {
+            namespaces: vec![namespace("team-a", "namespace-team-a")],
+            replica_sets: vec![Arc::new(ReplicaSet {
+                metadata: ObjectMeta {
+                    name: Some("web-rs".to_string()),
+                    namespace: Some("team-a".to_string()),
+                    uid: Some("replicaset-1".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })],
+            pods: vec![
+                pod(
+                    "managed",
+                    "team-a",
+                    "pod-managed",
+                    vec![owner_reference("ReplicaSet", "web-rs", "replicaset-1")],
+                ),
+                pod(
+                    "unsupported-owner",
+                    "team-a",
+                    "pod-unsupported",
+                    vec![owner_reference("UnsupportedKind", "ghost", "ghost-owner")],
+                ),
+                pod("orphan", "team-missing", "pod-orphan", vec![]),
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn changed_snapshot() -> SnapshotFrame {
+        let mut snapshot = base_snapshot();
+        snapshot
+            .namespaces
+            .push(namespace("team-b", "namespace-team-b"));
+        snapshot.pods.push(pod("new", "team-b", "pod-new", vec![]));
+        snapshot
+    }
+
+    fn has_edge(state: &ClusterState, edge_type: Edge, source: &str, target: &str) -> bool {
+        state
+            .get_edges_by_type(&edge_type)
+            .any(|edge| edge.source == source && edge.target == target)
+    }
+
+    #[tokio::test]
+    async fn resolver_sync_and_rebuild_cover_live_sync_paths() {
+        let initial = base_snapshot();
+        let unchanged = initial.clone();
+        let changed = changed_snapshot();
+        let degraded = Arc::new(Mutex::new(BTreeSet::new()));
+
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![initial, unchanged, changed.clone(), changed],
+                FailureConfig::default(),
+                degraded,
+            )),
+        )
+        .await
+        .expect("resolver should initialize from first snapshot");
+
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        {
+            let state = state_handle.lock().expect("state lock poisoned");
+            assert!(state.node_by_uid("replicaset-1").is_some());
+            assert!(state.node_by_uid("pod-managed").is_some());
+            assert!(state.node_by_uid("pod-unsupported").is_some());
+            assert!(state.node_by_uid("pod-orphan").is_some());
+            assert!(has_edge(
+                &state,
+                Edge::Manages,
+                "replicaset-1",
+                "pod-managed"
+            ));
+            assert!(!has_edge(
+                &state,
+                Edge::Manages,
+                "ghost-owner",
+                "pod-unsupported"
+            ));
+            assert!(has_edge(
+                &state,
+                Edge::BelongsTo,
+                "pod-managed",
+                "namespace-team-a"
+            ));
+            assert!(!has_edge(
+                &state,
+                Edge::BelongsTo,
+                "pod-orphan",
+                "namespace-team-a"
+            ));
+        }
+
+        let backend = Arc::new(MockGraphBackend::default());
+
+        let no_change = resolver
+            .sync_from_source(backend.clone())
+            .await
+            .expect("no-change sync should succeed");
+        assert_eq!(no_change.diff, StateDiffSummary::default());
+        assert!(no_change.write_duration.is_none());
+        assert!(backend.update_summaries().is_empty());
+
+        let changed_sync = resolver
+            .sync_from_source(backend.clone())
+            .await
+            .expect("changed sync should succeed");
+        assert!(changed_sync.write_duration.is_some());
+        assert!(changed_sync.diff.added_nodes > 0 || changed_sync.diff.modified_nodes > 0);
+        let update_summaries = backend.update_summaries();
+        assert_eq!(update_summaries.len(), 1);
+        assert!(
+            update_summaries[0].added_nodes > 0
+                || update_summaries[0].modified_nodes > 0
+                || update_summaries[0].removed_nodes > 0
+        );
+
+        {
+            let state = state_handle.lock().expect("state lock poisoned");
+            assert!(state.node_by_uid("namespace-team-b").is_some());
+            assert!(state.node_by_uid("pod-new").is_some());
+            assert!(has_edge(
+                &state,
+                Edge::BelongsTo,
+                "pod-new",
+                "namespace-team-b"
+            ));
+        }
+
+        resolver
+            .rebuild_from_source(backend.clone())
+            .await
+            .expect("rebuild should succeed");
+        let create_counts = backend.create_counts();
+        assert_eq!(create_counts.len(), 1);
+        assert!(create_counts[0].0 > 0);
+        assert!(create_counts[0].1 > 0);
+    }
+
+    #[tokio::test]
+    async fn degraded_resource_kinds_propagate_from_kube_client_handle() {
+        let degraded = Arc::new(Mutex::new(BTreeSet::new()));
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![SnapshotFrame::default()],
+                FailureConfig {
+                    nodes: true,
+                    storage_classes: true,
+                    persistent_volumes: true,
+                    ..Default::default()
+                },
+                degraded.clone(),
+            )),
+        )
+        .await
+        .expect("resolver should initialize with degraded resources");
+
+        let resolver_handle = resolver.degraded_resource_kinds_handle();
+        assert!(Arc::ptr_eq(&resolver_handle, &degraded));
+        let degraded_set = resolver_handle
+            .lock()
+            .expect("degraded_resource_kinds lock poisoned");
+        assert!(degraded_set.contains("Node"));
+        assert!(degraded_set.contains("StorageClass"));
+        assert!(degraded_set.contains("PersistentVolume"));
+    }
+
+    #[test]
+    fn configured_source_sync_poll_interval_parsing() {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let _guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock poisoned");
+        let original = std::env::var(SOURCE_SYNC_POLL_INTERVAL_ENV).ok();
+
+        unsafe {
+            std::env::remove_var(SOURCE_SYNC_POLL_INTERVAL_ENV);
+        }
+        assert_eq!(
+            configured_source_sync_poll_interval(),
+            Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS)
+        );
+
+        unsafe {
+            std::env::set_var(SOURCE_SYNC_POLL_INTERVAL_ENV, "0");
+        }
+        assert_eq!(
+            configured_source_sync_poll_interval(),
+            Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS)
+        );
+
+        unsafe {
+            std::env::set_var(SOURCE_SYNC_POLL_INTERVAL_ENV, "invalid");
+        }
+        assert_eq!(
+            configured_source_sync_poll_interval(),
+            Duration::from_secs(DEFAULT_SOURCE_SYNC_POLL_INTERVAL_SECONDS)
+        );
+
+        unsafe {
+            std::env::set_var(SOURCE_SYNC_POLL_INTERVAL_ENV, "7");
+        }
+        assert_eq!(
+            configured_source_sync_poll_interval(),
+            Duration::from_secs(7)
+        );
+
+        match original {
+            Some(value) => unsafe {
+                std::env::set_var(SOURCE_SYNC_POLL_INTERVAL_ENV, value);
+            },
+            None => unsafe {
+                std::env::remove_var(SOURCE_SYNC_POLL_INTERVAL_ENV);
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_from_source_reports_kube_fetch_failure_with_metadata() {
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![base_snapshot()],
+                FailureConfig {
+                    namespaces_after_first_round: true,
+                    ..Default::default()
+                },
+                Arc::new(Mutex::new(BTreeSet::new())),
+            )),
+        )
+        .await
+        .expect("resolver should initialize from first snapshot");
+
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let err = resolver
+            .sync_from_source(Arc::new(MockGraphBackend::default()))
+            .await
+            .expect_err("sync should fail on kube fetch");
+
+        assert_eq!(err.stage, SourceSyncStage::KubeFetch);
+        assert!(err.fetch_duration.is_some());
+        assert!(err.diff_duration.is_none());
+        assert!(err.write_duration.is_none());
+
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(state.node_by_uid("pod-managed").is_some());
+        assert!(state.node_by_uid("namespace-team-b").is_none());
+    }
+
+    #[tokio::test]
+    async fn sync_from_source_reports_graph_write_failure_and_preserves_cached_state() {
+        let changed = changed_snapshot();
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![base_snapshot(), changed.clone(), changed],
+                FailureConfig::default(),
+                Arc::new(Mutex::new(BTreeSet::new())),
+            )),
+        )
+        .await
+        .expect("resolver should initialize from first snapshot");
+
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let err = resolver
+            .sync_from_source(Arc::new(MockGraphBackend::fail_update()))
+            .await
+            .expect_err("sync should fail on graph write");
+
+        assert_eq!(err.stage, SourceSyncStage::GraphWrite);
+        assert!(err.fetch_duration.is_some());
+        assert!(err.diff_duration.is_some());
+        assert!(err.write_duration.is_some());
+
+        {
+            let state = state_handle.lock().expect("state lock poisoned");
+            assert!(state.node_by_uid("namespace-team-b").is_none());
+            assert!(state.node_by_uid("pod-new").is_none());
+        }
+
+        let outcome = resolver
+            .sync_from_source(Arc::new(MockGraphBackend::default()))
+            .await
+            .expect("follow-up sync should still observe pending diff");
+        assert!(outcome.write_duration.is_some());
+        assert!(outcome.diff.added_nodes > 0 || outcome.diff.modified_nodes > 0);
+
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(state.node_by_uid("namespace-team-b").is_some());
+        assert!(state.node_by_uid("pod-new").is_some());
+    }
+
+    #[tokio::test]
+    async fn rebuild_from_source_reports_state_read_failure_with_metadata() {
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![base_snapshot()],
+                FailureConfig {
+                    namespaces_after_first_round: true,
+                    ..Default::default()
+                },
+                Arc::new(Mutex::new(BTreeSet::new())),
+            )),
+        )
+        .await
+        .expect("resolver should initialize from first snapshot");
+
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let err = resolver
+            .rebuild_from_source(Arc::new(MockGraphBackend::default()))
+            .await
+            .expect_err("rebuild should fail while reading source state");
+
+        assert_eq!(err.stage, RebuildStage::StateRead);
+        assert!(err.fetch_duration.is_some());
+        assert!(err.write_duration.is_none());
+
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(state.node_by_uid("pod-managed").is_some());
+        assert!(state.node_by_uid("namespace-team-b").is_none());
+    }
+
+    #[tokio::test]
+    async fn rebuild_from_source_reports_graph_write_failure_and_preserves_cached_state() {
+        let changed = changed_snapshot();
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![base_snapshot(), changed.clone(), changed],
+                FailureConfig::default(),
+                Arc::new(Mutex::new(BTreeSet::new())),
+            )),
+        )
+        .await
+        .expect("resolver should initialize from first snapshot");
+
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let err = resolver
+            .rebuild_from_source(Arc::new(MockGraphBackend::fail_create()))
+            .await
+            .expect_err("rebuild should fail while writing graph");
+
+        assert_eq!(err.stage, RebuildStage::GraphWrite);
+        assert!(err.fetch_duration.is_some());
+        assert!(err.write_duration.is_some());
+
+        {
+            let state = state_handle.lock().expect("state lock poisoned");
+            assert!(state.node_by_uid("namespace-team-b").is_none());
+            assert!(state.node_by_uid("pod-new").is_none());
+        }
+
+        resolver
+            .rebuild_from_source(Arc::new(MockGraphBackend::default()))
+            .await
+            .expect("follow-up rebuild should still refresh from changed snapshot");
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(state.node_by_uid("namespace-team-b").is_some());
+        assert!(state.node_by_uid("pod-new").is_some());
     }
 }

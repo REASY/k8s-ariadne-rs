@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from .config import AgentConfig
-from .mcp_client import StreamableHttpMcpClient, extract_json_content
+from .mcp_client import (
+    StreamableHttpMcpClient,
+    extract_json_content,
+    normalize_graph_query_payload,
+)
 from .models import JsonValue
 
 
@@ -24,7 +28,7 @@ def execute_cypher_query(query: str) -> JsonValue:
         auth_token=config.mcp_auth_token,
     )
     try:
-        tool_result = client.call_tool("execute_cypher_query", {"query": query})
-        return extract_json_content(tool_result)
+        tool_result = client.call_tool("graph_query", {"query": query})
+        return normalize_graph_query_payload(extract_json_content(tool_result))
     finally:
         client.close()

@@ -22,7 +22,7 @@ impl IdGen {
     }
 
     pub fn get_next_id(&mut self, str: &str) -> GetNextIdResult {
-        let r = match self.str_to_id.get(str) {
+        match self.str_to_id.get(str) {
             None => {
                 let id = self.next_id;
                 assert_ne!(id, u32::MAX, "Reached u32::MAX");
@@ -33,8 +33,7 @@ impl IdGen {
                 GetNextIdResult::New(id)
             }
             Some(id) => GetNextIdResult::Existing(*id),
-        };
-        r
+        }
     }
 
     pub fn get_by_id(&self, id: u32) -> Option<String> {

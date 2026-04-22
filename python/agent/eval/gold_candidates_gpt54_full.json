@@ -1,0 +1,2560 @@
+[
+  {
+    "id": "e01",
+    "question": "List all namespaces in the cluster.",
+    "tags": [
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "cd747b870b68ab1a",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e01",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)\nRETURN ns['metadata']['name'] AS namespace\nORDER BY namespace",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)\nRETURN ns['metadata']['name'] AS namespace\nORDER BY namespace",
+            "tokens": {
+              "prompt": 17582,
+              "output": 62,
+              "total": 17644
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 34,
+        "result_fingerprint": "cd747b870b68ab1a"
+      }
+    ]
+  },
+  {
+    "id": "e02",
+    "question": "How many namespaces are there in the cluster?",
+    "tags": [
+      "namespace",
+      "count",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "ed8b081f2f0e5a92",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e02",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)\nRETURN count(ns) AS namespace_count",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)\nRETURN count(ns) AS namespace_count",
+            "tokens": {
+              "prompt": 17584,
+              "output": 51,
+              "total": 17635
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 1,
+        "result_fingerprint": "ed8b081f2f0e5a92"
+      }
+    ]
+  },
+  {
+    "id": "e03",
+    "question": "List all pods in namespace litmus.",
+    "tags": [
+      "pod",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "b490ef9a116865f7",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e03",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN p['metadata']['name'] AS pod\nORDER BY pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN p['metadata']['name'] AS pod\nORDER BY pod",
+            "tokens": {
+              "prompt": 17583,
+              "output": 86,
+              "total": 17669
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 7,
+        "result_fingerprint": "b490ef9a116865f7"
+      }
+    ]
+  },
+  {
+    "id": "e04",
+    "question": "List all services in namespace litmus.",
+    "tags": [
+      "service",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "377ba62283b006ed",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e04",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN s['metadata']['name'] AS service\nORDER BY service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN s['metadata']['name'] AS service\nORDER BY service",
+            "tokens": {
+              "prompt": 17583,
+              "output": 83,
+              "total": 17666
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "377ba62283b006ed"
+      }
+    ]
+  },
+  {
+    "id": "e05",
+    "question": "List all ingresses in namespace litmus.",
+    "tags": [
+      "ingress",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "c41a0d781933b749",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e05",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (i:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN i['metadata']['name'] AS ingress\nORDER BY ingress",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (i:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN i['metadata']['name'] AS ingress\nORDER BY ingress",
+            "tokens": {
+              "prompt": 17584,
+              "output": 83,
+              "total": 17667
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 1,
+        "result_fingerprint": "c41a0d781933b749"
+      }
+    ]
+  },
+  {
+    "id": "e06",
+    "question": "List all endpoint slices in namespace litmus.",
+    "tags": [
+      "endpointslice",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "0af3987e5dc4314c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e06",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN es['metadata']['name'] AS endpoint_slice,\n       es['addressType'] AS address_type,\n       es['metadata']['namespace'] AS namespace\nORDER BY endpoint_slice",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN es['metadata']['name'] AS endpoint_slice,\n       es['addressType'] AS address_type,\n       es['metadata']['namespace'] AS namespace\nORDER BY endpoint_slice",
+            "tokens": {
+              "prompt": 17584,
+              "output": 108,
+              "total": 17692
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "0af3987e5dc4314c"
+      }
+    ]
+  },
+  {
+    "id": "e07",
+    "question": "List all nodes in the cluster.",
+    "tags": [
+      "node",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e07",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (n:Node)\nRETURN n['metadata']['name'] AS node_name,\n       n['status']['phase'] AS phase,\n       n['spec']['providerID'] AS provider_id\nORDER BY node_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (n:Node)\nRETURN n['metadata']['name'] AS node_name,\n       n['status']['phase'] AS phase,\n       n['spec']['providerID'] AS provider_id\nORDER BY node_name",
+            "tokens": {
+              "prompt": 17582,
+              "output": 87,
+              "total": 17669
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e08",
+    "question": "List all storage classes in the cluster.",
+    "tags": [
+      "storageclass",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e08",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (sc:StorageClass)\nRETURN sc['metadata']['name'] AS storage_class\nORDER BY storage_class",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (sc:StorageClass)\nRETURN sc['metadata']['name'] AS storage_class\nORDER BY storage_class",
+            "tokens": {
+              "prompt": 17583,
+              "output": 77,
+              "total": 17660
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e09",
+    "question": "List all persistent volumes in the cluster.",
+    "tags": [
+      "pv",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "663f8fe81af57e9e",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e09",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (pv:PersistentVolume)\nRETURN pv['metadata']['name'] AS persistent_volume,\n       pv['status']['phase'] AS phase,\n       pv['spec']['storageClassName'] AS storage_class,\n       pv['spec']['capacity']['storage'] AS capacity\nORDER BY persistent_volume",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (pv:PersistentVolume)\nRETURN pv['metadata']['name'] AS persistent_volume,\n       pv['status']['phase'] AS phase,\n       pv['spec']['storageClassName'] AS storage_class,\n       pv['spec']['capacity']['storage'] AS capacity\nORDER BY persistent_volume",
+            "tokens": {
+              "prompt": 17583,
+              "output": 112,
+              "total": 17695
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 17,
+        "result_fingerprint": "663f8fe81af57e9e"
+      }
+    ]
+  },
+  {
+    "id": "e10",
+    "question": "List all service accounts in namespace litmus.",
+    "tags": [
+      "serviceaccount",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "ff3249f3e957edd5",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e10",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN sa['metadata']['name'] AS service_account\nORDER BY service_account",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN sa['metadata']['name'] AS service_account\nORDER BY service_account",
+            "tokens": {
+              "prompt": 17584,
+              "output": 70,
+              "total": 17654
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "ff3249f3e957edd5"
+      }
+    ]
+  },
+  {
+    "id": "e11",
+    "question": "List all deployments in namespace litmus.",
+    "tags": [
+      "deployment",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "a0dc7d4ca0699919",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e11",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN d['metadata']['name'] AS deployment\nORDER BY deployment",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN d['metadata']['name'] AS deployment\nORDER BY deployment",
+            "tokens": {
+              "prompt": 17583,
+              "output": 83,
+              "total": 17666
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "a0dc7d4ca0699919"
+      }
+    ]
+  },
+  {
+    "id": "e12",
+    "question": "List all replica sets in namespace litmus.",
+    "tags": [
+      "replicaset",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "e6c06125ec69ec9d",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e12",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN rs['metadata']['name'] AS replicaset\nORDER BY replicaset",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN rs['metadata']['name'] AS replicaset\nORDER BY replicaset",
+            "tokens": {
+              "prompt": 17584,
+              "output": 86,
+              "total": 17670
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "e6c06125ec69ec9d"
+      }
+    ]
+  },
+  {
+    "id": "e13",
+    "question": "List all stateful sets in namespace litmus.",
+    "tags": [
+      "statefulset",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "25936dd61bbfe502",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e13",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ss:StatefulSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN ss['metadata']['name'] AS statefulset\nORDER BY statefulset",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ss:StatefulSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN ss['metadata']['name'] AS statefulset\nORDER BY statefulset",
+            "tokens": {
+              "prompt": 17585,
+              "output": 89,
+              "total": 17674
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 2,
+        "result_fingerprint": "25936dd61bbfe502"
+      }
+    ]
+  },
+  {
+    "id": "e14",
+    "question": "List all daemon sets in namespace litmus.",
+    "tags": [
+      "daemonset",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e14",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ds:DaemonSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN ds['metadata']['name'] AS daemonset\nORDER BY daemonset",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ds:DaemonSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN ds['metadata']['name'] AS daemonset\nORDER BY daemonset",
+            "tokens": {
+              "prompt": 17584,
+              "output": 93,
+              "total": 17677
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e15",
+    "question": "List all jobs in namespace litmus.",
+    "tags": [
+      "job",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e15",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (j:Job)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN j['metadata']['name'] AS job_name\nORDER BY job_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (j:Job)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN j['metadata']['name'] AS job_name\nORDER BY job_name",
+            "tokens": {
+              "prompt": 17583,
+              "output": 90,
+              "total": 17673
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e16",
+    "question": "List all persistent volume claims in namespace litmus.",
+    "tags": [
+      "pvc",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e16",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN pvc['metadata']['name'] AS persistent_volume_claim,\n       pvc['status']['phase'] AS phase,\n       pvc['spec']['storageClassName'] AS storage_class,\n       pvc['spec']['volumeName'] AS volume_name\nORDER BY persistent_volume_claim",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN pvc['metadata']['name'] AS persistent_volume_claim,\n       pvc['status']['phase'] AS phase,\n       pvc['spec']['storageClassName'] AS storage_class,\n       pvc['spec']['volumeName'] AS volume_name\nORDER BY persistent_volume_claim",
+            "tokens": {
+              "prompt": 17585,
+              "output": 128,
+              "total": 17713
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e17",
+    "question": "How many pods are in namespace litmus?",
+    "tags": [
+      "pod",
+      "namespace",
+      "count",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "53d8ffac14f02c15",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e17",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN count(DISTINCT p) AS pod_count",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN count(DISTINCT p) AS pod_count",
+            "tokens": {
+              "prompt": 17584,
+              "output": 78,
+              "total": 17662
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 1,
+        "result_fingerprint": "53d8ffac14f02c15"
+      }
+    ]
+  },
+  {
+    "id": "e18",
+    "question": "List all config maps in namespace litmus.",
+    "tags": [
+      "configmap",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "a586d942f72850ce",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e18",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (cm:ConfigMap)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN cm['metadata']['name'] AS config_map\nORDER BY config_map",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (cm:ConfigMap)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN cm['metadata']['name'] AS config_map\nORDER BY config_map",
+            "tokens": {
+              "prompt": 17584,
+              "output": 88,
+              "total": 17672
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "a586d942f72850ce"
+      }
+    ]
+  },
+  {
+    "id": "e19",
+    "question": "List all network policies in namespace litmus.",
+    "tags": [
+      "networkpolicy",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e19",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (np:NetworkPolicy)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN np['metadata']['name'] AS network_policy\nORDER BY network_policy",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (np:NetworkPolicy)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN np['metadata']['name'] AS network_policy\nORDER BY network_policy",
+            "tokens": {
+              "prompt": 17584,
+              "output": 86,
+              "total": 17670
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "e20",
+    "question": "List all containers in namespace litmus.",
+    "tags": [
+      "container",
+      "namespace",
+      "list",
+      "difficulty:easy"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "5cb91402c0d20f08",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "e20",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, c['container_type'] AS container_type\nORDER BY pod_name, container_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, c['container_type'] AS container_type\nORDER BY pod_name, container_name",
+            "tokens": {
+              "prompt": 17583,
+              "output": 109,
+              "total": 17692
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 9,
+        "result_fingerprint": "5cb91402c0d20f08"
+      }
+    ]
+  },
+  {
+    "id": "m01",
+    "question": "For namespace litmus, list deployments and the replica sets they manage.",
+    "tags": [
+      "deployment",
+      "replicaset",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "e46a6ff5021b8eb3",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m01",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (d:Deployment)-[:BelongsTo]->(ns)\nMATCH (d)-[:Manages]->(rs:ReplicaSet)\nRETURN d['metadata']['name'] AS deployment, rs['metadata']['name'] AS replica_set\nORDER BY deployment, replica_set",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (d:Deployment)-[:BelongsTo]->(ns)\nMATCH (d)-[:Manages]->(rs:ReplicaSet)\nRETURN d['metadata']['name'] AS deployment, rs['metadata']['name'] AS replica_set\nORDER BY deployment, replica_set",
+            "tokens": {
+              "prompt": 17589,
+              "output": 118,
+              "total": 17707
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "e46a6ff5021b8eb3"
+      }
+    ]
+  },
+  {
+    "id": "m02",
+    "question": "For namespace litmus, list replica sets and the pods they manage.",
+    "tags": [
+      "replicaset",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4ac65f8680882d41",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m02",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (rs)-[:Manages]->(p:Pod)\nRETURN rs['metadata']['name'] AS replicaset, collect(DISTINCT p['metadata']['name']) AS pods\nORDER BY replicaset",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (rs)-[:Manages]->(p:Pod)\nRETURN rs['metadata']['name'] AS replicaset, collect(DISTINCT p['metadata']['name']) AS pods\nORDER BY replicaset",
+            "tokens": {
+              "prompt": 17589,
+              "output": 122,
+              "total": 17711
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "4ac65f8680882d41"
+      }
+    ]
+  },
+  {
+    "id": "m03",
+    "question": "For namespace litmus, list daemon sets and the pods they manage.",
+    "tags": [
+      "daemonset",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m03",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ds:DaemonSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (ds)-[:Manages]->(p:Pod)\nRETURN ds['metadata']['name'] AS daemon_set, p['metadata']['name'] AS pod\nORDER BY daemon_set, pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ds:DaemonSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (ds)-[:Manages]->(p:Pod)\nRETURN ds['metadata']['name'] AS daemon_set, p['metadata']['name'] AS pod\nORDER BY daemon_set, pod",
+            "tokens": {
+              "prompt": 17589,
+              "output": 129,
+              "total": 17718
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m04",
+    "question": "For namespace litmus, list stateful sets and the pods they manage.",
+    "tags": [
+      "statefulset",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "c9b528b56169c26b",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m04",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (sts:StatefulSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (sts)-[:Manages]->(pod:Pod)\nRETURN sts['metadata']['name'] AS stateful_set, pod['metadata']['name'] AS pod\nORDER BY stateful_set, pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (sts:StatefulSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (sts)-[:Manages]->(pod:Pod)\nRETURN sts['metadata']['name'] AS stateful_set, pod['metadata']['name'] AS pod\nORDER BY stateful_set, pod",
+            "tokens": {
+              "prompt": 17590,
+              "output": 118,
+              "total": 17708
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 4,
+        "result_fingerprint": "c9b528b56169c26b"
+      }
+    ]
+  },
+  {
+    "id": "m05",
+    "question": "For namespace litmus, list jobs and the pods they manage.",
+    "tags": [
+      "job",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m05",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(j:Job)-[:Manages]->(p:Pod)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN j['metadata']['name'] AS job, p['metadata']['name'] AS pod\nORDER BY job, pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(j:Job)-[:Manages]->(p:Pod)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN j['metadata']['name'] AS job, p['metadata']['name'] AS pod\nORDER BY job, pod",
+            "tokens": {
+              "prompt": 17588,
+              "output": 109,
+              "total": 17697
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m06",
+    "question": "For namespace litmus, list services and the endpoint slices they manage.",
+    "tags": [
+      "service",
+      "endpointslice",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "9bbdb0db497e4f5a",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m06",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)-[:Manages]->(es:EndpointSlice)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN s['metadata']['name'] AS service, collect(DISTINCT es['metadata']['name']) AS endpoint_slices\nORDER BY service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)-[:Manages]->(es:EndpointSlice)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN s['metadata']['name'] AS service, collect(DISTINCT es['metadata']['name']) AS endpoint_slices\nORDER BY service",
+            "tokens": {
+              "prompt": 17589,
+              "output": 115,
+              "total": 17704
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "9bbdb0db497e4f5a"
+      }
+    ]
+  },
+  {
+    "id": "m07",
+    "question": "For namespace litmus, list services and the pods backing each service.",
+    "tags": [
+      "service",
+      "endpointslice",
+      "endpoint",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "dbe2f21459c1478d",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m07",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(:EndpointSlice)-[:ContainsEndpoint]->(:Endpoint)-[:HasAddress]->(:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, collect(DISTINCT p['metadata']['name']) AS backing_pods\nRETURN s['metadata']['name'] AS service, backing_pods\nORDER BY service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(:EndpointSlice)-[:ContainsEndpoint]->(:Endpoint)-[:HasAddress]->(:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, collect(DISTINCT p['metadata']['name']) AS backing_pods\nRETURN s['metadata']['name'] AS service, backing_pods\nORDER BY service",
+            "tokens": {
+              "prompt": 17589,
+              "output": 156,
+              "total": 17745
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "dbe2f21459c1478d"
+      }
+    ]
+  },
+  {
+    "id": "m08",
+    "question": "List all pods running on node <node>.",
+    "tags": [
+      "pod",
+      "node",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m08",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)\nWHERE n['metadata']['name'] = '<node>' OR n['name'] = '<node>'\nRETURN p['metadata']['name'] AS pod_name,\n       p['metadata']['namespace'] AS namespace,\n       p['status']['phase'] AS phase\nORDER BY namespace, pod_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)\nWHERE n['metadata']['name'] = '<node>' OR n['name'] = '<node>'\nRETURN p['metadata']['name'] AS pod_name,\n       p['metadata']['namespace'] AS namespace,\n       p['status']['phase'] AS phase\nORDER BY namespace, pod_name",
+            "tokens": {
+              "prompt": 17585,
+              "output": 167,
+              "total": 17752
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m09",
+    "question": "For namespace litmus, list PVCs and the PVs they are bound to.",
+    "tags": [
+      "pvc",
+      "pv",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m09",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(pvc:PersistentVolumeClaim)-[:BoundTo]->(pv:PersistentVolume)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN pvc['metadata']['name'] AS pvc, pv['metadata']['name'] AS pv\nORDER BY pvc, pv",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(pvc:PersistentVolumeClaim)-[:BoundTo]->(pv:PersistentVolume)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN pvc['metadata']['name'] AS pvc, pv['metadata']['name'] AS pv\nORDER BY pvc, pv",
+            "tokens": {
+              "prompt": 17592,
+              "output": 115,
+              "total": 17707
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m10",
+    "question": "List events concerning pods in namespace litmus with event reason and pod name.",
+    "tags": [
+      "event",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m10",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (e:Event)-[:Concerns]->(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN e['reason'] AS event_reason, p['metadata']['name'] AS pod_name\nORDER BY pod_name, event_reason",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (e:Event)-[:Concerns]->(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN e['reason'] AS event_reason, p['metadata']['name'] AS pod_name\nORDER BY pod_name, event_reason",
+            "tokens": {
+              "prompt": 17590,
+              "output": 116,
+              "total": 17706
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m11",
+    "question": "For namespace litmus, list pods and the nodes they run on.",
+    "tags": [
+      "pod",
+      "node",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m11",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(p:Pod)-[:RunsOn]->(n:Node)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN p['metadata']['name'] AS pod, n['metadata']['name'] AS node\nORDER BY pod, node",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(p:Pod)-[:RunsOn]->(n:Node)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN p['metadata']['name'] AS pod, n['metadata']['name'] AS node\nORDER BY pod, node",
+            "tokens": {
+              "prompt": 17589,
+              "output": 109,
+              "total": 17698
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m12",
+    "question": "For namespace litmus, list pods and the PVCs they claim.",
+    "tags": [
+      "pod",
+      "pvc",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "1915afa37d3dae68",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m12",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (p)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)\nRETURN p['metadata']['name'] AS pod, collect(DISTINCT pvc['metadata']['name']) AS pvc_claims\nORDER BY pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (p)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)\nRETURN p['metadata']['name'] AS pod, collect(DISTINCT pvc['metadata']['name']) AS pvc_claims\nORDER BY pod",
+            "tokens": {
+              "prompt": 17589,
+              "output": 136,
+              "total": 17725
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 7,
+        "result_fingerprint": "1915afa37d3dae68"
+      }
+    ]
+  },
+  {
+    "id": "m13",
+    "question": "For namespace litmus, list containers and the pods they run in.",
+    "tags": [
+      "container",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "cad1bd78d120215a",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m13",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (c:Container)-[:Runs]->(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN c['metadata']['name'] AS container, p['metadata']['name'] AS pod\nORDER BY pod, container",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (c:Container)-[:Runs]->(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN c['metadata']['name'] AS container, p['metadata']['name'] AS pod\nORDER BY pod, container",
+            "tokens": {
+              "prompt": 17589,
+              "output": 105,
+              "total": 17694
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 9,
+        "result_fingerprint": "cad1bd78d120215a"
+      }
+    ]
+  },
+  {
+    "id": "m14",
+    "question": "For namespace litmus, list containers and their logs (if any).",
+    "tags": [
+      "container",
+      "logs",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4cc803929ec42d48",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m14",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (c:Container)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (l:Logs)\nWHERE l['container_uid'] = c['metadata']['uid']\nRETURN c['metadata']['name'] AS container,\n       c['pod_name'] AS pod,\n       l['content'] AS logs\nORDER BY pod, container",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (c:Container)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (l:Logs)\nWHERE l['container_uid'] = c['metadata']['uid']\nRETURN c['metadata']['name'] AS container,\n       c['pod_name'] AS pod,\n       l['content'] AS logs\nORDER BY pod, container",
+            "tokens": {
+              "prompt": 17589,
+              "output": 144,
+              "total": 17733
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 9,
+        "result_fingerprint": "4cc803929ec42d48"
+      }
+    ]
+  },
+  {
+    "id": "m15",
+    "question": "For namespace litmus, list ingresses and the services they target.",
+    "tags": [
+      "ingress",
+      "service",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "2f9952a849089a08",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m15",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(i:Ingress)-[:DefinesBackend]->(isb:IngressServiceBackend)-[:TargetsService]->(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN DISTINCT i['metadata']['name'] AS ingress, s['metadata']['name'] AS service\nORDER BY ingress, service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(i:Ingress)-[:DefinesBackend]->(isb:IngressServiceBackend)-[:TargetsService]->(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN DISTINCT i['metadata']['name'] AS ingress, s['metadata']['name'] AS service\nORDER BY ingress, service",
+            "tokens": {
+              "prompt": 17589,
+              "output": 127,
+              "total": 17716
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 2,
+        "result_fingerprint": "2f9952a849089a08"
+      }
+    ]
+  },
+  {
+    "id": "m16",
+    "question": "For namespace litmus, list endpoint slices and the pods they reference.",
+    "tags": [
+      "endpointslice",
+      "endpoint",
+      "pod",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "b3b8b969b36a4aa4",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m16",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (es)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nRETURN es['metadata']['name'] AS endpoint_slice,\n       collect(DISTINCT p['metadata']['name']) AS pods\nORDER BY endpoint_slice",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (es)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nRETURN es['metadata']['name'] AS endpoint_slice,\n       collect(DISTINCT p['metadata']['name']) AS pods\nORDER BY endpoint_slice",
+            "tokens": {
+              "prompt": 17589,
+              "output": 142,
+              "total": 17731
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "b3b8b969b36a4aa4"
+      }
+    ]
+  },
+  {
+    "id": "m17",
+    "question": "For namespace litmus, list events concerning services.",
+    "tags": [
+      "event",
+      "service",
+      "namespace",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m17",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (e:Event)-[:Concerns]->(s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN e['metadata']['name'] AS event_name,\n       e['type'] AS event_type,\n       e['reason'] AS reason,\n       e['note'] AS note,\n       e['eventTime'] AS event_time,\n       s['metadata']['name'] AS service_name\nORDER BY event_time DESC",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (e:Event)-[:Concerns]->(s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN e['metadata']['name'] AS event_name,\n       e['type'] AS event_type,\n       e['reason'] AS reason,\n       e['note'] AS note,\n       e['eventTime'] AS event_time,\n       s['metadata']['name'] AS service_name\nORDER BY event_time DESC",
+            "tokens": {
+              "prompt": 17585,
+              "output": 147,
+              "total": 17732
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m18",
+    "question": "List persistent volumes and the storage classes they use.",
+    "tags": [
+      "pv",
+      "storageclass",
+      "join",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m18",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (pv:PersistentVolume)-[:UsesStorageClass]->(sc:StorageClass)\nRETURN pv['metadata']['name'] AS persistent_volume,\n       sc['metadata']['name'] AS storage_class\nORDER BY persistent_volume",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (pv:PersistentVolume)-[:UsesStorageClass]->(sc:StorageClass)\nRETURN pv['metadata']['name'] AS persistent_volume,\n       sc['metadata']['name'] AS storage_class\nORDER BY persistent_volume",
+            "tokens": {
+              "prompt": 17585,
+              "output": 86,
+              "total": 17671
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m19",
+    "question": "For each node, count pods scheduled on that node.",
+    "tags": [
+      "node",
+      "pod",
+      "aggregation",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m19",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (n:Node)\nOPTIONAL MATCH (p:Pod)-[:RunsOn]->(n)\nRETURN n['metadata']['name'] AS node, count(DISTINCT p) AS pod_count\nORDER BY pod_count DESC, node",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (n:Node)\nOPTIONAL MATCH (p:Pod)-[:RunsOn]->(n)\nRETURN n['metadata']['name'] AS node, count(DISTINCT p) AS pod_count\nORDER BY pod_count DESC, node",
+            "tokens": {
+              "prompt": 17586,
+              "output": 93,
+              "total": 17679
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "m20",
+    "question": "For each namespace, count services.",
+    "tags": [
+      "namespace",
+      "service",
+      "aggregation",
+      "difficulty:medium"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "99532bf0547872db",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "m20",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWITH ns, count(DISTINCT s) AS service_count\nRETURN ns['metadata']['name'] AS namespace, service_count\nORDER BY service_count DESC, namespace",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWITH ns, count(DISTINCT s) AS service_count\nRETURN ns['metadata']['name'] AS namespace, service_count\nORDER BY service_count DESC, namespace",
+            "tokens": {
+              "prompt": 17582,
+              "output": 120,
+              "total": 17702
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 20,
+        "result_fingerprint": "99532bf0547872db"
+      }
+    ]
+  },
+  {
+    "id": "h01",
+    "question": "For each namespace, count pods and return the top 5 namespaces by pod count.",
+    "tags": [
+      "namespace",
+      "pod",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "5d47e2c76ff8c4fe",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h01",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWITH ns, count(DISTINCT p) AS pod_count\nRETURN ns['metadata']['name'] AS namespace, pod_count\nORDER BY pod_count DESC, namespace ASC\nLIMIT 5",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWITH ns, count(DISTINCT p) AS pod_count\nRETURN ns['metadata']['name'] AS namespace, pod_count\nORDER BY pod_count DESC, namespace ASC\nLIMIT 5",
+            "tokens": {
+              "prompt": 17592,
+              "output": 104,
+              "total": 17696
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "5d47e2c76ff8c4fe"
+      }
+    ]
+  },
+  {
+    "id": "h02",
+    "question": "Which nodes run more than 50 pods?",
+    "tags": [
+      "node",
+      "pod",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h02",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)\nWITH n, count(p) AS pod_count\nWHERE pod_count > 50\nRETURN n['metadata']['name'] AS node, pod_count\nORDER BY pod_count DESC",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)\nWITH n, count(p) AS pod_count\nWHERE pod_count > 50\nRETURN n['metadata']['name'] AS node, pod_count\nORDER BY pod_count DESC",
+            "tokens": {
+              "prompt": 17584,
+              "output": 110,
+              "total": 17694
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h03",
+    "question": "For each namespace, compute total requested and limit memory (MiB) across all pod containers.",
+    "tags": [
+      "pod",
+      "container",
+      "resources",
+      "unwind",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "af576975f2340a83",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h03",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nUNWIND p['spec']['containers'] AS container\nWITH ns, container['resources']['requests'] AS reqs, container['resources']['limits'] AS lims\nWITH ns,\n  CASE\n    WHEN reqs['memory'] IS NULL THEN 0.0\n    WHEN reqs['memory'] ENDS WITH 'Ti' THEN toFloat(replace(reqs['memory'], 'Ti', '')) * 1024 * 1024\n    WHEN reqs['memory'] ENDS WITH 'Gi' THEN toFloat(replace(reqs['memory'], 'Gi', '')) * 1024\n    WHEN reqs['memory'] ENDS WITH 'Mi' THEN toFloat(replace(reqs['memory'], 'Mi', ''))\n    WHEN reqs['memory'] ENDS WITH 'Ki' THEN toFloat(replace(reqs['memory'], 'Ki', '')) / 1024\n    WHEN reqs['memory'] ENDS WITH 'T' THEN toFloat(replace(reqs['memory'], 'T', '')) * 1000000000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'G' THEN toFloat(replace(reqs['memory'], 'G', '')) * 1000000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'M' THEN toFloat(replace(reqs['memory'], 'M', '')) * 1000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'k' THEN toFloat(replace(reqs['memory'], 'k', '')) * 1000 / 1048576\n    ELSE toFloat(reqs['memory']) / 1048576\n  END AS req_memory_mib,\n  CASE\n    WHEN lims['memory'] IS NULL THEN 0.0\n    WHEN lims['memory'] ENDS WITH 'Ti' THEN toFloat(replace(lims['memory'], 'Ti', '')) * 1024 * 1024\n    WHEN lims['memory'] ENDS WITH 'Gi' THEN toFloat(replace(lims['memory'], 'Gi', '')) * 1024\n    WHEN lims['memory'] ENDS WITH 'Mi' THEN toFloat(replace(lims['memory'], 'Mi', ''))\n    WHEN lims['memory'] ENDS WITH 'Ki' THEN toFloat(replace(lims['memory'], 'Ki', '')) / 1024\n    WHEN lims['memory'] ENDS WITH 'T' THEN toFloat(replace(lims['memory'], 'T', '')) * 1000000000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'G' THEN toFloat(replace(lims['memory'], 'G', '')) * 1000000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'M' THEN toFloat(replace(lims['memory'], 'M', '')) * 1000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'k' THEN toFloat(replace(lims['memory'], 'k', '')) * 1000 / 1048576\n    ELSE toFloat(lims['memory']) / 1048576\n  END AS lim_memory_mib\nRETURN ns['metadata']['name'] AS namespace,\n       sum(req_memory_mib) AS total_requested_memory_mib,\n       sum(lim_memory_mib) AS total_limit_memory_mib\nORDER BY namespace",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nUNWIND p['spec']['containers'] AS container\nWITH ns, container['resources']['requests'] AS reqs, container['resources']['limits'] AS lims\nWITH ns,\n  CASE\n    WHEN reqs['memory'] IS NULL THEN 0.0\n    WHEN reqs['memory'] ENDS WITH 'Ti' THEN toFloat(replace(reqs['memory'], 'Ti', '')) * 1024 * 1024\n    WHEN reqs['memory'] ENDS WITH 'Gi' THEN toFloat(replace(reqs['memory'], 'Gi', '')) * 1024\n    WHEN reqs['memory'] ENDS WITH 'Mi' THEN toFloat(replace(reqs['memory'], 'Mi', ''))\n    WHEN reqs['memory'] ENDS WITH 'Ki' THEN toFloat(replace(reqs['memory'], 'Ki', '')) / 1024\n    WHEN reqs['memory'] ENDS WITH 'T' THEN toFloat(replace(reqs['memory'], 'T', '')) * 1000000000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'G' THEN toFloat(replace(reqs['memory'], 'G', '')) * 1000000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'M' THEN toFloat(replace(reqs['memory'], 'M', '')) * 1000000 / 1048576\n    WHEN reqs['memory'] ENDS WITH 'k' THEN toFloat(replace(reqs['memory'], 'k', '')) * 1000 / 1048576\n    ELSE toFloat(reqs['memory']) / 1048576\n  END AS req_memory_mib,\n  CASE\n    WHEN lims['memory'] IS NULL THEN 0.0\n    WHEN lims['memory'] ENDS WITH 'Ti' THEN toFloat(replace(lims['memory'], 'Ti', '')) * 1024 * 1024\n    WHEN lims['memory'] ENDS WITH 'Gi' THEN toFloat(replace(lims['memory'], 'Gi', '')) * 1024\n    WHEN lims['memory'] ENDS WITH 'Mi' THEN toFloat(replace(lims['memory'], 'Mi', ''))\n    WHEN lims['memory'] ENDS WITH 'Ki' THEN toFloat(replace(lims['memory'], 'Ki', '')) / 1024\n    WHEN lims['memory'] ENDS WITH 'T' THEN toFloat(replace(lims['memory'], 'T', '')) * 1000000000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'G' THEN toFloat(replace(lims['memory'], 'G', '')) * 1000000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'M' THEN toFloat(replace(lims['memory'], 'M', '')) * 1000000 / 1048576\n    WHEN lims['memory'] ENDS WITH 'k' THEN toFloat(replace(lims['memory'], 'k', '')) * 1000 / 1048576\n    ELSE toFloat(lims['memory']) / 1048576\n  END AS lim_memory_mib\nRETURN ns['metadata']['name'] AS namespace,\n       sum(req_memory_mib) AS total_requested_memory_mib,\n       sum(lim_memory_mib) AS total_limit_memory_mib\nORDER BY namespace",
+            "tokens": {
+              "prompt": 17594,
+              "output": 829,
+              "total": 18423
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 24,
+        "result_fingerprint": "af576975f2340a83"
+      }
+    ]
+  },
+  {
+    "id": "h04",
+    "question": "Find services in namespace default that have no endpoint slices.",
+    "tags": [
+      "service",
+      "endpointslice",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "f77cd4c2c9b63e0a",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h04",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'default'\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH s, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN s['metadata']['name'] AS service, endpoint_slice_count\nORDER BY service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'default'\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH s, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN s['metadata']['name'] AS service, endpoint_slice_count\nORDER BY service",
+            "tokens": {
+              "prompt": 17586,
+              "output": 131,
+              "total": 17717
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 4,
+        "result_fingerprint": "f77cd4c2c9b63e0a"
+      }
+    ]
+  },
+  {
+    "id": "h05",
+    "question": "Find ingresses in namespace litmus whose backend services have endpoints.",
+    "tags": [
+      "ingress",
+      "service",
+      "endpointslice",
+      "endpoint",
+      "namespace",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "ee03f03b91e46012",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h05",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(i:Ingress)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(s:Service)-[:Manages]->(es:EndpointSlice)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (es)-[:ContainsEndpoint]->(e:Endpoint)\nMATCH (e)-[:HasAddress]->(:EndpointAddress)\nRETURN DISTINCT i['metadata']['name'] AS ingress, s['metadata']['name'] AS service, es['metadata']['name'] AS endpoint_slice\nORDER BY ingress, service, endpoint_slice",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(i:Ingress)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(s:Service)-[:Manages]->(es:EndpointSlice)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (es)-[:ContainsEndpoint]->(e:Endpoint)\nMATCH (e)-[:HasAddress]->(:EndpointAddress)\nRETURN DISTINCT i['metadata']['name'] AS ingress, s['metadata']['name'] AS service, es['metadata']['name'] AS endpoint_slice\nORDER BY ingress, service, endpoint_slice",
+            "tokens": {
+              "prompt": 17588,
+              "output": 177,
+              "total": 17765
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 2,
+        "result_fingerprint": "ee03f03b91e46012"
+      }
+    ]
+  },
+  {
+    "id": "h06",
+    "question": "For host litmus.qa.agoda.is, list backend services and pods backing that host.",
+    "tags": [
+      "host",
+      "ingress",
+      "service",
+      "pod",
+      "join",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "9eb4935da96c6b22",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h06",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)-[:DefinesBackend]->(isb:IngressServiceBackend)-[:TargetsService]->(s:Service)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWHERE h['name'] = 'litmus.qa.agoda.is'\nRETURN DISTINCT s['metadata']['namespace'] AS service_namespace,\n       s['metadata']['name'] AS service_name,\n       p['metadata']['namespace'] AS pod_namespace,\n       p['metadata']['name'] AS pod_name\nORDER BY service_namespace, service_name, pod_namespace, pod_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)-[:DefinesBackend]->(isb:IngressServiceBackend)-[:TargetsService]->(s:Service)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWHERE h['name'] = 'litmus.qa.agoda.is'\nRETURN DISTINCT s['metadata']['namespace'] AS service_namespace,\n       s['metadata']['name'] AS service_name,\n       p['metadata']['namespace'] AS pod_namespace,\n       p['metadata']['name'] AS pod_name\nORDER BY service_namespace, service_name, pod_namespace, pod_name",
+            "tokens": {
+              "prompt": 17593,
+              "output": 211,
+              "total": 17804
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 2,
+        "result_fingerprint": "9eb4935da96c6b22"
+      }
+    ]
+  },
+  {
+    "id": "h07",
+    "question": "For each service, count distinct backing pod IPs.",
+    "tags": [
+      "service",
+      "pod",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "31ba3f55b9a8f968",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h07",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (s:Service)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, collect(DISTINCT ea['address']) AS pod_ips\nRETURN s['metadata']['namespace'] AS namespace,\n       s['metadata']['name'] AS service,\n       size(pod_ips) AS distinct_backing_pod_ip_count\nORDER BY distinct_backing_pod_ip_count DESC, namespace, service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (s:Service)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, collect(DISTINCT ea['address']) AS pod_ips\nRETURN s['metadata']['namespace'] AS namespace,\n       s['metadata']['name'] AS service,\n       size(pod_ips) AS distinct_backing_pod_ip_count\nORDER BY distinct_backing_pod_ip_count DESC, namespace, service",
+            "tokens": {
+              "prompt": 17586,
+              "output": 162,
+              "total": 17748
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 102,
+        "result_fingerprint": "31ba3f55b9a8f968"
+      }
+    ]
+  },
+  {
+    "id": "h08",
+    "question": "List deployments where ready replicas are fewer than desired replicas.",
+    "tags": [
+      "deployment",
+      "status",
+      "filter",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h08",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (d:Deployment)\nWHERE d['status']['readyReplicas'] < d['spec']['replicas']\nRETURN d['metadata']['namespace'] AS namespace,\n       d['metadata']['name'] AS deployment,\n       d['status']['readyReplicas'] AS ready_replicas,\n       d['spec']['replicas'] AS desired_replicas\nORDER BY namespace, deployment",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (d:Deployment)\nWHERE d['status']['readyReplicas'] < d['spec']['replicas']\nRETURN d['metadata']['namespace'] AS namespace,\n       d['metadata']['name'] AS deployment,\n       d['status']['readyReplicas'] AS ready_replicas,\n       d['spec']['replicas'] AS desired_replicas\nORDER BY namespace, deployment",
+            "tokens": {
+              "prompt": 17586,
+              "output": 145,
+              "total": 17731
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h09",
+    "question": "List pods in namespace storefront that are not managed by any Deployment, StatefulSet, DaemonSet, Job, or ReplicaSet.",
+    "tags": [
+      "pod",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "09b887d0a8490ec6",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h09",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'storefront'\n  AND NOT EXISTS { MATCH (:Deployment)-[:Manages]->(:ReplicaSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:StatefulSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:DaemonSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:Job)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:ReplicaSet)-[:Manages]->(p) }\nRETURN p['metadata']['name'] AS pod\nORDER BY pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'storefront'\n  AND NOT EXISTS { MATCH (:Deployment)-[:Manages]->(:ReplicaSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:StatefulSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:DaemonSet)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:Job)-[:Manages]->(p) }\n  AND NOT EXISTS { MATCH (:ReplicaSet)-[:Manages]->(p) }\nRETURN p['metadata']['name'] AS pod\nORDER BY pod",
+            "tokens": {
+              "prompt": 17601,
+              "output": 195,
+              "total": 17796
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 1,
+        "result_fingerprint": "09b887d0a8490ec6"
+      }
+    ]
+  },
+  {
+    "id": "h10",
+    "question": "List PVCs in namespace pyroscope with their bound PV name and storage class (if any).",
+    "tags": [
+      "pvc",
+      "pv",
+      "storageclass",
+      "namespace",
+      "join",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "c012320b02630f72",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h10",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nOPTIONAL MATCH (pvc)-[:BoundTo]->(pv:PersistentVolume)\nRETURN pvc['metadata']['name'] AS pvc_name,\n       pv['metadata']['name'] AS pv_name,\n       coalesce(pvc['spec']['storageClassName'], pv['spec']['storageClassName']) AS storage_class\nORDER BY pvc_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nOPTIONAL MATCH (pvc)-[:BoundTo]->(pv:PersistentVolume)\nRETURN pvc['metadata']['name'] AS pvc_name,\n       pv['metadata']['name'] AS pv_name,\n       coalesce(pvc['spec']['storageClassName'], pv['spec']['storageClassName']) AS storage_class\nORDER BY pvc_name",
+            "tokens": {
+              "prompt": 17594,
+              "output": 158,
+              "total": 17752
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "c012320b02630f72"
+      }
+    ]
+  },
+  {
+    "id": "h11",
+    "question": "Find services in namespace litmus that have no endpoint slices.",
+    "tags": [
+      "service",
+      "endpointslice",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h11",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH s, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN s['metadata']['name'] AS service, endpoint_slice_count\nORDER BY service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH s, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN s['metadata']['name'] AS service, endpoint_slice_count\nORDER BY service",
+            "tokens": {
+              "prompt": 17587,
+              "output": 134,
+              "total": 17721
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h12",
+    "question": "For each ingress in namespace litmus, list backend services that have no endpoint slices.",
+    "tags": [
+      "ingress",
+      "service",
+      "endpointslice",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h12",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (ing)-[:DefinesBackend]->(backend:IngressServiceBackend)-[:TargetsService]->(svc:Service)\nOPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)\nWITH ing, svc, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN ing['metadata']['name'] AS ingress, svc['metadata']['name'] AS backend_service\nORDER BY ingress, backend_service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (ing)-[:DefinesBackend]->(backend:IngressServiceBackend)-[:TargetsService]->(svc:Service)\nOPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)\nWITH ing, svc, count(es) AS endpoint_slice_count\nWHERE endpoint_slice_count = 0\nRETURN ing['metadata']['name'] AS ingress, svc['metadata']['name'] AS backend_service\nORDER BY ingress, backend_service",
+            "tokens": {
+              "prompt": 17592,
+              "output": 182,
+              "total": 17774
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h13",
+    "question": "List PVCs in namespace litmus that are not bound to any PV.",
+    "tags": [
+      "pvc",
+      "pv",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h13",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n  AND NOT EXISTS((pvc)-[:BoundTo]->(:PersistentVolume))\nRETURN pvc['metadata']['name'] AS pvc_name,\n       pvc['status']['phase'] AS phase,\n       pvc['spec']['storageClassName'] AS storage_class,\n       pvc['spec']['volumeName'] AS requested_volume\nORDER BY pvc_name",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n  AND NOT EXISTS((pvc)-[:BoundTo]->(:PersistentVolume))\nRETURN pvc['metadata']['name'] AS pvc_name,\n       pvc['status']['phase'] AS phase,\n       pvc['spec']['storageClassName'] AS storage_class,\n       pvc['spec']['volumeName'] AS requested_volume\nORDER BY pvc_name",
+            "tokens": {
+              "prompt": 17590,
+              "output": 152,
+              "total": 17742
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h14",
+    "question": "List pods in namespace litmus that claim PVCs whose PV has no storage class.",
+    "tags": [
+      "pod",
+      "pvc",
+      "pv",
+      "storageclass",
+      "namespace",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h14",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nMATCH (p)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)-[:BoundTo]->(pv:PersistentVolume)\nWHERE ns['metadata']['name'] = 'litmus'\n  AND (pv['spec']['storageClassName'] IS NULL OR pv['spec']['storageClassName'] = '')\nRETURN DISTINCT p['metadata']['name'] AS pod,\n       pvc['metadata']['name'] AS pvc,\n       pv['metadata']['name'] AS pv\nORDER BY pod, pvc, pv",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nMATCH (p)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)-[:BoundTo]->(pv:PersistentVolume)\nWHERE ns['metadata']['name'] = 'litmus'\n  AND (pv['spec']['storageClassName'] IS NULL OR pv['spec']['storageClassName'] = '')\nRETURN DISTINCT p['metadata']['name'] AS pod,\n       pvc['metadata']['name'] AS pvc,\n       pv['metadata']['name'] AS pv\nORDER BY pod, pvc, pv",
+            "tokens": {
+              "prompt": 17592,
+              "output": 168,
+              "total": 17760
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h15",
+    "question": "For each node, count distinct namespaces of pods scheduled there; return nodes with more than 1 namespace.",
+    "tags": [
+      "node",
+      "pod",
+      "namespace",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h15",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWITH n, count(DISTINCT ns) AS namespace_count\nWHERE namespace_count > 1\nRETURN n['metadata']['name'] AS node, namespace_count\nORDER BY namespace_count DESC, node",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (n:Node)<-[:RunsOn]-(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWITH n, count(DISTINCT ns) AS namespace_count\nWHERE namespace_count > 1\nRETURN n['metadata']['name'] AS node, namespace_count\nORDER BY namespace_count DESC, node",
+            "tokens": {
+              "prompt": 17596,
+              "output": 129,
+              "total": 17725
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h16",
+    "question": "For each deployment in namespace litmus, count pods it ultimately manages via replica sets.",
+    "tags": [
+      "deployment",
+      "replicaset",
+      "pod",
+      "namespace",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "d5889667ce73ef89",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h16",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (d)-[:Manages]->(rs:ReplicaSet)\nMATCH (rs)-[:Manages]->(p:Pod)\nRETURN d['metadata']['name'] AS deployment, count(DISTINCT p) AS pod_count\nORDER BY deployment",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (d)-[:Manages]->(rs:ReplicaSet)\nMATCH (rs)-[:Manages]->(p:Pod)\nRETURN d['metadata']['name'] AS deployment, count(DISTINCT p) AS pod_count\nORDER BY deployment",
+            "tokens": {
+              "prompt": 17592,
+              "output": 159,
+              "total": 17751
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 3,
+        "result_fingerprint": "d5889667ce73ef89"
+      }
+    ]
+  },
+  {
+    "id": "h17",
+    "question": "List pods in namespace litmus that have at least one Warning event.",
+    "tags": [
+      "pod",
+      "event",
+      "namespace",
+      "filter",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4f53cda18c2baa0c",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h17",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (e:Event)-[:Concerns]->(p)\nWHERE e['type'] = 'Warning'\nRETURN DISTINCT p['metadata']['name'] AS pod\nORDER BY pod",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (e:Event)-[:Concerns]->(p)\nWHERE e['type'] = 'Warning'\nRETURN DISTINCT p['metadata']['name'] AS pod\nORDER BY pod",
+            "tokens": {
+              "prompt": 17589,
+              "output": 110,
+              "total": 17699
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 0,
+        "result_fingerprint": "4f53cda18c2baa0c"
+      }
+    ]
+  },
+  {
+    "id": "h18",
+    "question": "For each namespace, count services with zero endpoint slices.",
+    "tags": [
+      "namespace",
+      "service",
+      "endpointslice",
+      "aggregation",
+      "negative",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "4232831e1f76250b",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h18",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)\nOPTIONAL MATCH (s:Service)-[:BelongsTo]->(ns)\nWITH ns, s\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH ns, s, count(es) AS endpoint_slice_count\nWHERE s IS NOT NULL AND endpoint_slice_count = 0\nRETURN ns['metadata']['name'] AS namespace, count(s) AS services_with_zero_endpoint_slices\nORDER BY services_with_zero_endpoint_slices DESC, namespace",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)\nOPTIONAL MATCH (s:Service)-[:BelongsTo]->(ns)\nWITH ns, s\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\nWITH ns, s, count(es) AS endpoint_slice_count\nWHERE s IS NOT NULL AND endpoint_slice_count = 0\nRETURN ns['metadata']['name'] AS namespace, count(s) AS services_with_zero_endpoint_slices\nORDER BY services_with_zero_endpoint_slices DESC, namespace",
+            "tokens": {
+              "prompt": 17586,
+              "output": 163,
+              "total": 17749
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 1,
+        "result_fingerprint": "4232831e1f76250b"
+      }
+    ]
+  },
+  {
+    "id": "h19",
+    "question": "List hosts and the backend services they route to.",
+    "tags": [
+      "host",
+      "ingress",
+      "service",
+      "join",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "f60800148cfc9314",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h19",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(s:Service)\nRETURN h['name'] AS host, i['metadata']['name'] AS ingress, s['metadata']['namespace'] AS namespace, s['metadata']['name'] AS backend_service\nORDER BY host, namespace, backend_service",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(s:Service)\nRETURN h['name'] AS host, i['metadata']['name'] AS ingress, s['metadata']['namespace'] AS namespace, s['metadata']['name'] AS backend_service\nORDER BY host, namespace, backend_service",
+            "tokens": {
+              "prompt": 17585,
+              "output": 138,
+              "total": 17723
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 26,
+        "result_fingerprint": "f60800148cfc9314"
+      }
+    ]
+  },
+  {
+    "id": "h20",
+    "question": "For each service in namespace litmus, count pods by phase.",
+    "tags": [
+      "service",
+      "pod",
+      "namespace",
+      "aggregation",
+      "difficulty:hard"
+    ],
+    "deterministic": true,
+    "reference_cypher": null,
+    "consensus_result_fingerprint": "96b678d94e4a3b9f",
+    "consensus_models": [
+      "openai/gpt-5.4"
+    ],
+    "candidates": [
+      {
+        "question_id": "h20",
+        "model": "openai/gpt-5.4",
+        "provider": "openai",
+        "valid": true,
+        "error": null,
+        "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(:EndpointSlice)-[:ContainsEndpoint]->(:Endpoint)-[:HasAddress]->(:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, p['status']['phase'] AS phase, count(DISTINCT p) AS pod_count\nRETURN s['metadata']['name'] AS service, phase, pod_count\nORDER BY service, phase",
+        "attempts": [
+          {
+            "attempt": 1,
+            "valid": true,
+            "error": null,
+            "cypher": "MATCH (ns:Namespace)<-[:BelongsTo]-(s:Service)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (s)-[:Manages]->(:EndpointSlice)-[:ContainsEndpoint]->(:Endpoint)-[:HasAddress]->(:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, p['status']['phase'] AS phase, count(DISTINCT p) AS pod_count\nRETURN s['metadata']['name'] AS service, phase, pod_count\nORDER BY service, phase",
+            "tokens": {
+              "prompt": 17588,
+              "output": 187,
+              "total": 17775
+            }
+          }
+        ],
+        "execution_error": null,
+        "row_count": 5,
+        "result_fingerprint": "96b678d94e4a3b9f"
+      }
+    ]
+  }
+]

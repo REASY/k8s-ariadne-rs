@@ -27,6 +27,14 @@ impl GraphConnection for Memgraph {
     ) -> Result<Vec<Value>> {
         Memgraph::execute_query_with_params(self, query, params)
     }
+
+    fn execute_query_with_columns(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        Memgraph::execute_query_with_params_and_columns(self, query, params)
+    }
 }
 
 /// Async handle for interacting with Memgraph via message passing.
@@ -99,6 +107,14 @@ impl MemgraphAsync {
         self.actor.execute_query(query, params).await
     }
 
+    pub async fn execute_query_with_columns(
+        &self,
+        query: impl Into<String>,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        self.actor.execute_query_with_columns(query, params).await
+    }
+
     pub async fn shutdown(&self) {
         self.actor.shutdown().await;
     }
@@ -120,6 +136,14 @@ impl GraphBackend for MemgraphAsync {
         params: Option<HashMap<String, Value>>,
     ) -> Result<Vec<Value>> {
         MemgraphAsync::execute_query(self, query, params).await
+    }
+
+    async fn execute_query_with_columns(
+        &self,
+        query: String,
+        params: Option<HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
+        MemgraphAsync::execute_query_with_columns(self, query, params).await
     }
 
     async fn shutdown(&self) {

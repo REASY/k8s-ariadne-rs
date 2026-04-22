@@ -211,8 +211,8 @@ impl AccessChecker {
 mod tests {
     use super::*;
     use http::{Request, Response, StatusCode};
-    use kube::client::Body;
     use kube::Client;
+    use kube::client::Body;
     use serde_json::json;
     use std::convert::Infallible;
     use std::sync::{Arc, Mutex};

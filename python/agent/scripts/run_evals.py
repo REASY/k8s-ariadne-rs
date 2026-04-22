@@ -21,14 +21,22 @@ DEFAULT_MODELS = [
     "claude-sonnet-4-5-20250929",
     "claude-haiku-4-5-20251001",
     "claude-opus-4-5-20251101",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
     "deepseek-r1",
     "openai/gpt-5-mini-2025-08-07",
     "openai/gpt-5-nano-2025-08-07",
     "openai/gpt-5.2-2025-12-11",
+    "openai/gpt-5.4-nano-2026-03-17",
+    "openai/gpt-5.4-mini-2026-03-17",
+    "openai/gpt-5.4-2026-03-05",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-pro",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview"
 ]
 
 
@@ -168,6 +176,8 @@ def _detect_provider(model: str) -> str | None:
         return "deepseek"
     if lowered.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
+    if _has_openai_compatible_base_url():
+        return "openai"
     return None
 
 
@@ -188,6 +198,10 @@ def _force_openai_proxy() -> bool:
         "true",
         "yes",
     } or os.environ.get("EVAL_FORCE_OPENAI_PROXY", "").lower() in {"1", "true", "yes"}
+
+
+def _has_openai_compatible_base_url() -> bool:
+    return bool(os.environ.get("OPENAI_BASE_URL") or os.environ.get("LLM_BASE_URL"))
 
 
 def _provider_override(model: str, provider: str | None) -> str | None:

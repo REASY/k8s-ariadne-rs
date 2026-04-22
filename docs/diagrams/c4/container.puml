@@ -1,0 +1,43 @@
+@startuml
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+LAYOUT_LEFT_RIGHT()
+
+title Ariadne - Container Diagram
+
+Person(sre, "SRE / Developer", "Investigates Kubernetes topology, incidents, and workload changes.")
+Person_Ext(mcp_client, "Coding Agent / MCP Client", "Codex, Claude Code, Cursor, or another MCP-aware client.")
+System_Ext(kubernetes, "Kubernetes API", "Live cluster state for source snapshots and incremental sync.")
+System_Ext(llm, "LLM Provider", "Used by local experimentation harnesses for NL -> Cypher workflows.")
+
+System_Boundary(ariadne, "Ariadne") {
+  Container(rust_mcp, "ariadne-mcp", "Rust / Axum / MCP", "Primary product interface. Uses ariadne-core, ariadne-tools, and ariadne-cypher in-process to ingest cluster state, sync the graph, and expose graph_query, graph_schema, and graph_health.")
+
+  ContainerDb(memgraph, "Memgraph", "Graph database", "Materialized Kubernetes property graph queried by Cypher.")
+
+  ContainerDb(snapshot_dir, "Snapshot Directory", "JSON files", "On-disk Ariadne snapshot format used for export and snapshot-mode startup.")
+
+  Container(rust_cli, "ariadne-cli", "Rust desktop / debug app", "Local GUI and debugging harness that reuses Ariadne ingestion and validation logic, with either Memgraph or in-memory execution.")
+
+  Container(py_agent, "python/agent", "Python", "MCP client, NL -> Cypher experimentation layer, bridge, and evaluation harness.")
+}
+
+Rel(sre, rust_cli, "Uses for local demos and debugging", "GUI")
+Rel(mcp_client, rust_mcp, "Calls graph_query, graph_schema, graph_health", "Streamable HTTP MCP")
+Rel(py_agent, rust_mcp, "Calls MCP tools", "HTTP / JSON-RPC")
+
+Rel(rust_mcp, kubernetes, "Reads cluster state in live mode", "K8s API")
+Rel(rust_mcp, snapshot_dir, "Exports observed snapshots and loads snapshot mode", "JSON files")
+Rel(rust_mcp, memgraph, "Creates, updates, and queries graph", "Bolt")
+
+Rel(rust_cli, kubernetes, "Reads cluster state directly for local runs", "K8s API")
+Rel(rust_cli, snapshot_dir, "Loads local snapshot directories", "JSON files")
+Rel(rust_cli, memgraph, "Optionally queries the graph backend", "Bolt")
+Rel(rust_cli, llm, "Prompts for translation / analysis experiments", "HTTPS")
+
+Rel(py_agent, llm, "Prompts for NL -> Cypher experiments", "HTTPS")
+
+@enduml

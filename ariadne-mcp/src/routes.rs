@@ -1,3 +1,4 @@
+use crate::health::{GraphScope, RebuildHealth, SharedCoverage, SyncHealth};
 use crate::kube_tool::KubeTool;
 use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::prelude::*;
@@ -8,11 +9,13 @@ use axum::response::Html;
 use axum::routing::get;
 use axum::{Json, Router};
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpService,
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use strum::IntoEnumIterator;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 struct AppState {
@@ -21,13 +24,37 @@ struct AppState {
 
 pub async fn create_route(
     cluster_name: String,
+    backend_kind: String,
+    mode: String,
+    scope: Option<GraphScope>,
+    snapshot_captured_at: Option<String>,
     cluster_state: SharedClusterState,
-    memgraph: Arc<dyn GraphBackend>,
+    graph: Arc<dyn GraphBackend>,
+    initial_load_succeeded: Arc<AtomicBool>,
+    source_sync: Arc<Mutex<SyncHealth>>,
+    rebuild: Arc<Mutex<Option<RebuildHealth>>>,
+    coverage: SharedCoverage,
+    cancellation_token: CancellationToken,
 ) -> Result<Router> {
+    let mcp_cluster_state = cluster_state.clone();
     let service = StreamableHttpService::new(
-        move || Ok(KubeTool::new_tool(cluster_name.clone(), memgraph.clone())),
+        move || {
+            Ok(KubeTool::new_tool(
+                cluster_name.clone(),
+                backend_kind.clone(),
+                mode.clone(),
+                scope.clone(),
+                snapshot_captured_at.clone(),
+                mcp_cluster_state.clone(),
+                graph.clone(),
+                initial_load_succeeded.clone(),
+                source_sync.clone(),
+                rebuild.clone(),
+                coverage.clone(),
+            ))
+        },
         LocalSessionManager::default().into(),
-        Default::default(),
+        StreamableHttpServerConfig::default().with_cancellation_token(cancellation_token),
     );
 
     let state = AppState { cluster_state };

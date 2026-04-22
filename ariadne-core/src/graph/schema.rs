@@ -1,12 +1,12 @@
-use crate::types::{Edge, ResourceType, LOGICAL_RESOURCE_TYPES};
-use serde::Serialize;
+use crate::types::{Edge, LOGICAL_RESOURCE_TYPES, ResourceType};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use strum::IntoEnumIterator;
 
 type EdgeKey = (ResourceType, Edge, ResourceType);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphRelationship {
     #[serde(rename = "from")]
     pub from: String,

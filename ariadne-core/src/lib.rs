@@ -1,3 +1,4 @@
+pub mod cypher_validation;
 pub mod errors;
 #[path = "graph/actor.rs"]
 pub(crate) mod graph_actor;
@@ -7,6 +8,7 @@ pub mod graph_backend;
 pub mod graph_schema;
 #[path = "kube/access.rs"]
 mod kube_access;
+pub mod query_issue;
 pub(crate) mod tls;
 
 pub mod prelude {

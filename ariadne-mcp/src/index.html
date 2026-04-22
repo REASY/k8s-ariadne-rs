@@ -6,17 +6,122 @@
     <title>D3.js Directed Graph</title>
     <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
     <style>
+        :root {
+            color-scheme: light;
+            --bg: #eef2f7;
+            --panel-bg: rgba(255, 255, 255, 0.92);
+            --panel-border: rgba(148, 163, 184, 0.28);
+            --panel-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+            --text: #0f172a;
+            --muted: #64748b;
+            --muted-strong: #475569;
+            --badge-bg: #f8fafc;
+            --badge-border: #e2e8f0;
+        }
+
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background-color: #f0f2f5;
-            overflow: hidden; /* Prevents scrollbars from appearing */
+            background-color: var(--bg);
+            color: var(--text);
+            overflow: hidden;
         }
 
         svg {
             display: block;
             width: 100vw;
             height: 100vh;
+        }
+
+        .overlay {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            box-shadow: var(--panel-shadow);
+            backdrop-filter: blur(14px);
+            pointer-events: auto;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 16px;
+            z-index: 2;
+        }
+
+        .cluster-meta {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .cluster-kicker {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .cluster-title {
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.2;
+            color: var(--text);
+        }
+
+        .cluster-subtitle {
+            font-size: 12px;
+            color: var(--muted-strong);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cluster-stats {
+            display: flex;
+            align-items: stretch;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            min-width: 92px;
+            padding: 8px 10px;
+            background: var(--badge-bg);
+            border: 1px solid var(--badge-border);
+            border-radius: 12px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .stat-value {
+            margin-top: 3px;
+            font-size: 20px;
+            line-height: 1.1;
+            font-weight: 700;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
         }
 
         .link {
@@ -53,35 +158,80 @@
             transition: opacity 0.2s;
         }
 
-        .legends {
+        .side-panel {
             position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            max-height: 90vh;
-            overflow-y: auto;
+            top: 92px;
+            left: 16px;
+            bottom: 16px;
+            width: 246px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow: hidden;
+            z-index: 1;
         }
 
         .legend {
-            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .legend--nodes {
+            flex: 1 1 52%;
+        }
+
+        .legend--edges {
+            flex: 1 1 48%;
+        }
+
+        .legend-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
         .legend h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 5px;
+            margin: 0;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .legend-hint {
+            font-size: 11px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .legend-list {
+            min-height: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-right: 2px;
         }
 
         .legend-item {
-            display: flex;
+            display: grid;
+            grid-template-columns: 10px minmax(0, 1fr) auto;
             align-items: center;
-            margin-bottom: 5px;
+            gap: 8px;
+            padding: 5px 8px;
+            border-radius: 10px;
+            transition: opacity 0.2s, background-color 0.2s;
+        }
+
+        .legend-item--toggle {
             cursor: pointer;
-            transition: opacity 0.2s;
+        }
+
+        .legend-item--toggle:hover {
+            background: rgba(15, 23, 42, 0.05);
         }
 
         .legend-item:not(.active) {
@@ -89,36 +239,95 @@
         }
 
         .legend-swatch {
-            width: 15px;
-            height: 15px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
-            margin-right: 8px;
+            flex-shrink: 0;
         }
 
         .legend-swatch.edge {
-            width: 15px;
-            height: 3px;
-            border-radius: 0;
+            width: 10px;
+            height: 2px;
+            border-radius: 999px;
         }
 
         .legend-text {
-            font-size: 12px;
+            font-size: 11px;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .legend-count {
+            min-width: 22px;
+            padding: 2px 6px;
+            background: var(--badge-bg);
+            border: 1px solid var(--badge-border);
+            border-radius: 999px;
+            font-size: 10px;
+            line-height: 1.2;
+            text-align: center;
+            color: var(--muted-strong);
+            font-variant-numeric: tabular-nums;
+        }
+
+        @media (max-width: 860px) {
+            .top-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .cluster-stats {
+                justify-content: flex-start;
+            }
+
+            .side-panel {
+                width: 220px;
+                top: 124px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .top-bar {
+                top: 12px;
+                left: 12px;
+                right: 12px;
+                padding: 12px;
+            }
+
+            .cluster-title {
+                font-size: 16px;
+            }
+
+            .side-panel {
+                top: auto;
+                left: 12px;
+                right: 12px;
+                bottom: 12px;
+                width: auto;
+                height: 44vh;
+            }
         }
     </style>
 </head>
 <body>
 <svg id="graph-svg"></svg>
-<div class="tooltip"></div>
-<div class="legends">
-    <div id="node-legend" class="legend"></div>
-    <div id="edge-legend" class="legend"></div>
+<div class="overlay">
+    <div id="cluster-summary" class="panel top-bar"></div>
+    <div class="panel side-panel">
+        <div id="node-legend" class="legend legend--nodes"></div>
+        <div id="edge-legend" class="legend legend--edges"></div>
+    </div>
 </div>
+<div class="tooltip"></div>
 
 <script>
     const path = window.location.pathname.replace("/index.html", "");
     const server_url = `${window.location.protocol}//${window.location.host}${path}`;
     const metadata_url = `${server_url}/v1/metadata`;
     const graph_url = `${server_url}/v1/graph`;
+    const number_formatter = new Intl.NumberFormat();
 
     console.log(`Using server URL: ${server_url}`);
     console.log(`Using metadata URL: ${metadata_url}`);
@@ -138,37 +347,51 @@
         // Main function to render the graph
         async function initializeGraph() {
             try {
-                const graphMetadata = await fetch_graph(metadata_url);
-                console.log("Cluster info");
-                console.log(graphMetadata.cluster);
+                const [graphMetadata, graphData] = await Promise.all([
+                    fetch_graph(metadata_url),
+                    fetch_graph(graph_url),
+                ]);
 
-                // --- 1. Data and Color Scales ---
-                const node_domain = graphMetadata.resource_types;
-                const edge_domain = graphMetadata.edge_types;
-
-                const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#6EA7B7', '#84CC16', '#D946EF', '#14B8A6', '#8B5CF6', '#F59E0B', '#DC2626', '#64748B'];
-                const node_color = d3.scaleOrdinal(node_domain, node_color_range);
-
-                const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7', '#A155F7', '#EC4899', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#84CC16', '#D946EF'];
-                const edge_color = d3.scaleOrdinal(edge_domain, edge_color_range);
-
-                // To use the fetch function, uncomment the line below and comment out the `sampleData` line.
-                const graphData = await fetch_graph(graph_url);
-
-                if (!graphData || !graphData.vertices || !graphData.edges) {
+                if (!graphData || !graphData.vertices || !graphData.edges || !graphMetadata || !graphMetadata.cluster) {
                     console.error("Graph data is invalid or empty.");
                     document.body.innerHTML = "<h2 style='text-align: center; margin-top: 50px;'>Error: Could not load graph data.</h2>";
                     return;
                 }
 
+                const node_counts = countBy(graphData.vertices, item => item.node_type);
+                const edge_counts = countBy(graphData.edges, item => item.edge_type);
+
+                let node_domain = graphMetadata.resource_types.filter(type => node_counts.has(type));
+                let edge_domain = graphMetadata.edge_types.filter(type => edge_counts.has(type));
+
+                if (!node_domain.length) {
+                    node_domain = Array.from(node_counts.keys());
+                }
+
+                if (!edge_domain.length) {
+                    edge_domain = Array.from(edge_counts.keys());
+                }
+
+                const node_color_range = ['#3B82F6', '#10B981', '#EAB308', '#F97316', '#6366F1', '#EC4899', '#A855F7', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#6EA7B7', '#84CC16', '#D946EF', '#14B8A6', '#8B5CF6', '#F59E0B', '#DC2626', '#64748B'];
+                const node_color = d3.scaleOrdinal(graphMetadata.resource_types, node_color_range);
+
+                const edge_color_range = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#6366F1', '#A855F7', '#A155F7', '#EC4899', '#F472B6', '#06B6D4', '#0EA5E9', '#6EE7B7', '#84CC16', '#D946EF'];
+                const edge_color = d3.scaleOrdinal(graphMetadata.edge_types, edge_color_range);
+
+                renderClusterSummary(graphMetadata.cluster, graphData, node_domain.length, edge_domain.length);
+                createLegends(node_color, edge_color, node_domain, edge_domain, node_counts, edge_counts);
+                syncOverlayLayout();
                 renderGraph(graphData, node_color, edge_color, edge_domain);
-                createLegends(node_color, edge_color, node_domain, edge_domain);
 
             } catch (error) {
                 console.error("Failed to initialize graph:", error);
                 document.body.innerHTML = `<h2 style='text-align: center; margin-top: 50px;'>Error: ${error.message}</h2>`;
             }
         }
+
+        window.addEventListener("resize", () => {
+            syncOverlayLayout();
+        });
 
         initializeGraph();
     });
@@ -180,9 +403,16 @@
 
         const width = window.innerWidth;
         const height = window.innerHeight;
+        const insets = getGraphInsets();
+        const centerWidth = Math.max(width - insets.left - insets.right, 160);
+        const centerHeight = Math.max(height - insets.top - insets.bottom, 160);
+        const centerX = insets.left + centerWidth / 2;
+        const centerY = insets.top + centerHeight / 2;
 
         const svg = d3.select("#graph-svg");
         const tooltip = d3.select(".tooltip");
+
+        svg.selectAll("*").remove();
 
         // Create a main group for zoom/pan
         const g = svg.append("g");
@@ -191,8 +421,8 @@
         const simulation = d3.forceSimulation(nodes)
             .force("link", d3.forceLink(links).id(d => d.id))
             .force("charge", d3.forceManyBody().strength(-200))
-            .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("collide", d3.forceCollide().radius(d => 25)); // Prevent node overlap
+            .force("center", d3.forceCenter(centerX, centerY))
+            .force("collide", d3.forceCollide().radius(() => 25));
 
         // Define arrowheads for each edge type
         const defs = g.append("defs");
@@ -312,14 +542,25 @@
     }
 
     // --- 4. Legend Creation ---
-    function createLegends(node_color, edge_color, node_domain, edge_domain) {
+    function createLegends(node_color, edge_color, node_domain, edge_domain, node_counts, edge_counts) {
         // Node Legend
         const nodeLegend = d3.select("#node-legend");
-        nodeLegend.append("h4").text("Node Types");
-        const nodeItems = nodeLegend.selectAll(".legend-item")
+        nodeLegend.html("");
+
+        const nodeHeader = nodeLegend.append("div")
+            .attr("class", "legend-header");
+        nodeHeader.append("h4").text("Node Types");
+        nodeHeader.append("span")
+            .attr("class", "legend-hint")
+            .text(`${node_domain.length} shown`);
+
+        const nodeList = nodeLegend.append("div")
+            .attr("class", "legend-list");
+
+        const nodeItems = nodeList.selectAll(".legend-item")
             .data(node_domain)
             .enter().append("div")
-            .attr("class", "legend-item active")
+            .attr("class", "legend-item active");
 
         nodeItems.append("div")
             .attr("class", "legend-swatch")
@@ -329,13 +570,28 @@
             .attr("class", "legend-text")
             .text(d => d);
 
+        nodeItems.append("span")
+            .attr("class", "legend-count")
+            .text(d => number_formatter.format(node_counts.get(d) || 0));
+
         // Edge Legend
         const edgeLegend = d3.select("#edge-legend");
-        edgeLegend.append("h4").text("Edge Types (click to toggle visibility)");
-        const edgeItems = edgeLegend.selectAll(".legend-item")
+        edgeLegend.html("");
+
+        const edgeHeader = edgeLegend.append("div")
+            .attr("class", "legend-header");
+        edgeHeader.append("h4").text("Edge Types");
+        edgeHeader.append("span")
+            .attr("class", "legend-hint")
+            .text("click to toggle");
+
+        const edgeList = edgeLegend.append("div")
+            .attr("class", "legend-list");
+
+        const edgeItems = edgeList.selectAll(".legend-item")
             .data(edge_domain)
             .enter().append("div")
-            .attr("class", "legend-item active")
+            .attr("class", "legend-item legend-item--toggle active")
             .on("click", (event, d) => {
                 const item = d3.select(event.currentTarget);
                 const isActive = item.classed("active");
@@ -353,6 +609,149 @@
         edgeItems.append("span")
             .attr("class", "legend-text")
             .text(d => d);
+
+        edgeItems.append("span")
+            .attr("class", "legend-count")
+            .text(d => number_formatter.format(edge_counts.get(d) || 0));
+    }
+
+    function renderClusterSummary(cluster, graphData, nodeTypeCount, edgeTypeCount) {
+        const clusterName = cluster.name || cluster.metadata?.name || "Unknown cluster";
+        const version = cluster.info?.gitVersion
+            || cluster.info?.git_version
+            || formatKubernetesVersion(cluster.info)
+            || "unknown";
+        const endpoint = formatClusterEndpoint(cluster.cluster_url);
+        const subtitle = endpoint
+            ? `Kubernetes ${version} • ${endpoint}`
+            : `Kubernetes ${version}`;
+
+        document.title = `${clusterName} Graph`;
+
+        const summary = d3.select("#cluster-summary");
+        summary.html("");
+
+        const meta = summary.append("div")
+            .attr("class", "cluster-meta");
+        meta.append("div")
+            .attr("class", "cluster-kicker")
+            .text("Cluster");
+        meta.append("div")
+            .attr("class", "cluster-title")
+            .text(clusterName);
+        meta.append("div")
+            .attr("class", "cluster-subtitle")
+            .text(subtitle);
+
+        const stats = summary.append("div")
+            .attr("class", "cluster-stats");
+
+        [
+            { label: "Nodes", value: graphData.vertices.length },
+            { label: "Edges", value: graphData.edges.length },
+            { label: "Node Types", value: nodeTypeCount },
+            { label: "Edge Types", value: edgeTypeCount },
+        ].forEach(item => {
+            const stat = stats.append("div")
+                .attr("class", "stat-card");
+            stat.append("div")
+                .attr("class", "stat-label")
+                .text(item.label);
+            stat.append("div")
+                .attr("class", "stat-value")
+                .text(number_formatter.format(item.value));
+        });
+    }
+
+    function countBy(items, getKey) {
+        const counts = new Map();
+        items.forEach(item => {
+            const key = getKey(item);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        return counts;
+    }
+
+    function formatClusterEndpoint(clusterUrl) {
+        if (!clusterUrl) {
+            return "";
+        }
+
+        try {
+            const parsed = new URL(clusterUrl);
+            return parsed.host || clusterUrl;
+        } catch (_error) {
+            return clusterUrl;
+        }
+    }
+
+    function formatKubernetesVersion(info) {
+        if (!info) {
+            return "";
+        }
+
+        const major = info.major;
+        const minor = info.minor;
+
+        if (!major || !minor) {
+            return "";
+        }
+
+        return `v${major}.${minor}`;
+    }
+
+    function syncOverlayLayout() {
+        const topBar = document.getElementById("cluster-summary");
+        const sidePanel = document.querySelector(".side-panel");
+
+        if (!topBar || !sidePanel) {
+            return;
+        }
+
+        if (window.innerWidth <= 640) {
+            sidePanel.style.removeProperty("top");
+            sidePanel.style.removeProperty("height");
+            return;
+        }
+
+        const gap = 12;
+        const top = Math.ceil(topBar.offsetTop + topBar.offsetHeight + gap);
+        sidePanel.style.top = `${top}px`;
+        sidePanel.style.removeProperty("height");
+    }
+
+    function getGraphInsets() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const topBar = document.getElementById("cluster-summary");
+        const sidePanel = document.querySelector(".side-panel");
+        const topRect = topBar?.getBoundingClientRect();
+        const sideRect = sidePanel?.getBoundingClientRect();
+
+        if (width <= 640) {
+            return {
+                left: 24,
+                right: 24,
+                top: topRect ? Math.ceil(topRect.bottom + 16) : 140,
+                bottom: sideRect ? Math.ceil(height - sideRect.top + 16) : 280,
+            };
+        }
+
+        if (width <= 860) {
+            return {
+                left: sideRect ? Math.ceil(sideRect.right + 16) : 254,
+                right: 24,
+                top: topRect ? Math.ceil(topRect.bottom + 16) : 136,
+                bottom: 24,
+            };
+        }
+
+        return {
+            left: sideRect ? Math.ceil(sideRect.right + 16) : 288,
+            right: 24,
+            top: topRect ? Math.ceil(topRect.bottom + 16) : 96,
+            bottom: 24,
+        };
     }
 </script>
 </body>

@@ -1,0 +1,41 @@
+use ariadne_core::cypher_validation::{
+    parse_cypher, validate_cypher, validate_read_only_query, validate_schema_query,
+};
+
+#[test]
+fn rejects_updating_clause() {
+    let err = validate_cypher("CREATE (:Pod) RETURN 1").unwrap_err();
+    assert!(err.to_string().contains("updating"));
+}
+
+#[test]
+fn rejects_call_clause() {
+    let err = validate_cypher("CALL db.labels() YIELD label RETURN label").unwrap_err();
+    assert!(err.to_string().contains("CALL"));
+}
+
+#[test]
+fn accepts_with_unwind() {
+    let res = validate_cypher("UNWIND [1,2,3] AS x WITH x RETURN x");
+    assert!(res.is_ok());
+}
+
+#[test]
+fn rejects_schema_mismatch() {
+    let err = validate_cypher("MATCH (p:Pod)-[:BelongsTo]->(c:Cluster) RETURN p").unwrap_err();
+    assert!(err.to_string().contains("not allowed"));
+}
+
+#[test]
+fn rejects_unknown_label() {
+    let err = validate_cypher("MATCH (x:NotAReal)-[:Manages]->(p:Pod) RETURN x").unwrap_err();
+    assert!(err.to_string().contains("Unknown label"));
+}
+
+#[test]
+fn stages_can_be_run_independently() {
+    let query =
+        parse_cypher("MATCH (p:Pod)-[:RunsOn]->(n:Node) RETURN p").expect("query should parse");
+    validate_read_only_query(&query).expect("query should be read-only");
+    validate_schema_query(&query).expect("query should match schema");
+}

@@ -1,4 +1,4 @@
-use ariadne_cli::validation::validate_cypher;
+use ariadne_core::cypher_validation::validate_cypher;
 
 #[test]
 fn rejects_updating_clause() {

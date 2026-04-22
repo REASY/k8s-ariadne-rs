@@ -2,7 +2,6 @@ mod agent;
 mod error;
 mod gui;
 mod gui_dioxus;
-mod validation;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,12 +18,12 @@ use ariadne_core::memgraph_async::MemgraphAsync;
 use ariadne_core::state_resolver::ClusterStateResolver;
 
 use crate::agent::{
-    context_window_tokens_for_model, Agentic, Analyst, LlmAgentic, LlmConfig, LlmRouter,
-    LlmTranslator, Router, SreAnalyst, Translator,
+    Agentic, Analyst, LlmAgentic, LlmConfig, LlmRouter, LlmTranslator, Router, SreAnalyst,
+    Translator, context_window_tokens_for_model,
 };
 use crate::error::CliResult;
-use crate::gui::{run_gui, GuiArgs};
-use crate::gui_dioxus::{run_gui_dioxus, DioxusGuiArgs, DioxusRenderer};
+use crate::gui::{GuiArgs, run_gui};
+use crate::gui_dioxus::{DioxusGuiArgs, DioxusRenderer, run_gui_dioxus};
 
 #[derive(Parser, Debug)]
 #[command(name = "ariadne-cli")]
@@ -243,19 +242,19 @@ fn init_logging() -> CliResult<()> {
                 .init();
         }
         None => {
-            if let Some(path) = default_log_path() {
-                if let Ok(file) = open_log_file(&path) {
-                    tracing_subscriber::fmt()
-                        .with_env_filter("INFO")
-                        .with_writer(file)
-                        .with_ansi(false)
-                        .with_file(true)
-                        .with_line_number(true)
-                        .with_thread_ids(true)
-                        .with_thread_names(true)
-                        .init();
-                    return Ok(());
-                }
+            if let Some(path) = default_log_path()
+                && let Ok(file) = open_log_file(&path)
+            {
+                tracing_subscriber::fmt()
+                    .with_env_filter("INFO")
+                    .with_writer(file)
+                    .with_ansi(false)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .init();
+                return Ok(());
             }
             tracing_subscriber::fmt()
                 .with_env_filter("INFO")

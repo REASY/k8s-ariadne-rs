@@ -7,7 +7,9 @@ use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
+use ariadne_core::cypher_validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
+use ariadne_core::query_issue::classify_ariadne_error;
 use ariadne_core::state::{ClusterState, SharedClusterState};
 use ariadne_core::types::ResourceType;
 use strum::IntoEnumIterator;
@@ -16,7 +18,6 @@ use crate::agent::{
     Agentic, AnalysisResult, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
 };
 use crate::error::CliResult;
-use crate::validation::validate_cypher;
 
 const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
 const COMPACT_CONTEXT_LIMIT: usize = 12;
@@ -1307,8 +1308,9 @@ fn submit_question(context: &AppContext, question: String) {
                                 }
                                 Err(err) => {
                                     let exec_ms = exec_start.elapsed().as_millis();
+                                    let issue = classify_ariadne_error(&err);
                                     update_feed_item(&context, id, |item| {
-                                        item.state = FeedState::Error(err.to_string());
+                                        item.state = FeedState::Error(issue.to_string());
                                         item.exec_duration_ms = Some(exec_ms);
                                     });
                                     notify(&context);
@@ -1449,8 +1451,13 @@ fn submit_question(context: &AppContext, question: String) {
                         }
                         Err(err) => {
                             let exec_ms = exec_start.elapsed().as_millis();
+                            let issue = classify_ariadne_error(&err);
+                            if attempt <= LLM_MAX_RETRIES && issue.repairable() {
+                                feedback = Some(issue.feedback());
+                                continue;
+                            }
                             update_feed_item(&context, id, |item| {
-                                item.state = FeedState::Error(err.to_string());
+                                item.state = FeedState::Error(issue.to_string());
                                 item.exec_duration_ms = Some(exec_ms);
                             });
                             notify(&context);
@@ -1459,7 +1466,7 @@ fn submit_question(context: &AppContext, question: String) {
                     return;
                 }
                 Err(issue) => {
-                    if attempt <= LLM_MAX_RETRIES && issue.retriable() {
+                    if attempt <= LLM_MAX_RETRIES && issue.repairable() {
                         feedback = Some(issue.feedback());
                         continue;
                     }
@@ -1566,8 +1573,9 @@ fn rerun_cypher(context: &AppContext, id: u64, cypher: String) {
                     }
                     Err(err) => {
                         let exec_ms = exec_start.elapsed().as_millis();
+                        let issue = classify_ariadne_error(&err);
                         update_feed_item(&context, id, |item| {
-                            item.state = FeedState::Error(err.to_string());
+                            item.state = FeedState::Error(issue.to_string());
                             item.exec_duration_ms = Some(exec_ms);
                         });
                         notify(&context);
@@ -1822,19 +1830,17 @@ fn classify_result(records: &[Value]) -> ResultPayload {
         return graph;
     }
 
-    if records.len() == 1 {
-        if let Some(obj) = records[0].as_object() {
-            if obj.len() == 1 {
-                if let Some((label, value)) = obj.iter().next() {
-                    let value_str = format_value(value);
-                    return ResultPayload::Metric {
-                        label: label.clone(),
-                        value: value_str,
-                        unit: None,
-                    };
-                }
-            }
-        }
+    if records.len() == 1
+        && let Some(obj) = records[0].as_object()
+        && obj.len() == 1
+        && let Some((label, value)) = obj.iter().next()
+    {
+        let value_str = format_value(value);
+        return ResultPayload::Metric {
+            label: label.clone(),
+            value: value_str,
+            unit: None,
+        };
     }
 
     if records.iter().all(|value| value.is_object()) {
@@ -1888,11 +1894,11 @@ fn merge_params(
     context: &[ConversationTurn],
 ) -> Option<HashMap<String, Value>> {
     let mut merged = params.unwrap_or_default();
-    if let Some(turn) = context.last() {
-        if let Some(bindings) = &turn.bindings {
-            for (key, value) in bindings {
-                merged.entry(key.clone()).or_insert_with(|| value.clone());
-            }
+    if let Some(turn) = context.last()
+        && let Some(bindings) = &turn.bindings
+    {
+        for (key, value) in bindings {
+            merged.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
     if merged.is_empty() {
@@ -1916,10 +1922,9 @@ fn extract_context_bindings(records: &[Value]) -> Option<HashMap<String, Value>>
     if let Some(value) = extract_uniform_value(records, &["pod", "pod_name"]) {
         bindings.insert("pod_name".to_string(), value);
     }
-    if has_pod {
-        if let Some(value) = extract_uniform_value(records, &["pod_namespace", "namespace"]) {
-            bindings.insert("pod_namespace".to_string(), value);
-        }
+    if has_pod && let Some(value) = extract_uniform_value(records, &["pod_namespace", "namespace"])
+    {
+        bindings.insert("pod_namespace".to_string(), value);
     }
     if let Some(value) = extract_uniform_value(records, &["service", "service_name"]) {
         bindings.insert("service_name".to_string(), value);
@@ -1927,10 +1932,8 @@ fn extract_context_bindings(records: &[Value]) -> Option<HashMap<String, Value>>
     if has_service {
         if let Some(value) = extract_uniform_value(records, &["service_namespace"]) {
             bindings.insert("service_namespace".to_string(), value);
-        } else if !has_pod {
-            if let Some(value) = extract_uniform_value(records, &["namespace"]) {
-                bindings.insert("service_namespace".to_string(), value);
-            }
+        } else if !has_pod && let Some(value) = extract_uniform_value(records, &["namespace"]) {
+            bindings.insert("service_namespace".to_string(), value);
         }
     }
     if let Some(value) = extract_uniform_value(records, &["ingress", "ingress_name"]) {
@@ -1974,10 +1977,10 @@ fn extract_uniform_value(records: &[Value], keys: &[&str]) -> Option<Value> {
                 }
             }
         }
-        if count == records.len() {
-            if let Some(found) = value {
-                return Some(found);
-            }
+        if count == records.len()
+            && let Some(found) = value
+        {
+            return Some(found);
         }
     }
     None
@@ -2494,11 +2497,7 @@ fn log_llm_call(label: &str, duration_ms: u128, usage: Option<&LlmUsage>) {
 
 fn estimate_text_tokens(text: &str) -> usize {
     let chars = text.len();
-    if chars == 0 {
-        0
-    } else {
-        (chars / 4).max(1)
-    }
+    if chars == 0 { 0 } else { (chars / 4).max(1) }
 }
 
 fn estimate_turn_tokens(turn: &ConversationTurn) -> usize {

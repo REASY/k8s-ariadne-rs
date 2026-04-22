@@ -1,0 +1,95 @@
+2026-03-27 04:42:40,753 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p:Pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:42:40,753 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'litmus'
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)-[:HasLogs]->(l:Logs)
+RETURN
+  c['metadata']['name'] AS container_name,
+  c['pod_name'] AS pod_name,
+  c['spec']['image'] AS image,
+  l['content'] AS logs
+ORDER BY container_name
+2026-03-27 04:42:45,255 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Deployment -> Pod via Manages. Allowed: Service -> EndpointSlice; AWX -> Ingress; Job -> Pod; Deployment -> Deployment; AWX -> Deployment; Deployment -> ReplicaSet; ReplicaSet -> Pod; StatefulSet -> Pod; Deployment -> DaemonSet; DaemonSet -> Pod; Node -> Pod; Pod -> PersistentVolumeClaim. Pattern: (d:Deployment)-[:Manages]->(p) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/where/expression/xorExpression/andExpression/notExpression/comparisonExpression/addSubExpression/multDivExpression/powerExpression/unaryAddSubExpression/atomicExpression/propertyOrLabelExpression/propertyExpression/atom/subqueryExist/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: Manages is only allowed as Service -> EndpointSlice; AWX -> Ingress; Job -> Pod; Deployment -> Deployment; AWX -> Deployment; Deployment -> ReplicaSet; ReplicaSet -> Pod; StatefulSet -> Pod; Deployment -> DaemonSet; DaemonSet -> Pod; Node -> Pod; Pod -> PersistentVolumeClaim. Check direction and node labels.
+2026-03-27 04:42:45,255 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'storefront'
+AND NOT EXISTS {
+    MATCH (rs:ReplicaSet)-[:Manages]->(p)
+}
+AND NOT EXISTS {
+    MATCH (ss:StatefulSet)-[:Manages]->(p)
+}
+AND NOT EXISTS {
+    MATCH (ds:DaemonSet)-[:Manages]->(p)
+}
+AND NOT EXISTS {
+    MATCH (j:Job)-[:Manages]->(p)
+}
+AND NOT EXISTS {
+    MATCH (d:Deployment)-[:Manages]->(p)
+}
+RETURN p['metadata']['name'] AS pod_name,
+       p['metadata']['namespace'] AS namespace,
+       p['status']['phase'] AS phase
+ORDER BY pod_name
+2026-03-27 04:42:50,124 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_13]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:42:50,165 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_13]: execution failed for h03; attempting repair: MemgraphError: CommitError: Query execution error: No current transaction to commit.
+2026-03-27 04:42:58,854 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p:Pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:42:58,854 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'kube-system'
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)-[:HasLogs]->(l:Logs)
+WHERE l['container_uid'] = c['metadata']['uid']
+RETURN
+  c['metadata']['name'] AS container_name,
+  c['pod_name'] AS pod_name,
+  c['spec']['image'] AS image,
+  l['content'] AS logs
+ORDER BY pod_name, container_name
+2026-03-27 04:43:02,897 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_13]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:43:09,217 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p:Pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:09,217 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)-[:HasLogs]->(l:Logs)
+WHERE l['container_uid'] = c['metadata']['uid']
+RETURN
+  c['metadata']['name'] AS container_name,
+  c['pod_name'] AS pod_name,
+  c['spec']['image'] AS image,
+  l['content'] AS logs
+ORDER BY container_name
+2026-03-27 04:43:19,063 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p:Pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:19,063 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'content-downloader'
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)-[:HasLogs]->(l:Logs)
+RETURN
+  c['metadata']['name'] AS container_name,
+  c['pod_name'] AS pod_name,
+  c['spec']['image'] AS image,
+  l['content'] AS logs
+ORDER BY container_name
+2026-03-27 04:43:22,832 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p:Pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:22,832 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'tempo'
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)-[:HasLogs]->(l:Logs)
+RETURN
+  c['metadata']['name'] AS container_name,
+  c['pod_name'] AS pod_name,
+  c['spec']['image'] AS image,
+  l['content'] AS logs
+ORDER BY container_name

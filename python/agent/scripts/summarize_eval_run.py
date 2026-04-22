@@ -45,6 +45,7 @@ def main() -> None:
     summaries.sort(
         key=lambda row: (
             -(row["valid_rate"] or 0.0),
+            row["validator_error_rate"] or 0.0,
             row["exec_error_rate"] or 0.0,
             row["avg_latency_ms"] or 0.0,
         )
@@ -83,9 +84,17 @@ def _summarize_records(path: Path, records: list[dict[str, Any]]) -> dict[str, A
     model = _first(records, "model") or path.stem.replace("results_", "")
     question_ids = {rec.get("question_id") for rec in records if rec.get("question_id")}
     valid = sum(1 for rec in records if _truthy(rec, "final", "valid"))
+    validator_errors = sum(
+        1 for rec in records if rec.get("final", {}).get("validator_error")
+    )
     exec_errors = sum(
         1 for rec in records if rec.get("final", {}).get("execution_error")
     )
+    matched = sum(1 for rec in records if _truthy(rec, "final", "result_match"))
+    projected = sum(
+        1 for rec in records if rec.get("final", {}).get("match_type") == "projected"
+    )
+    exact = sum(1 for rec in records if rec.get("final", {}).get("match_type") == "exact")
     retry = sum(1 for rec in records if len(rec.get("attempts", [])) > 1)
     retry_success = sum(
         1
@@ -98,7 +107,11 @@ def _summarize_records(path: Path, records: list[dict[str, Any]]) -> dict[str, A
         "records": total,
         "unique_questions": len(question_ids),
         "valid_rate": _ratio(valid, total),
+        "validator_error_rate": _ratio(validator_errors, total),
         "exec_error_rate": _ratio(exec_errors, total),
+        "matched_rate": _ratio(matched, total),
+        "exact_rate": _ratio(exact, total),
+        "projected_rate": _ratio(projected, total),
         "retry_rate": _ratio(retry, total),
         "retry_success_rate": _ratio(retry_success, retry) if retry else 0.0,
         "avg_attempts": _avg_metric(records, "attempts"),
@@ -167,7 +180,11 @@ def _render_markdown(
         "Records",
         "Questions",
         "Valid %",
+        "Validator Error %",
         "Exec Error %",
+        "Matched %",
+        "Exact %",
+        "Projected %",
         "Retry %",
         "Retry Success %",
         "Avg Attempts",
@@ -187,7 +204,11 @@ def _render_markdown(
                     str(row["records"]),
                     str(row["unique_questions"]),
                     _pct(row["valid_rate"]),
+                    _pct(row["validator_error_rate"]),
                     _pct(row["exec_error_rate"]),
+                    _pct(row["matched_rate"]),
+                    _pct(row["exact_rate"]),
+                    _pct(row["projected_rate"]),
                     _pct(row["retry_rate"]),
                     _pct(row["retry_success_rate"]),
                     _fmt_float(row["avg_attempts"]),

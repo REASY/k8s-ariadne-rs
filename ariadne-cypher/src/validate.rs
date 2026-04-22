@@ -1,5 +1,5 @@
-use crate::ast::*;
 use crate::CypherError;
+use crate::ast::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ValidationMode {
@@ -55,6 +55,8 @@ pub fn validate_query(query: &Query, mode: ValidationMode) -> Result<(), CypherE
             }
             _ => {}
         }
+
+        validate_clause_expr_patterns(clause)?;
     }
 
     if matches!(mode, ValidationMode::Engine) {
@@ -113,10 +115,157 @@ pub fn validate_query(query: &Query, mode: ValidationMode) -> Result<(), CypherE
     Ok(())
 }
 
+fn validate_clause_expr_patterns(clause: &Clause) -> Result<(), CypherError> {
+    match clause {
+        Clause::Match(m) => {
+            if let Some(expr) = &m.where_clause {
+                validate_expr_patterns(expr)?;
+            }
+        }
+        Clause::Unwind(u) => {
+            validate_expr_patterns(&u.expression)?;
+        }
+        Clause::With(w) => {
+            for item in &w.items {
+                validate_expr_patterns(&item.expr)?;
+            }
+            if let Some(expr) = &w.where_clause {
+                validate_expr_patterns(expr)?;
+            }
+            if let Some(order) = &w.order {
+                for item in &order.items {
+                    validate_expr_patterns(&item.expr)?;
+                }
+            }
+            if let Some(expr) = &w.skip {
+                validate_expr_patterns(expr)?;
+            }
+            if let Some(expr) = &w.limit {
+                validate_expr_patterns(expr)?;
+            }
+        }
+        Clause::Return(r) => {
+            for item in &r.items {
+                validate_expr_patterns(&item.expr)?;
+            }
+            if let Some(order) = &r.order {
+                for item in &order.items {
+                    validate_expr_patterns(&item.expr)?;
+                }
+            }
+            if let Some(expr) = &r.skip {
+                validate_expr_patterns(expr)?;
+            }
+            if let Some(expr) = &r.limit {
+                validate_expr_patterns(expr)?;
+            }
+        }
+        Clause::Call(c) => {
+            for arg in &c.args {
+                validate_expr_patterns(arg)?;
+            }
+        }
+        Clause::Updating(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_expr_patterns(expr: &Expr) -> Result<(), CypherError> {
+    match expr {
+        Expr::Literal(_)
+        | Expr::Variable(_)
+        | Expr::Star
+        | Expr::CountStar
+        | Expr::Parameter(_) => Ok(()),
+        Expr::PropertyAccess { expr, .. } => validate_expr_patterns(expr),
+        Expr::IndexAccess { expr, index } => {
+            validate_expr_patterns(expr)?;
+            validate_expr_patterns(index)
+        }
+        Expr::ListSlice { expr, start, end } => {
+            validate_expr_patterns(expr)?;
+            if let Some(start) = start {
+                validate_expr_patterns(start)?;
+            }
+            if let Some(end) = end {
+                validate_expr_patterns(end)?;
+            }
+            Ok(())
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                validate_expr_patterns(arg)?;
+            }
+            Ok(())
+        }
+        Expr::UnaryOp { expr, .. } => validate_expr_patterns(expr),
+        Expr::BinaryOp { left, right, .. } => {
+            validate_expr_patterns(left)?;
+            validate_expr_patterns(right)
+        }
+        Expr::IsNull { expr, .. } => validate_expr_patterns(expr),
+        Expr::In { expr, list } => {
+            validate_expr_patterns(expr)?;
+            validate_expr_patterns(list)
+        }
+        Expr::HasLabel { expr, .. } => validate_expr_patterns(expr),
+        Expr::Case {
+            base,
+            alternatives,
+            else_expr,
+        } => {
+            if let Some(base) = base {
+                validate_expr_patterns(base)?;
+            }
+            for (when_expr, then_expr) in alternatives {
+                validate_expr_patterns(when_expr)?;
+                validate_expr_patterns(then_expr)?;
+            }
+            if let Some(else_expr) = else_expr {
+                validate_expr_patterns(else_expr)?;
+            }
+            Ok(())
+        }
+        Expr::Exists {
+            pattern,
+            where_clause,
+        } => {
+            validate_pattern(pattern)?;
+            if let Some(where_clause) = where_clause {
+                validate_expr_patterns(where_clause)?;
+            }
+            Ok(())
+        }
+        Expr::ListComprehension {
+            list,
+            where_clause,
+            map,
+            ..
+        } => {
+            validate_expr_patterns(list)?;
+            if let Some(where_clause) = where_clause {
+                validate_expr_patterns(where_clause)?;
+            }
+            validate_expr_patterns(map)
+        }
+        Expr::Quantifier {
+            list, where_clause, ..
+        } => {
+            validate_expr_patterns(list)?;
+            if let Some(where_clause) = where_clause {
+                validate_expr_patterns(where_clause)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn validate_pattern(pattern: &Pattern) -> Result<(), CypherError> {
     match pattern {
-        Pattern::Node(_) => Ok(()),
+        Pattern::Node(node) => validate_node_pattern(node),
         Pattern::Relationship(rel) => {
+            validate_node_pattern(&rel.left)?;
+            validate_node_pattern(&rel.right)?;
             if rel.rel.types.len() > 1 {
                 return Err(CypherError::semantic(
                     "relationship type unions not supported",
@@ -126,7 +275,9 @@ fn validate_pattern(pattern: &Pattern) -> Result<(), CypherError> {
             Ok(())
         }
         Pattern::Path(path) => {
+            validate_node_pattern(&path.start)?;
             for segment in &path.segments {
+                validate_node_pattern(&segment.node)?;
                 if segment.rel.types.len() > 1 {
                     return Err(CypherError::semantic(
                         "relationship type unions not supported",
@@ -137,6 +288,16 @@ fn validate_pattern(pattern: &Pattern) -> Result<(), CypherError> {
             Ok(())
         }
     }
+}
+
+fn validate_node_pattern(node: &NodePattern) -> Result<(), CypherError> {
+    if node.has_inline_properties {
+        return Err(CypherError::semantic(
+            "inline property maps in MATCH are not supported; move filters into WHERE",
+            node.span,
+        ));
+    }
+    Ok(())
 }
 
 fn validate_engine_pattern(pattern: &Pattern) -> Result<(), CypherError> {
@@ -413,5 +574,39 @@ fn clause_span(clause: &Clause) -> Span {
         Clause::Return(c) => c.span,
         Clause::Call(c) => c.span,
         Clause::Updating(c) => c.span,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_query;
+
+    #[test]
+    fn read_only_validation_rejects_inline_property_maps_in_match() {
+        let query =
+            parse_query("MATCH (ns:Namespace {name: 'litmus'}) RETURN ns").expect("parse query");
+
+        let err = validate_query(&query, ValidationMode::ReadOnly).expect_err("should fail");
+
+        assert!(
+            err.to_string()
+                .contains("inline property maps in MATCH are not supported"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn engine_validation_rejects_inline_property_maps_in_match() {
+        let query =
+            parse_query("MATCH (ns:Namespace {name: 'litmus'}) RETURN ns").expect("parse query");
+
+        let err = validate_query(&query, ValidationMode::Engine).expect_err("should fail");
+
+        assert!(
+            err.to_string()
+                .contains("inline property maps in MATCH are not supported"),
+            "unexpected error: {err:?}"
+        );
     }
 }

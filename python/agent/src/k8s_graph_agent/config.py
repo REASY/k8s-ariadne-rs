@@ -35,6 +35,7 @@ class AdkConfig:
     temperature: float
     max_output_tokens: int
     use_mcp_prompt: bool
+    prompt_bundle_file: str | None = None
 
     @classmethod
     def from_env(cls) -> "AdkConfig":
@@ -84,6 +85,7 @@ class AdkConfig:
             max_output_tokens=int(os.environ.get("ADK_MAX_OUTPUT_TOKENS", "24576")),
             use_mcp_prompt=os.environ.get("ADK_USE_MCP_PROMPT", "true").lower()
             in {"1", "true", "yes"},
+            prompt_bundle_file=os.environ.get("ADK_PROMPT_BUNDLE_FILE"),
         )
 
 

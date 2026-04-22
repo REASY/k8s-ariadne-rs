@@ -1,0 +1,29 @@
+{
+  "created_at": "20260327_044148",
+  "dataset": "eval/questions_gold_expanded_dense_v2.yaml",
+  "mode": "retry",
+  "runs": 1,
+  "models": [
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+    "claude-opus-4-5-20251101",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "deepseek-r1",
+    "openai/gpt-5-mini-2025-08-07",
+    "openai/gpt-5-nano-2025-08-07",
+    "openai/gpt-5.2-2025-12-11",
+    "openai/gpt-5.4-nano-2026-03-17",
+    "openai/gpt-5.4-mini-2026-03-17",
+    "openai/gpt-5.4-2026-03-05",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview"
+  ],
+  "model_parallelism": 19,
+  "parallelism": "16"
+}

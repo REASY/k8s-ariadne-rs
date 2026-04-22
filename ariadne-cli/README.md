@@ -5,7 +5,8 @@ Interactive GUI for querying Kubernetes cluster graphs with natural language.
 `ariadne-cli` connects to a live cluster or a local snapshot, builds an
 in-memory graph from Kubernetes objects, and lets you ask questions in English.
 The app calls an LLM to translate your question into Cypher, runs it against the
-embedded engine, and renders results in an immediate GUI powered by egui.
+embedded engine, retries on repairable query issues, and renders results in an
+immediate GUI powered by egui.
 
 ## Features
 
@@ -13,6 +14,7 @@ embedded engine, and renders results in an immediate GUI powered by egui.
 - **Immediate GUI (egui or Dioxus)**: ask questions and browse results in one interactive session.
 - **Live or snapshot mode**: connect to a real cluster or a snapshot directory.
 - **Structured LLM output**: enforces JSON output with a single `cypher` field.
+- **Repairable query retries**: feeds validation and some execution failures back to the LLM for self-correction.
 - **Log hygiene**: logs go to a file by default so the UI stays clean.
 - **Short-term context**: recent queries + summaries are fed back to the LLM for follow-ups.
 

@@ -167,10 +167,10 @@ where
     // Removed => in prev but not in current
     let mut removed: Vec<&'b T> = Vec::new();
     for item in prev {
-        if let Some(uid) = item.meta().uid.as_deref() {
-            if !current_uids.contains(uid) {
-                removed.push(&**item);
-            }
+        if let Some(uid) = item.meta().uid.as_deref()
+            && !current_uids.contains(uid)
+        {
+            removed.push(&**item);
         }
     }
 

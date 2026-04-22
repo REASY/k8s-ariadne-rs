@@ -6,7 +6,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 
+use ariadne_core::cypher_validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
+use ariadne_core::query_issue::classify_ariadne_error;
 
 use crate::agent::prompts::agentic_prompt;
 use crate::agent::types::{
@@ -14,7 +16,6 @@ use crate::agent::types::{
 };
 use crate::agent::util::{clean_json_response, extract_cypher, map_llm_error};
 use crate::error::CliResult;
-use crate::validation::validate_cypher;
 
 const DEFAULT_MAX_STEPS: usize = 3;
 const DEFAULT_MAX_RETRIES: usize = 1;
@@ -127,7 +128,7 @@ impl Agentic for LlmAgentic {
                 }
 
                 if let Err(issue) = validate_cypher(&step.cypher) {
-                    if attempt <= self.max_retries && issue.retriable() {
+                    if attempt <= self.max_retries && issue.repairable() {
                         feedback = Some(issue.feedback());
                         continue;
                     }
@@ -166,7 +167,12 @@ impl Agentic for LlmAgentic {
                         break;
                     }
                     Err(err) => {
-                        return Err(err.into());
+                        let issue = classify_ariadne_error(&err);
+                        if attempt <= self.max_retries && issue.repairable() {
+                            feedback = Some(issue.feedback());
+                            continue;
+                        }
+                        return Err(issue.into());
                     }
                 }
             }
@@ -210,12 +216,12 @@ fn parse_unstructured_step(text: &str) -> AgentStep {
                 action = AgentAction::Final;
             }
         }
-        if lower.starts_with("cypher:") {
-            if let Some((_, value)) = trimmed.split_once(':') {
-                let value = value.trim();
-                if !value.is_empty() {
-                    cypher_line = Some(value.to_string());
-                }
+        if lower.starts_with("cypher:")
+            && let Some((_, value)) = trimmed.split_once(':')
+        {
+            let value = value.trim();
+            if !value.is_empty() {
+                cypher_line = Some(value.to_string());
             }
         }
     }
@@ -260,11 +266,11 @@ fn build_agent_messages(
         }
         messages.push(ChatMessage::user().content(turn.question.trim()).build());
         let mut assistant = format!("Cypher:\n{}", turn.cypher.trim());
-        if let Some(summary) = &turn.result_summary {
-            if !summary.trim().is_empty() {
-                assistant.push_str("\nResult summary:\n");
-                assistant.push_str(summary.trim());
-            }
+        if let Some(summary) = &turn.result_summary
+            && !summary.trim().is_empty()
+        {
+            assistant.push_str("\nResult summary:\n");
+            assistant.push_str(summary.trim());
         }
         if let Some(bindings) = &turn.bindings {
             let formatted = format_bindings(bindings);
@@ -285,12 +291,12 @@ fn build_agent_messages(
                 step.action.as_str(),
                 step.cypher.trim()
             ));
-            if let Some(summary) = &step.result_summary {
-                if !summary.trim().is_empty() {
-                    history.push_str("Result summary: ");
-                    history.push_str(summary.trim());
-                    history.push('\n');
-                }
+            if let Some(summary) = &step.result_summary
+                && !summary.trim().is_empty()
+            {
+                history.push_str("Result summary: ");
+                history.push_str(summary.trim());
+                history.push('\n');
             }
             if let Some(params) = &step.params {
                 let formatted = format_bindings(params);
@@ -343,11 +349,11 @@ fn merge_params(
     context: &[ConversationTurn],
 ) -> Option<HashMap<String, Value>> {
     let mut merged = params.unwrap_or_default();
-    if let Some(turn) = context.last() {
-        if let Some(bindings) = &turn.bindings {
-            for (key, value) in bindings {
-                merged.entry(key.clone()).or_insert_with(|| value.clone());
-            }
+    if let Some(turn) = context.last()
+        && let Some(bindings) = &turn.bindings
+    {
+        for (key, value) in bindings {
+            merged.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
     if merged.is_empty() {

@@ -1,0 +1,64 @@
+2026-03-27 04:42:40,423 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:42:40,423 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'litmus'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:42:45,356 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_4]: execution failed for h09; attempting repair: MemgraphError: QueryError: Query execution error: Unbounded variables are not allowed in exists!
+2026-03-27 04:42:48,313 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_13]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:42:51,312 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_9]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:43:00,088 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:00,088 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'kube-system'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:43:07,368 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:07,368 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'kube-system'
+MATCH (c)-[:Runs]->(p:Pod)
+OPTIONAL MATCH (p)-[:HasLogs]->(l:Logs)
+WHERE l['container_uid'] = c['metadata']['uid']
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:43:08,319 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:08,319 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:43:14,526 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:14,526 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+OPTIONAL MATCH (p:Pod)-[:BelongsTo]->(ns)
+WHERE p['metadata']['name'] = c['pod_name']
+OPTIONAL MATCH (p)-[:HasLogs]->(l:Logs)
+WHERE l['container_uid'] = c['metadata']['uid']
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:43:16,621 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:16,621 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'content-downloader'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs
+2026-03-27 04:43:25,683 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_14]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:25,683 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_14]: invalid cypher:
+MATCH (c:Container)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'tempo'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['metadata']['name'] AS container_name, c['pod_name'] AS pod_name, l['content'] AS logs

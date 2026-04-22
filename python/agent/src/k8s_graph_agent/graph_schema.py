@@ -46,7 +46,7 @@ class GraphSchema:
     @classmethod
     def load_from_mcp(cls, mcp: McpClient) -> "GraphSchema" | None:
         try:
-            result = mcp.call_tool("get_graph_schema", {})
+            result = mcp.call_tool("graph_schema", {"format": "structured"})
             payload = extract_json_content(result)
         except Exception:
             return None
@@ -56,7 +56,9 @@ class GraphSchema:
 
     @classmethod
     def from_payload(cls, payload: JsonObject) -> "GraphSchema" | None:
-        relationships = payload.get("relationships")
+        relationships = payload.get("relationship_types")
+        if not isinstance(relationships, list):
+            relationships = payload.get("relationships")
         if not isinstance(relationships, list):
             return None
         edges: list[tuple[str, str, str]] = []

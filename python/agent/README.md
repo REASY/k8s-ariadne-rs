@@ -1,7 +1,7 @@
 # K8s Graph Agent (Python)
 
 This is a typed Python scaffold for the agent layer that talks to the MCP server exposed by the Rust app.
-It supports direct Cypher execution via the MCP tool `execute_cypher_query` and includes an ADK
+It supports direct Cypher execution via the MCP tool `graph_query` and includes an ADK
 translator that uses LiteLLM for provider-agnostic LLM access.
 
 ## Demo
@@ -64,7 +64,7 @@ LLM_MODEL=openai/gpt-5.2 \
 ## Notes
 - The current CLI expects a Cypher query prefixed with `cypher:`.
 - The MCP protocol uses JSON-RPC over streamable HTTP; this client handles JSON and SSE responses.
-- The ADK translator fetches the `analyze_question` prompt from MCP and uses it as the model input.
+- The ADK translator no longer depends on MCP prompts; it derives prompt context from `graph_schema` or a local prompt bundle override.
 - If `LLM_PROVIDER` is omitted, the provider is inferred from `LLM_MODEL` (prefix or name).
 
 ## ADK web (config-based)
@@ -190,14 +190,90 @@ Summarize a run folder as markdown:
 uv run python scripts/summarize_eval_run.py --run-dir eval/runs/<timestamp>
 ```
 
+Bootstrap gold evals with stronger models as candidate generators:
+```bash
+uv run python scripts/generate_gold_candidates.py \
+  --dataset eval/questions.yaml \
+  --output eval/gold_candidates.json \
+  --models openai/gpt-5.2-2025-12-11,gemini-3-pro-preview,claude-opus-4-5-20251101 \
+  --ids e01,e02,m01,h04
+```
+This writes per-question candidate Cypher plus execution fingerprints so you can review consensus cases first.
+Treat these model outputs as proposals, not gold truth.
+
+After you approve and copy `reference_cypher` onto deterministic questions, materialize exact expected rows:
+```bash
+uv run python scripts/materialize_expected.py \
+  --dataset eval/questions.yaml \
+  --ids e01,e02,m01,h04
+```
+This executes each approved `reference_cypher` via MCP and stores `expected.columns` / `expected.rows`
+back into the dataset. Use `--output` to write to a separate file instead of overwriting.
+
+Expand the gold dataset with grounded namespace/host variants from the live graph:
+```bash
+uv run python scripts/expand_gold_dataset.py \
+  --dataset eval/questions_gold_full.yaml \
+  --output eval/questions_gold_expanded.yaml \
+  --target-total 180 \
+  --namespace-pool-size 20 \
+  --max-namespace-variants-per-question 6 \
+  --include-empty-variants
+```
+This writes generated questions with `group_id`, `family`, `source_question_id`, and
+`generation_type` metadata so later train/dev splits can keep related variants together.
+If you want a denser set with fewer empty-result variants, omit `--include-empty-variants`.
+
+## DSPy spike
+
+The DSPy experiment keeps the live MCP-rendered schema/connectivity fixed and optimizes the
+instruction + rules layer for cheaper models.
+
+Run a DSPy prompt-optimization pass against the gold dataset:
+```bash
+MCP_URL=http://127.0.0.1:8080/mcp \
+OPENAI_API_KEY=... \
+OPENAI_BASE_URL=... \
+GEMINI_API_KEY=... \
+GOOGLE_GEMINI_BASE_URL=... \
+uv run python scripts/run_dspy_experiment.py \
+  --dataset eval/questions_gold_full.yaml \
+  --models openai/gpt-5-mini-2025-08-07,gemini-2.5-flash \
+  --train-size 40 \
+  --auto light \
+  --num-threads 4 \
+  --max-bootstrapped-demos 2 \
+  --max-labeled-demos 2
+```
+
+Artifacts are written to `eval/dspy_runs/<timestamp>/` and include:
+- `manifest.json` with train/dev ids and the base tunable instruction
+- `<model>/report.json` with baseline vs compiled exact-match metrics
+- `<model>/compiled_program/` with the serialized DSPy program
+
+For a cheap smoke run:
+```bash
+uv run python scripts/run_dspy_experiment.py \
+  --dataset eval/questions_gold.yaml \
+  --models openai/gpt-5-mini-2025-08-07 \
+  --train-size 12 \
+  --num-trials 2 \
+  --minibatch-size 6 \
+  --output-dir eval/dspy_smoke
+```
+
 Dataset entry example:
 ```yaml
 - id: q001
   question: "What are the pods backing DNS name litmus.qa.agoda.is?"
   deterministic: true
+  reference_cypher: |
+    MATCH (h:Host)-[:IsClaimedBy]->(ing:Ingress)-[:DefinesBackend]->(:IngressServiceBackend)-[:TargetsService]->(svc:Service)
+    WHERE h['name'] = 'litmus.qa.agoda.is'
+    RETURN svc['metadata']['name'] AS service
   expected:
-    columns: [namespace, pod_name]
+    columns: [service]
     rows:
-      - ["litmus", "chaos-litmus-frontend-..."]
+      - ["frontend"]
   tags: [dns, ingress, endpointslice, pod]
 ```

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ariadne Kubernetes Graph"
+  short_description: "Query Kubernetes via Ariadne MCP"
+  default_prompt: "Use $ariadne-kubernetes-graph to answer this Kubernetes cluster question through Ariadne MCP."

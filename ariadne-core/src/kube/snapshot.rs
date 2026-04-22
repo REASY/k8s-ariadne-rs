@@ -1,6 +1,6 @@
 use crate::prelude::*;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

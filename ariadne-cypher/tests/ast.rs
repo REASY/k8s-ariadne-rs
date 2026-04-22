@@ -1,6 +1,6 @@
 use ariadne_cypher::{
-    parse_query, validate_query, BinaryOp, Clause, Expr, Literal, Pattern, RelationshipDirection,
-    ValidationMode,
+    BinaryOp, Clause, Expr, Literal, Pattern, RelationshipDirection, ValidationMode, parse_query,
+    validate_query,
 };
 
 #[test]

@@ -216,9 +216,6 @@ pub enum ResourceAttributes {
     Cluster {
         cluster: Box<Cluster>,
     },
-    Logs {
-        logs: Box<Logs>,
-    },
     Container {
         container: Arc<Container>,
     },
@@ -456,41 +453,6 @@ impl Container {
                 ..Default::default()
             },
             spec,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, schemars::JsonSchema)]
-pub struct Logs {
-    pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-    pub container_uid: String,
-    pub content: String,
-}
-
-impl Logs {
-    pub fn new(namespace: &str, name: &str, container_uid: &str, content: String) -> Self {
-        let uid = format!("Logs:{container_uid}");
-        let md = k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-            annotations: None,
-            creation_timestamp: None,
-            deletion_grace_period_seconds: None,
-            deletion_timestamp: None,
-            finalizers: None,
-            generate_name: None,
-            generation: None,
-            labels: None,
-            managed_fields: None,
-            name: Some(name.to_string()),
-            namespace: Some(namespace.to_string()),
-            owner_references: None,
-            resource_version: None,
-            self_link: None,
-            uid: Some(uid),
-        };
-        Self {
-            metadata: md,
-            container_uid: container_uid.to_string(),
-            content,
         }
     }
 }

@@ -114,6 +114,7 @@ pub enum Pattern {
 pub struct NodePattern {
     pub variable: Option<String>,
     pub labels: Vec<String>,
+    pub has_inline_properties: bool,
     pub span: Span,
 }
 

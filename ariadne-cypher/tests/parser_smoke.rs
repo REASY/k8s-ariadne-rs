@@ -1,4 +1,4 @@
-use ariadne_cypher::{parse_cypher, ParseError};
+use ariadne_cypher::{ParseError, parse_cypher};
 
 #[test]
 fn parses_simple_match_return() {

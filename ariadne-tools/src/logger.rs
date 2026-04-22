@@ -1,12 +1,14 @@
 use std::env;
-use tracing_subscriber::fmt::format::{DefaultFields, Format};
-use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::SubscriberBuilder;
+use tracing_subscriber::fmt::format::{DefaultFields, Format};
 
 pub fn setup(module: &str, log_level: &str) {
     if env::var_os("RUST_LOG").is_none() {
         let env = format!("{module}={log_level}");
-        env::set_var("RUST_LOG", env);
+        unsafe {
+            env::set_var("RUST_LOG", env);
+        }
     }
     let subscriber = get_subscriber();
     subscriber.init();

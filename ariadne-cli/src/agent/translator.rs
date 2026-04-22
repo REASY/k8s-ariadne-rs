@@ -112,11 +112,11 @@ fn build_messages(
         }
         messages.push(ChatMessage::user().content(turn.question.trim()).build());
         let mut assistant = format!("Cypher:\n{}", turn.cypher.trim());
-        if let Some(summary) = &turn.result_summary {
-            if !summary.trim().is_empty() {
-                assistant.push_str("\nResult summary:\n");
-                assistant.push_str(summary.trim());
-            }
+        if let Some(summary) = &turn.result_summary
+            && !summary.trim().is_empty()
+        {
+            assistant.push_str("\nResult summary:\n");
+            assistant.push_str(summary.trim());
         }
         if let Some(bindings) = &turn.bindings {
             let formatted = format_bindings(bindings);

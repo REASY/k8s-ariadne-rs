@@ -191,6 +191,27 @@ def extract_json_content(tool_result: JsonObject) -> JsonValue:
     raise McpProtocolError("tool result did not contain json content")
 
 
+def normalize_graph_query_payload(payload: JsonValue) -> JsonValue:
+    if not isinstance(payload, dict):
+        return payload
+    columns = payload.get("columns")
+    rows = payload.get("rows")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return payload
+    column_names = [column for column in columns if isinstance(column, str)]
+    normalized: list[JsonObject] = []
+    for row in rows:
+        if not isinstance(row, list):
+            return payload
+        normalized.append(
+            {
+                column_names[index]: row[index] if index < len(row) else None
+                for index in range(len(column_names))
+            }
+        )
+    return normalized
+
+
 def _parse_sse_messages(body: str) -> list[JsonObject]:
     messages: list[JsonObject] = []
     data_lines: list[str] = []

@@ -143,8 +143,6 @@ fn build_valid_queries() -> Vec<String> {
 
 fn build_invalid_queries() -> Vec<&'static str> {
     vec![
-        "MATCH (n {name:'x'}) RETURN n",
-        "MATCH (n:Pod {name:'x'}) RETURN n",
         "MATCH p = (a)--(b) RETURN p",
         "MATCH (a)-[:REL*1..3]->(b) RETURN a",
         "MATCH (a)--(b), (c) RETURN a",

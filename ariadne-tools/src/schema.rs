@@ -46,14 +46,14 @@ pub fn get_schema(schema: &Schema) -> SchemaInfo {
 
     let mut definitions: BTreeMap<String, Type> = BTreeMap::new();
 
-    if let Some(defs_value) = object.get("$defs").or_else(|| object.get("definitions")) {
-        if let Some(defs) = defs_value.as_object() {
-            for (full_name, value) in defs {
-                if let Ok(def_schema) = Schema::try_from(value.clone()) {
-                    if let Some(info) = process_schema(full_name, &def_schema) {
-                        definitions.insert(full_name.clone(), info);
-                    }
-                }
+    if let Some(defs_value) = object.get("$defs").or_else(|| object.get("definitions"))
+        && let Some(defs) = defs_value.as_object()
+    {
+        for (full_name, value) in defs {
+            if let Ok(def_schema) = Schema::try_from(value.clone())
+                && let Some(info) = process_schema(full_name, &def_schema)
+            {
+                definitions.insert(full_name.clone(), info);
             }
         }
     }
@@ -74,7 +74,7 @@ pub fn get_schema(schema: &Schema) -> SchemaInfo {
                 .map(|props| {
                     props
                         .keys()
-                        .map(|name| Property::new(name.clone(), "ANY".to_string()))
+                        .map(|name| Property::new(name.clone(), "any".to_string()))
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -148,15 +148,15 @@ fn process_schema(type_name: &str, schema: &Schema) -> Option<Type> {
 fn get_type_name(schema: &Schema) -> String {
     if let Some(value) = schema.as_bool() {
         return if value {
-            "ANY".to_string()
+            "any".to_string()
         } else {
-            "NEVER".to_string()
+            "never".to_string()
         };
     }
 
     let object = match schema.as_object() {
         Some(object) => object,
-        None => return "ANY".to_string(),
+        None => return "any".to_string(),
     };
 
     if let Some(reference) = extract_reference(object) {
@@ -174,12 +174,12 @@ fn get_type_name(schema: &Schema) -> String {
     if let Some(type_value) = object.get("type") {
         if let Some(type_str) = type_value.as_str() {
             return match type_str {
-                "string" => "STRING".to_string(),
-                "number" => "FLOAT".to_string(),
-                "integer" => "INTEGER".to_string(),
-                "boolean" => "BOOLEAN".to_string(),
-                "object" => "MAP".to_string(),
-                "null" => "NULL".to_string(),
+                "string" => "string".to_string(),
+                "number" => "number".to_string(),
+                "integer" => "integer".to_string(),
+                "boolean" => "boolean".to_string(),
+                "object" => "object".to_string(),
+                "null" => "null".to_string(),
                 "array" => {
                     let item_type = object
                         .get("items")
@@ -195,13 +195,13 @@ fn get_type_name(schema: &Schema) -> String {
                             )
                             .ok()
                             .map(|schema| get_type_name(&schema)),
-                            Value::Array(_) => Some("TUPLE".to_string()),
+                            Value::Array(_) => Some("tuple".to_string()),
                             _ => None,
                         })
-                        .unwrap_or_else(|| "ANY".to_string());
+                        .unwrap_or_else(|| "any".to_string());
                     format!("[{item_type}]")
                 }
-                other => other.to_uppercase(),
+                other => other.to_string(),
             };
         } else if let Some(types) = type_value.as_array() {
             let mut resolved: Vec<String> = types
@@ -209,13 +209,13 @@ fn get_type_name(schema: &Schema) -> String {
                 .filter_map(Value::as_str)
                 .filter(|ty| *ty != "null")
                 .map(|ty| match ty {
-                    "string" => "STRING".to_string(),
-                    "number" => "FLOAT".to_string(),
-                    "integer" => "INTEGER".to_string(),
-                    "boolean" => "BOOLEAN".to_string(),
-                    "object" => "MAP".to_string(),
-                    "array" => "[ANY]".to_string(),
-                    other => other.to_uppercase(),
+                    "string" => "string".to_string(),
+                    "number" => "number".to_string(),
+                    "integer" => "integer".to_string(),
+                    "boolean" => "boolean".to_string(),
+                    "object" => "object".to_string(),
+                    "array" => "[any]".to_string(),
+                    other => other.to_string(),
                 })
                 .collect();
             resolved.sort();
@@ -223,9 +223,9 @@ fn get_type_name(schema: &Schema) -> String {
             if resolved.len() == 1 {
                 return resolved.pop().unwrap();
             } else if resolved.is_empty() {
-                return "NULL".to_string();
+                return "null".to_string();
             } else {
-                return "ANY".to_string();
+                return "any".to_string();
             }
         }
     }
@@ -243,15 +243,15 @@ fn get_type_name(schema: &Schema) -> String {
 
     if let Some(const_value) = object.get("const") {
         if const_value.is_string() {
-            return "STRING".to_string();
+            return "string".to_string();
         } else if const_value.is_number() {
-            return "FLOAT".to_string();
+            return "number".to_string();
         } else if const_value.is_boolean() {
-            return "BOOLEAN".to_string();
+            return "boolean".to_string();
         }
     }
 
-    "ANY".to_string()
+    "any".to_string()
 }
 
 fn extract_reference(object: &Map<String, Value>) -> Option<&str> {
@@ -263,7 +263,7 @@ fn map_reference(reference: &str) -> String {
         "#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
         | "#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.MicroTime"
         | "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
-        | "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.MicroTime" => "DATETIME_UTC".into(),
+        | "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.MicroTime" => "datetime".into(),
         _ => reference.to_string(),
     }
 }
@@ -278,7 +278,7 @@ fn get_from_discriminator(object: &Map<String, Value>, key: &str) -> Option<Stri
         .iter()
         .filter_map(|value| Schema::try_from(value.clone()).ok())
         .map(|schema| get_type_name(&schema))
-        .filter(|ty| ty != "NULL")
+        .filter(|ty| ty != "null")
         .collect();
     if resolved.is_empty() {
         return None;
@@ -288,21 +288,10 @@ fn get_from_discriminator(object: &Map<String, Value>, key: &str) -> Option<Stri
     if resolved.len() == 1 {
         return Some(resolved.pop().unwrap());
     }
-    Some("ANY".to_string())
+    Some("any".to_string())
 }
 
 fn customize_root_type(root_type: &mut Type) {
-    if root_type.name == "Cluster"
-        && !root_type
-            .properties
-            .iter()
-            .any(|p| p.name == "retrieved_at")
-    {
-        root_type.properties.push(Property::new(
-            "retrieved_at".to_string(),
-            "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time".to_string(),
-        ));
-    }
     if root_type.name == "Container" {
         for property in &mut root_type.properties {
             normalize_container_type(&property.name, &mut property.data_type);
@@ -318,15 +307,20 @@ fn customize_root_type(root_type: &mut Type) {
         {
             root_type.properties.push(Property::new(
                 "deprecatedTopology".to_string(),
-                "MAP".to_string(),
+                "object".to_string(),
             ));
         }
     }
 }
 
 fn normalize_container_type(property_name: &str, data_type: &mut String) {
-    if property_name == "container_type" && data_type == "#/definitions/ContainerType" {
-        *data_type = "STRING".to_string();
+    if property_name == "container_type"
+        && matches!(
+            data_type.as_str(),
+            "#/definitions/ContainerType" | "#/$defs/ContainerType"
+        )
+    {
+        *data_type = "string".to_string();
     }
 }
 

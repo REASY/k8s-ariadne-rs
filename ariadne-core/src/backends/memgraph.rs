@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
-use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType, LOGICAL_RESOURCE_TYPES};
+use crate::types::{Edge, GenericObject, LOGICAL_RESOURCE_TYPES, ResourceAttributes, ResourceType};
 use k8s_openapi::Metadata;
 use rsmgclient::{
     ConnectParams, Connection, ConnectionStatus, QueryParam, Record, SSLMode, TrustCallback,
@@ -185,10 +185,10 @@ impl Memgraph {
 
     fn reconnect_if_bad(&mut self) {
         let status = self.connection.status();
-        if status == ConnectionStatus::Bad || status == ConnectionStatus::Closed {
-            if let Err(err) = self.reconnect() {
-                warn!("Failed to reconnect memgraph after bad connection: {err}");
-            }
+        if (status == ConnectionStatus::Bad || status == ConnectionStatus::Closed)
+            && let Err(err) = self.reconnect()
+        {
+            warn!("Failed to reconnect memgraph after bad connection: {err}");
         }
     }
 
@@ -293,9 +293,7 @@ impl Memgraph {
         for (source_type, target_type, edge_type) in &unique_edges {
             trace!(
                 "(:{:?})-[:{:?}]->(:{:?})",
-                source_type,
-                edge_type,
-                target_type
+                source_type, edge_type, target_type
             );
         }
         Result::Ok(())
@@ -385,6 +383,15 @@ impl Memgraph {
         query: &str,
         params: Option<&HashMap<String, Value>>,
     ) -> Result<Vec<Value>> {
+        let (_, rows) = self.execute_query_with_params_and_columns(query, params)?;
+        Ok(rows)
+    }
+
+    pub fn execute_query_with_params_and_columns(
+        &mut self,
+        query: &str,
+        params: Option<&HashMap<String, Value>>,
+    ) -> Result<(Vec<String>, Vec<Value>)> {
         self.ensure_connected()?;
         let query_params = params.map(Self::json_params_to_query_params);
         let cols = self.connection.execute(query, query_params.as_ref());
@@ -410,7 +417,7 @@ impl Memgraph {
             self.reconnect_if_bad();
             MemgraphError::CommitError(msg)
         })?;
-        Ok(result)
+        Ok((cols, result))
     }
 
     fn json_params_to_query_params(params: &HashMap<String, Value>) -> HashMap<String, QueryParam> {
@@ -556,7 +563,6 @@ impl Memgraph {
                 Self::cleanup_metadata(&mut fixed);
                 serde_json::to_value(fixed)?
             }
-            ResourceAttributes::Logs { logs: context } => serde_json::to_value(context.as_ref())?,
             ResourceAttributes::Event { event: context } => serde_json::to_value(context.as_ref())?,
             ResourceAttributes::IngressServiceBackend {
                 ingress_service_backend,

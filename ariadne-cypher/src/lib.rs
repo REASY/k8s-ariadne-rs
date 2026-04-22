@@ -4,7 +4,7 @@ mod validate;
 
 pub use ast::*;
 pub use parser::parse_query;
-pub use validate::{validate_query, ValidationMode};
+pub use validate::{ValidationMode, validate_query};
 
 use thiserror::Error;
 use tree_sitter::{Parser, Tree};

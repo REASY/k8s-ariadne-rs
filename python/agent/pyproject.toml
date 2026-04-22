@@ -12,9 +12,11 @@ dependencies = [
   "antlr4-cypher>=0.1.2",
   "antlr4-python3-runtime>=4.13.2",
   "fastapi>=0.115.0",
-  "google-adk>=1.23.0",
+  "dspy>=2.6.0",
+  "google-adk>=1.26.0",
   "httpx>=0.27.0",
-  "litellm>=1.45.0",
+  # litellm 1.82.7 and 1.82.8 contain a malicious .pth file that steals credentials.
+  "litellm @ https://files.pythonhosted.org/packages/74/0f/5312b944208efeec5dcbf8e0ed956f8f7c430b0c6458301d206380c90b56/litellm-1.81.5-py3-none-any.whl",
   "pyyaml>=6.0.2",
   "pydantic>=2.8.0",
   "uvicorn>=0.30.0",
@@ -30,6 +32,9 @@ k8s-graph-openai-bridge = "k8s_graph_agent.openai_bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8s_graph_agent"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [dependency-groups]
 dev = [

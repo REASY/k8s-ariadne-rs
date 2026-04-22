@@ -221,12 +221,12 @@ fn build_analysis_messages(
             body.push_str("User: ");
             body.push_str(turn.question.trim());
             body.push('\n');
-            if let Some(summary) = &turn.result_summary {
-                if !summary.trim().is_empty() {
-                    body.push_str("Result summary: ");
-                    body.push_str(summary.trim());
-                    body.push('\n');
-                }
+            if let Some(summary) = &turn.result_summary
+                && !summary.trim().is_empty()
+            {
+                body.push_str("Result summary: ");
+                body.push_str(summary.trim());
+                body.push('\n');
             }
             if let Some(bindings) = &turn.bindings {
                 let formatted = format_bindings(bindings);
@@ -278,12 +278,12 @@ fn build_compaction_messages(context: &[ConversationTurn]) -> Vec<ChatMessage> {
         body.push_str("User: ");
         body.push_str(turn.question.trim());
         body.push('\n');
-        if let Some(summary) = &turn.result_summary {
-            if !summary.trim().is_empty() {
-                body.push_str("Result summary: ");
-                body.push_str(summary.trim());
-                body.push('\n');
-            }
+        if let Some(summary) = &turn.result_summary
+            && !summary.trim().is_empty()
+        {
+            body.push_str("Result summary: ");
+            body.push_str(summary.trim());
+            body.push('\n');
         }
         if let Some(bindings) = &turn.bindings {
             let formatted = format_bindings(bindings);

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 import re
 import uuid
 from typing import Any, Coroutine
@@ -14,9 +16,12 @@ from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_expo
 from .config import AdkConfig
 from .cypher_validator import CypherSchemaValidator, CypherValidationError
 from .graph_schema import GraphSchema
-from .mcp_client import McpClient
+from .mcp_client import McpClient, extract_json_content
 from .models import CypherQuery
-from .prompting import extract_prompt_text
+from .prompting import (
+    prompt_sections_from_graph_schema_payload,
+    render_prompt_bundle,
+)
 
 
 class CypherTranslation(BaseModel):
@@ -67,6 +72,7 @@ class AdkCypherTranslator:
     _runner: tuple[Any, Any] | None = field(init=False, default=None)
     _validator: CypherSchemaValidator | None = field(init=False, default=None)
     _session_service: Any | None = field(init=False, default=None)
+    _prompt_bundle_text: str | None = field(init=False, default=None)
     _logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
@@ -84,14 +90,67 @@ class AdkCypherTranslator:
         self._logger.info(
             "translate question (use_mcp_prompt=%s)", self.config.use_mcp_prompt
         )
+        prompt_text = self._build_prompt_text(question)
+        return self._translate_from_prompt(
+            question=question,
+            prompt_text=prompt_text,
+            max_attempts=max_attempts,
+        )
+
+    def translate_with_execution_error(
+        self, question: str, cypher: str, error: str, max_attempts: int = 1
+    ) -> TranslationOutcome:
+        prompt_text = self._build_prompt_text(question)
+        retry_prompt = _build_retry_prompt(prompt_text, cypher, error)
+        return self._translate_from_prompt(
+            question=question,
+            prompt_text=retry_prompt,
+            max_attempts=max_attempts,
+        )
+
+    def _build_prompt_text(self, question: str) -> str:
         prompt_text = question
-        if self.config.use_mcp_prompt:
-            prompt = self.mcp.get_prompt("analyze_question", {"question": question})
-            extracted = extract_prompt_text(prompt)
-            if extracted:
-                prompt_text = extracted
-                self._logger.debug("using MCP prompt template")
-        runner, types = self._get_runner()
+        if self.config.prompt_bundle_file:
+            prompt_text = render_prompt_bundle(self._load_prompt_bundle(), question)
+            self._logger.debug(
+                "using prompt bundle override from %s",
+                self.config.prompt_bundle_file,
+            )
+        elif self.config.use_mcp_prompt:
+            try:
+                schema_result = self.mcp.call_tool(
+                    "graph_schema", {"format": "structured"}
+                )
+                payload = extract_json_content(schema_result)
+                if isinstance(payload, dict):
+                    sections = prompt_sections_from_graph_schema_payload(payload)
+                    if sections is not None:
+                        bundle_text = "\n\n".join(
+                            [
+                                sections.instruction,
+                                sections.rules,
+                                sections.schema_reference,
+                                sections.node_connectivity,
+                                sections.footer,
+                            ]
+                        )
+                        prompt_text = render_prompt_bundle(bundle_text, question)
+                        self._logger.debug("using graph_schema-derived prompt bundle")
+            except Exception:
+                self._logger.debug(
+                    "graph_schema prompt fallback unavailable; using raw question",
+                    exc_info=True,
+                )
+        return prompt_text
+
+    def _translate_from_prompt(
+        self, question: str, prompt_text: str, max_attempts: int
+    ) -> TranslationOutcome:
+        runner: tuple[Any, Any] | None = None
+        types: Any | None = None
+        use_direct_openai_http = _should_use_direct_openai_http(self.config)
+        if not use_direct_openai_http:
+            runner, types = self._get_runner()
         validator = self._validator
         if validator is None:
             schema = GraphSchema.load_from_mcp(self.mcp)
@@ -112,13 +171,21 @@ class AdkCypherTranslator:
             self._logger.info("cypher translation attempt %d/%d", attempt, max_attempts)
             session_id = f"{base_session_id}-a{attempt}"
             self._ensure_session(session_id)
-            content = types.Content(
-                role="user", parts=[types.Part(text=current_prompt)]
-            )
             try:
-                response_text, usage = _run_agent(
-                    runner, self.config, content, session_id
-                )
+                if use_direct_openai_http:
+                    response_text, usage = _run_openai_http_completion(
+                        config=self.config,
+                        prompt_text=current_prompt,
+                    )
+                else:
+                    assert runner is not None
+                    assert types is not None
+                    content = types.Content(
+                        role="user", parts=[types.Part(text=current_prompt)]
+                    )
+                    response_text, usage = _run_agent(
+                        runner, self.config, content, session_id
+                    )
                 total_usage.add(usage)
             except Exception as exc:
                 error = str(exc)
@@ -324,12 +391,24 @@ class AdkCypherTranslator:
             )
         )
 
+    def _load_prompt_bundle(self) -> str:
+        if self._prompt_bundle_text is not None:
+            return self._prompt_bundle_text
+        bundle_file = self.config.prompt_bundle_file
+        if not bundle_file:
+            raise ValueError("prompt bundle file is not configured")
+        bundle_path = Path(bundle_file)
+        self._prompt_bundle_text = bundle_path.read_text(encoding="utf-8")
+        return self._prompt_bundle_text
+
 
 def _format_model(model: str, provider: str | None) -> str:
     normalized = model.strip()
     if "/" in normalized:
         return normalized
     if provider:
+        if provider.strip().lower() == "openai-compatible":
+            return normalized
         return f"{provider}/{normalized}"
     return normalized
 
@@ -363,6 +442,13 @@ def _is_openai_provider(provider: str | None, model: str) -> bool:
     return normalized.startswith(("openai/", "gpt-", "o1", "o3", "o4", "chatgpt"))
 
 
+def _is_deepseek_provider(provider: str | None, model: str) -> bool:
+    if provider and provider.strip().lower() == "deepseek":
+        return True
+    normalized = model.strip().lower()
+    return normalized.startswith(("deepseek", "openai/deepseek", "deepseek/"))
+
+
 def _supports_openai_json_schema(provider: str | None, model: str) -> bool:
     raw = os.environ.get("K8S_GRAPH_DISABLE_OPENAI_JSON_SCHEMA") or os.environ.get(
         "ADK_DISABLE_OPENAI_JSON_SCHEMA"
@@ -373,6 +459,87 @@ def _supports_openai_json_schema(provider: str | None, model: str) -> bool:
     if "deepseek" in normalized:
         return False
     return _is_openai_provider(provider, model)
+
+
+def _should_use_direct_openai_http(config: AdkConfig) -> bool:
+    if not config.base_url:
+        return False
+    if not _is_openai_provider(config.provider, config.model):
+        return False
+    if (config.provider or "").strip().lower() == "openai-compatible":
+        return True
+    normalized = config.model.strip().lower()
+    if "/" in normalized:
+        return False
+    return not normalized.startswith(("gpt-", "o1", "o3", "o4", "chatgpt"))
+
+
+def _run_openai_http_completion(
+    *, config: AdkConfig, prompt_text: str
+) -> tuple[str, "TokenUsage"]:
+    import httpx
+
+    model_name = _strip_provider_prefix(config.model)
+    base_url = _normalize_openai_http_base_url(config.base_url)
+    headers = {"Content-Type": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+
+    payload: dict[str, Any] = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": config.temperature,
+        "max_tokens": config.max_output_tokens,
+    }
+    if _supports_openai_json_schema(config.provider, config.model):
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "cypher_translation",
+                "strict": True,
+                "schema": CypherTranslationStrict.model_json_schema(),
+            },
+        }
+
+    timeout = httpx.Timeout(connect=10.0, read=300.0, write=300.0, pool=300.0)
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+
+    data = response.json()
+    usage = TokenUsage()
+    usage.update_from_usage(data.get("usage"))
+    usage.log_if_present()
+
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError(
+            f"OpenAI-compatible endpoint returned no choices: {json.dumps(data)[:400]}"
+        )
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise ValueError(
+            f"OpenAI-compatible endpoint returned no message: {json.dumps(data)[:400]}"
+        )
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content, usage
+    raise ValueError(
+        f"OpenAI-compatible endpoint returned no message content: {json.dumps(data)[:400]}"
+    )
+
+
+def _normalize_openai_http_base_url(base_url: str | None) -> str:
+    if not base_url:
+        raise ValueError("OpenAI-compatible HTTP path requires a base_url")
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
 
 
 def _build_generate_content_config(config: AdkConfig, types: Any) -> Any:
@@ -442,6 +609,44 @@ def _gemini_request_retry_base_seconds() -> float:
         return 1.0
 
 
+def _rate_limit_request_retries(config: AdkConfig) -> int:
+    raw = os.environ.get("K8S_GRAPH_RATE_LIMIT_RETRIES") or os.environ.get(
+        "ADK_RATE_LIMIT_RETRIES"
+    )
+    if raw is not None:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 0
+    if _is_deepseek_provider(config.provider, config.model):
+        return 3
+    return 0
+
+
+def _rate_limit_request_retry_base_seconds() -> float:
+    raw = os.environ.get(
+        "K8S_GRAPH_RATE_LIMIT_RETRY_BASE_SECONDS"
+    ) or os.environ.get("ADK_RATE_LIMIT_RETRY_BASE_SECONDS")
+    if raw is None:
+        return 2.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 2.0
+
+
+def _rate_limit_request_retry_max_seconds() -> float:
+    raw = os.environ.get(
+        "K8S_GRAPH_RATE_LIMIT_RETRY_MAX_SECONDS"
+    ) or os.environ.get("ADK_RATE_LIMIT_RETRY_MAX_SECONDS")
+    if raw is None:
+        return 20.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 20.0
+
+
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -465,6 +670,38 @@ def _should_retry_gemini_error(config: AdkConfig, exc: Exception) -> bool:
             "unexpected end of stream" in message
             and "generativelanguage.googleapis.com" in message
         ):
+            return True
+    return False
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    for err in _iter_exception_chain(exc):
+        status = getattr(err, "status_code", None) or getattr(err, "status", None)
+        if status == 429:
+            return True
+        name = err.__class__.__name__.lower()
+        if "ratelimit" in name or name == "ratelimiterror":
+            return True
+        message = str(err).lower()
+        if "rate limited" in message:
+            return True
+        if "too many tokens" in message:
+            return True
+        if "too many requests" in message:
+            return True
+        if "retry in " in message and "deepseek-r1" in message:
+            return True
+    return False
+
+
+def _should_retry_request_error(config: AdkConfig, exc: Exception) -> bool:
+    if _should_retry_gemini_error(config, exc):
+        return True
+    if _is_rate_limit_error(exc):
+        return True
+    if _is_deepseek_provider(config.provider, config.model):
+        message = str(exc).lower()
+        if "adk returned no response content" in message:
             return True
     return False
 
@@ -505,11 +742,18 @@ def _run_agent(
         usage.log_if_present()
         return response_text, usage
 
-    max_retries = _gemini_request_retries(config)
-    if max_retries <= 0 or not _is_gemini_provider(config.provider, config.model):
+    gemini_retries = _gemini_request_retries(config)
+    rate_limit_retries = _rate_limit_request_retries(config)
+    max_retries = max(gemini_retries, rate_limit_retries)
+    if max_retries <= 0:
         return _run_once()
 
-    base_delay = _gemini_request_retry_base_seconds()
+    if rate_limit_retries > 0:
+        base_delay = _rate_limit_request_retry_base_seconds()
+        max_delay = _rate_limit_request_retry_max_seconds()
+    else:
+        base_delay = _gemini_request_retry_base_seconds()
+        max_delay = None
     total_attempts = max_retries + 1
 
     def _log_retry(retry_state) -> None:
@@ -520,17 +764,24 @@ def _run_agent(
         if retry_state.next_action is not None:
             delay = retry_state.next_action.sleep
         logging.getLogger(__name__).warning(
-            "Gemini request failed; retrying in %.1fs (%d/%d): %s",
+            "LLM request failed; retrying in %.1fs (%d/%d): %s",
             delay,
             retry_state.attempt_number,
             total_attempts,
             exc,
         )
 
+    wait_kwargs: dict[str, Any] = {
+        "multiplier": base_delay,
+        "min": base_delay,
+    }
+    if max_delay is not None:
+        wait_kwargs["max"] = max_delay
+
     retrying = Retrying(
         stop=stop_after_attempt(total_attempts),
-        wait=wait_exponential(multiplier=base_delay, min=base_delay),
-        retry=retry_if_exception(lambda exc: _should_retry_gemini_error(config, exc)),
+        wait=wait_exponential(**wait_kwargs),
+        retry=retry_if_exception(lambda exc: _should_retry_request_error(config, exc)),
         reraise=True,
         before_sleep=_log_retry,
     )
@@ -543,7 +794,7 @@ def _run_agent(
 def _build_retry_prompt(base_prompt: str, cypher: str, error: str) -> str:
     return (
         f"{base_prompt}\n\n"
-        "The previous Cypher failed schema validation.\n"
+        "The previous Cypher failed validation or execution.\n"
         f"Error: {error}\n"
         "Previous Cypher:\n"
         f"{cypher}\n"
@@ -645,8 +896,7 @@ class TokenUsage:
         self.total_tokens: int | None = None
         self._logger = logging.getLogger(__name__)
 
-    def update_from_event(self, event: Any) -> None:
-        usage = getattr(event, "usage_metadata", None)
+    def update_from_usage(self, usage: Any) -> None:
         if usage is None:
             return
         prompt = _read_usage_value(
@@ -660,6 +910,10 @@ class TokenUsage:
         self.prompt_tokens = _coalesce_usage(self.prompt_tokens, prompt)
         self.output_tokens = _coalesce_usage(self.output_tokens, output)
         self.total_tokens = _coalesce_usage(self.total_tokens, total)
+
+    def update_from_event(self, event: Any) -> None:
+        usage = getattr(event, "usage_metadata", None)
+        self.update_from_usage(usage)
 
     def log_if_present(self) -> None:
         if (

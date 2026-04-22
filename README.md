@@ -1,21 +1,24 @@
 # Ariadne
 
-Ariadne turns Kubernetes state into a Memgraph property graph and lets you query it
-with Cypher or natural language. This repo includes the Rust ingester + MCP server,
-a Python NL -> Cypher agent with AST validation, and an eval harness.
+Ariadne is a Kubernetes graph MCP for coding agents. It ingests the cluster state into a property graph and exposes three deterministic tools:
 
-> Ariadne is a Greek mythology nod to finding a path through complex systems.
+- `graph_query` for read-only Cypher
+- `graph_schema` for schema discovery
+- `graph_health` for freshness and readiness
+
+The Rust MCP server is the primary product surface. The Rust CLI and Python agent in this repo are local harnesses for debugging, evaluation, and experimentation.
+
+> Short version: `kubectl` lists objects. Ariadne answers relationship questions.
 
 ---
 
 ## TL;DR
 
-- **LLMs generate Cypher, not answers**
-- **Memgraph executes queries over full cluster state**
-- **Schema + AST validation guarantees correctness**
-- **Context size stays tiny, regardless of cluster size**
-
-Ariadne turns natural language questions into **compact, schema-valid graph queries**, instead of bloated JSON prompts.
+- **MCP-first**: Ariadne is designed to plug into coding agents, not replace them.
+- **Topology over inventory**: Ariadne is strongest on multi-hop Kubernetes questions such as `Host -> Ingress -> IngressServiceBackend -> Service -> EndpointSlice -> Endpoint -> EndpointAddress -> Pod`.
+- **Deterministic execution**: the model generates Cypher; the graph executes modeled relationships.
+- **Compact defaults**: `graph_schema()` and `graph_health()` default to compact, model-friendly responses to reduce token overhead.
+- **Shared validation**: `ariadne-core` owns Cypher validation and shared query-issue classification used by both the MCP server and local tooling.
 
 ---
 
@@ -25,88 +28,79 @@ https://github.com/user-attachments/assets/820065c6-191f-4fdf-9e3a-53f3d32b7ee6
 
 [cli.mp4](docs/demo/cli.mp4)
 
-## The problem: JSON does not scale
+## Why Ariadne
 
-Most "LLM + Kubernetes" tools do this:
+Most "LLM + Kubernetes" workflows make the model reason over raw JSON or YAML:
 
+```text
+Kubernetes API -> giant object dump -> LLM context -> ad hoc joins in code
 ```
-Kubernetes API → giant JSON/YAML → LLM context → hope for the best
-```
 
-This breaks down fast:
+That works for direct inventory, but it breaks down on relationship-heavy questions:
 
-- Context windows explode with cluster size
-- Token costs scale with data, not intent
-- Models pattern-match instead of query
-- Answers are heuristic and non-reproducible
+- which pods back a host?
+- which services have no endpoint slices?
+- which pods claim PVCs whose PV has no storage class?
+- which deployment owns these pods through replica sets?
 
-**JSON is the wrong abstraction for querying systems.**
+Those are graph questions. Ariadne gives the agent explicit edges instead of forcing it to reconstruct joins with Python, shell, or `jq`.
 
----
+## When Ariadne Wins
 
-## The Ariadne approach
+Ariadne is strongest when the answer depends on multi-hop traversals across resource kinds:
 
-Ariadne flips the model from "LLM answers" to "LLM generates queries."
+- `Host -> Ingress -> IngressServiceBackend -> Service -> EndpointSlice -> Endpoint -> EndpointAddress -> Pod`
+- `Service -> EndpointSlice -> Endpoint -> EndpointAddress -> Pod`
+- `Deployment -> ReplicaSet -> Pod`
+- `Pod -> PersistentVolumeClaim -> PersistentVolume -> StorageClass`
+- negative graph queries such as "resources with no backing edges"
+
+These are literal graph paths. Ariadne derives helper nodes such as `Host`, `IngressServiceBackend`,
+`Endpoint`, `EndpointAddress`, and `Container` from raw Kubernetes objects during graph construction.
+
+For these questions, Ariadne helps with:
+
+- **correctness**: joins are encoded as graph edges, not improvised by the agent
+- **lower agent-side complexity**: one declarative query replaces bespoke glue code
+- **scaling with hop depth**: adding another relationship hop extends the traversal instead of rewriting the whole approach
+
+## When `kubectl` Is Fine
+
+Ariadne is not meant to replace `kubectl` for every cluster question. Plain read-only `kubectl` is often enough for:
+
+- listing pods, services, ingresses, or PVCs
+- top namespaces by pod count
+- straightforward spec/status checks
+- direct inventory dumps with little or no joining
+
+The goal is not to out-`kubectl` `kubectl`. The goal is to give agents a safer query substrate for relationship-heavy Kubernetes questions.
+
+## Core flow
+
 ```text
 User question
      ↓
-LLM (intent → Cypher)
+Coding agent
      ↓
-AST validator (schema + Cypher rules)
-     ↓
-Retry on validation error (LLM self‑corrects)
+Query issue loop
+(static validation + repairable execution feedback)
      ↓
 GraphDB (Memgraph)
      ↓
-Deterministic query execution on the current graph state; query generation is probabilistic.
+Deterministic execution over the current graph state
 ```
 
 Key idea:
-- The LLM does not see the raw cluster state.
-- It only generates a Cypher, then interprets the query results.
 
----
-
-## Why Cypher + GraphDB
-
-Kubernetes is fundamentally a **relationship graph**:
-
-- Ingress → Service → EndpointSlice → Pod
-- Pod → Node → Namespace
-- NetworkPolicy → PodSelector → Pod
-
-Cypher encodes this structure naturally:
-
-- Orders of magnitude smaller than JSON
-- Explicit relationships and direction
-- Statically validatable (edges, labels, direction)
-
-Example Cypher generated by Ariadne to answer a question "What are the pods backing DNS name litmus.qa.agoda.is?":
-
-```cypher
-MATCH
-  (h:Host)-[:IsClaimedBy]->(:Ingress)
-  -[:DefinesBackend]->(:IngressServiceBackend)
-  -[:TargetsService]->(:Service)
-  -[:Manages]->(:EndpointSlice)
-  <-[:ListedIn]-(ea:EndpointAddress)
-  -[:IsAddressOf]->(p:Pod)
-WHERE
-  h.name = "litmus.qa.agoda.is"
-RETURN DISTINCT
-  p.metadata.namespace AS namespace,
-  p.metadata.name AS pod_name
-ORDER BY
-  namespace, pod_name
-```
-
-This query stays small no matter how big the cluster is.
+- the model does not need raw cluster state in context
+- it generates a query against a modeled graph
+- Ariadne validates the query and returns structured results or structured repair feedback
 
 ---
 
 ## Quick start
 
-### 1) Start Memgraph (local)
+### 1) Start Memgraph
 
 ```bash
 docker compose up -d
@@ -114,7 +108,7 @@ docker compose up -d
 
 Memgraph listens on `localhost:7687` and Memgraph Lab on `localhost:3000`.
 
-### 2) Run the Rust app (graph + MCP server)
+### 2) Run the MCP server
 
 ```bash
 CLUSTER=<cluster> \
@@ -122,23 +116,30 @@ KUBE_CONTEXT=<context> \
 cargo run --release -p ariadne-mcp
 ```
 
-The app:
+By default this starts an HTTP MCP server on:
 
-- builds the graph in Memgraph
-- exposes HTTP endpoints (including MCP)
-
-### 3) Query with the GUI CLI (no Memgraph required)
-
-The CLI ships with an in-memory graph backend, so it works without running Memgraph.
-
-```bash
-LLM_BASE_URL=... \
-LLM_MODEL=... \
-LLM_API_KEY=... \
-cargo run --release -p ariadne-cli -- --cluster <cluster>
+```text
+http://127.0.0.1:8080/mcp
 ```
 
-### 4) Ask questions with the Python agent
+The main tools are:
+
+- `graph_query`: execute read-only Cypher
+- `graph_schema`: compact schema by default; request `format = "structured"` for full machine-readable details
+- `graph_health`: compact freshness/status by default; request `detail = "full"` or `detail = "debug"` for full diagnostics
+
+### 3) Connect a coding agent
+
+Point your coding agent at the MCP endpoint above. If you want reusable agent guidance, use [AGENTS.template.md](AGENTS.template.md) as a template in the consuming workspace, not as an active instruction file in this repo.
+
+### 4) Optional local tooling
+
+The repo also includes local harnesses:
+
+- `ariadne-cli`: local GUI/debug client
+- `python/agent`: evaluation and experimentation layer for NL -> Cypher workflows
+
+Example Python agent setup:
 
 ```bash
 cd python/agent
@@ -157,6 +158,7 @@ k8s-graph-agent --use-adk "What are the pods backing DNS name litmus.qa.agoda.is
 ## Docs
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
+- MCP tool contract: [docs/specs/mcp_tools_v1.md](docs/specs/mcp_tools_v1.md)
 - Development & build: [docs/development.md](docs/development.md)
 - Snapshots: [docs/snapshots.md](docs/snapshots.md)
 - Python agent + eval harness: [python/agent/README.md](python/agent/README.md)
@@ -164,11 +166,12 @@ k8s-graph-agent --use-adk "What are the pods backing DNS name litmus.qa.agoda.is
 
 ## Repo structure
 
-- `ariadne-core/` - core graph + Memgraph integration
-- `ariadne-cli/` - GUI client with in-memory graph backend
-- `ariadne-mcp/` - K8s ingestion + MCP + HTTP server
-- `ariadne-tools/` - schema generation tooling
-- `python/agent/` - ADK agent, AST validator, eval harness
+- `ariadne-core/` - kube clients, snapshot resolver, shared graph model/backends, validation, and query-issue classification
+- `ariadne-mcp/` - MCP + HTTP server that wires `ariadne-core` into the primary product surface
+- `ariadne-cli/` - local GUI/debug harness with optional Memgraph or in-memory execution
+- `ariadne-tools/` - schema generation tooling used by `graph_schema`
+- `ariadne-cypher/` - Cypher parser, AST, and semantic validation
+- `python/agent/` - MCP client, agent experiments, eval harness, and structured-schema consumers
 
 ---
 

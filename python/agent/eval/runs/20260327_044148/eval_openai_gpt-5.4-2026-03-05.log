@@ -1,0 +1,12 @@
+2026-03-27 04:42:39,639 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_9]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:42:51,905 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Container -> Logs via HasLogs. Allowed: none. Pattern: (c)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:42:51,905 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (ns:Namespace)<-[:BelongsTo]-(c:Container)-[:Runs]->(p:Pod)
+WHERE ns['metadata']['name'] = 'tempo'
+OPTIONAL MATCH (c)-[:HasLogs]->(l:Logs)
+RETURN c['spec']['name'] AS container_name,
+       p['metadata']['name'] AS pod_name,
+       l['content'] AS logs
+ORDER BY pod_name, container_name

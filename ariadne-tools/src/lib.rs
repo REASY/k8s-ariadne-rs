@@ -1,10 +1,11 @@
 use ariadne_core::types::{
-    Cluster, Container, Endpoint, EndpointAddress, Host, IngressServiceBackend, Logs, Provisioner,
+    Cluster, Container, Endpoint, EndpointAddress, Host, IngressServiceBackend, Provisioner,
 };
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, Node, PersistentVolume, Pod, Service, ServiceAccount,
+    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
@@ -15,7 +16,7 @@ use schemars::Schema;
 
 pub mod schema;
 
-pub use ariadne_core::graph_schema::{graph_relationships, GraphRelationship};
+pub use ariadne_core::graph_schema::{GraphRelationship, graph_relationships};
 pub use schema::SchemaInfo;
 
 const PROMPT_TEMPLATE: &str = include_str!("../../prompt.txt");
@@ -46,7 +47,7 @@ pub fn full_prompt() -> String {
         .replace(RELATIONSHIPS_PLACEHOLDER, relationships.trim_end())
 }
 
-fn generate_schema() -> Vec<SchemaInfo> {
+pub fn generate_schema() -> Vec<SchemaInfo> {
     let logical_types: Vec<Schema> = vec![
         schema_for!(Cluster),
         schema_for!(Container),
@@ -54,7 +55,6 @@ fn generate_schema() -> Vec<SchemaInfo> {
         schema_for!(EndpointAddress),
         schema_for!(Host),
         schema_for!(IngressServiceBackend),
-        schema_for!(Logs),
         schema_for!(Provisioner),
     ];
     let k8s_types: Vec<Schema> = vec![
@@ -69,6 +69,7 @@ fn generate_schema() -> Vec<SchemaInfo> {
         schema_for!(NetworkPolicy),
         schema_for!(Node),
         schema_for!(PersistentVolume),
+        schema_for!(PersistentVolumeClaim),
         schema_for!(Pod),
         schema_for!(ReplicaSet),
         schema_for!(Service),
@@ -84,4 +85,36 @@ fn generate_schema() -> Vec<SchemaInfo> {
     }
     derived_schema.sort_by_key(|x| x.root_type.name.clone());
     derived_schema
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_schema;
+
+    #[test]
+    fn generate_schema_includes_persistent_volume_claim() {
+        let schema = generate_schema();
+        assert!(
+            schema
+                .iter()
+                .any(|entry| entry.root_type.name == "PersistentVolumeClaim")
+        );
+    }
+
+    #[test]
+    fn generate_schema_normalizes_container_type_to_string() {
+        let schema = generate_schema();
+        let container = schema
+            .iter()
+            .find(|entry| entry.root_type.name == "Container")
+            .expect("container schema should exist");
+        let container_type = container
+            .root_type
+            .properties
+            .iter()
+            .find(|property| property.name == "container_type")
+            .expect("container_type should exist");
+
+        assert_eq!(container_type.data_type, "string");
+    }
 }

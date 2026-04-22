@@ -1,0 +1,1017 @@
+easy:
+- id: e02
+  question: How many namespaces are there in the cluster?
+  tags:
+  - namespace
+  - count
+  deterministic: true
+  reference_cypher: 'MATCH (ns:Namespace)
+
+    RETURN count(ns) AS namespace_count'
+  expected:
+    columns:
+    - namespace_count
+    rows:
+    - - 34
+    ordered: false
+- id: e06
+  question: List all endpoint slices in namespace litmus.
+  tags:
+  - endpointslice
+  - namespace
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE\
+    \ ns['metadata']['name'] = 'litmus'\nRETURN es['metadata']['name'] AS endpointSlice,\n\
+    \       es['metadata']['namespace'] AS namespace,\n       es['addressType'] AS\
+    \ addressType,\n       es['metadata']['uid'] AS uid\nORDER BY endpointSlice;"
+  expected:
+    columns:
+    - addressType
+    - endpointSlice
+    - namespace
+    - uid
+    rows:
+    - - IPv4
+      - chaos-litmus-auth-server-service-4wv95
+      - litmus
+      - f16b8889-1347-41f4-ad26-27845ca15821
+    - - IPv4
+      - chaos-litmus-frontend-service-5b254
+      - litmus
+      - 5bb8f9a6-caf1-4314-b450-e4ad720e1cc4
+    - - IPv4
+      - chaos-litmus-server-service-llhkx
+      - litmus
+      - b8e9ce1e-e96d-4505-9d75-7e2722cd12f9
+    - - IPv4
+      - chaos-mongodb-arbiter-headless-l9rf2
+      - litmus
+      - 043f32ec-0a15-4f75-9797-e8cea4e762ab
+    - - IPv4
+      - chaos-mongodb-headless-n2ljb
+      - litmus
+      - a855138d-a814-4275-834c-669e1302c412
+    ordered: false
+- id: e08
+  question: List all storage classes in the cluster.
+  tags:
+  - storageclass
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (sc:StorageClass)-[:PartOf]->(c:Cluster)\nRETURN\n  c.name\
+    \ AS cluster,\n  sc['metadata']['name'] AS storage_class,\n  sc.provisioner AS\
+    \ provisioner,\n  sc.reclaimPolicy AS reclaim_policy,\n  sc.volumeBindingMode\
+    \ AS volume_binding_mode,\n  sc.allowVolumeExpansion AS allow_volume_expansion\n\
+    ORDER BY cluster, storage_class;"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+- id: e10
+  question: List all service accounts in namespace litmus.
+  tags:
+  - serviceaccount
+  - namespace
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE\
+    \ ns['metadata']['name'] = 'litmus'\nRETURN sa['metadata']['name'] AS service_account,\n\
+    \       sa['metadata']['namespace'] AS namespace\nORDER BY service_account;"
+  expected:
+    columns:
+    - namespace
+    - service_account
+    rows:
+    - - litmus
+      - chaos-mongodb
+    - - litmus
+      - default
+    - - litmus
+      - litmus-server-account
+    ordered: false
+- id: e12
+  question: List all replica sets in namespace litmus.
+  tags:
+  - replicaset
+  - namespace
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name']\
+    \ = 'litmus'\nRETURN\n  rs['metadata']['name'] AS replica_set,\n  rs['metadata']['namespace']\
+    \ AS namespace,\n  rs['metadata']['uid'] AS uid\nORDER BY replica_set;"
+  expected:
+    columns:
+    - namespace
+    - replica_set
+    - uid
+    rows:
+    - - litmus
+      - chaos-litmus-auth-server-6b79d4d5bd
+      - 54230f6a-f068-467f-b0c7-b7bae2e6e719
+    - - litmus
+      - chaos-litmus-frontend-86ccb7c787
+      - 8a99ccf4-1ce3-4bcb-866f-2e3f81088deb
+    - - litmus
+      - chaos-litmus-server-68bf554745
+      - 4de40c29-efb3-4fd1-b5c3-09c3fb7dc720
+    ordered: false
+- id: e18
+  question: List all config maps in namespace litmus.
+  tags:
+  - configmap
+  - namespace
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (cm:ConfigMap)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name']\
+    \ = 'litmus'\nRETURN cm['metadata']['name'] AS config_map,\n       cm['metadata']['namespace']\
+    \ AS namespace\nORDER BY config_map"
+  expected:
+    columns:
+    - config_map
+    - namespace
+    rows:
+    - - chaos-litmus-admin-config
+      - litmus
+    - - chaos-litmus-frontend-nginx-configuration
+      - litmus
+    - - chaos-mongodb-common-scripts
+      - litmus
+    - - chaos-mongodb-scripts
+      - litmus
+    - - kube-root-ca.crt
+      - litmus
+    ordered: false
+- id: e19
+  question: List all network policies in namespace litmus.
+  tags:
+  - networkpolicy
+  - namespace
+  - list
+  deterministic: true
+  reference_cypher: "MATCH (np:NetworkPolicy)-[:BelongsTo]->(ns:Namespace)\nWHERE\
+    \ ns['metadata']['name'] = 'litmus'\nRETURN \n  np['metadata']['name'] AS network_policy,\n\
+    \  np['metadata']['namespace'] AS namespace\nORDER BY network_policy;"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+medium:
+- id: m04
+  question: For namespace litmus, list stateful sets and the pods they manage.
+  tags:
+  - statefulset
+  - pod
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (ss:StatefulSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name']\
+    \ = 'litmus'\nOPTIONAL MATCH (ss)-[:Manages]->(p:Pod)-[:BelongsTo]->(ns)\nWITH\
+    \ ss, ns, collect(DISTINCT p) AS pods\nRETURN \n  ns['metadata']['name'] AS namespace,\n\
+    \  ss['metadata']['name'] AS statefulset,\n  [p IN pods | p['metadata']['name']]\
+    \ AS pod_names,\n  size(pods) AS pod_count\nORDER BY statefulset ASC;"
+  expected:
+    columns:
+    - namespace
+    - pod_count
+    - pod_names
+    - statefulset
+    rows:
+    - - litmus
+      - 3
+      - - chaos-mongodb-2
+        - chaos-mongodb-1
+        - chaos-mongodb-0
+      - chaos-mongodb
+    - - litmus
+      - 1
+      - - chaos-mongodb-arbiter-0
+      - chaos-mongodb-arbiter
+    ordered: false
+- id: m06
+  question: For namespace litmus, list services and the endpoint slices they manage.
+  tags:
+  - service
+  - endpointslice
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n\
+    MATCH (s:Service)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\n\
+    RETURN\n  s['metadata']['name'] AS service,\n  collect(DISTINCT es['metadata']['name'])\
+    \ AS endpoint_slices,\n  count(DISTINCT es) AS endpoint_slice_count\nORDER BY\
+    \ service;"
+  expected:
+    columns:
+    - endpoint_slice_count
+    - endpoint_slices
+    - service
+    rows:
+    - - 1
+      - - chaos-litmus-auth-server-service-4wv95
+      - chaos-litmus-auth-server-service
+    - - 1
+      - - chaos-litmus-frontend-service-5b254
+      - chaos-litmus-frontend-service
+    - - 1
+      - - chaos-litmus-server-service-llhkx
+      - chaos-litmus-server-service
+    - - 1
+      - - chaos-mongodb-arbiter-headless-l9rf2
+      - chaos-mongodb-arbiter-headless
+    - - 1
+      - - chaos-mongodb-headless-n2ljb
+      - chaos-mongodb-headless
+    ordered: false
+- id: m09
+  question: For namespace litmus, list PVCs and the PVs they are bound to.
+  tags:
+  - pvc
+  - pv
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\n\
+    WHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (pvc)-[:BoundTo]->(pv:PersistentVolume)\n\
+    RETURN \n  pvc['metadata']['name'] AS pvc_name,\n  pvc['metadata']['namespace']\
+    \ AS namespace,\n  pvc['status']['phase'] AS pvc_phase,\n  pv['metadata']['name']\
+    \ AS pv_name,\n  pv['status']['phase'] AS pv_phase\nORDER BY pvc_name, pv_name"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+- id: m12
+  question: For namespace litmus, list pods and the PVCs they claim.
+  tags:
+  - pod
+  - pvc
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n\
+    MATCH (p:Pod)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (p)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)\n\
+    RETURN\n  p['metadata']['name'] AS pod,\n  collect(DISTINCT pvc['metadata']['name'])\
+    \ AS pvcs\nORDER BY pod;"
+  expected:
+    columns:
+    - pod
+    - pvcs
+    rows:
+    - - chaos-litmus-auth-server-6b79d4d5bd-hpjfz
+      - []
+    - - chaos-litmus-frontend-86ccb7c787-m8m85
+      - []
+    - - chaos-litmus-server-68bf554745-zbr95
+      - []
+    - - chaos-mongodb-0
+      - []
+    - - chaos-mongodb-1
+      - []
+    - - chaos-mongodb-2
+      - []
+    - - chaos-mongodb-arbiter-0
+      - []
+    ordered: false
+- id: m16
+  question: For namespace litmus, list endpoint slices and the pods they reference.
+  tags:
+  - endpointslice
+  - endpoint
+  - pod
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n\
+    MATCH (es:EndpointSlice)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (es)<-[:ListedIn]-(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\n\
+    RETURN es['metadata']['name'] AS endpoint_slice,\n       collect(DISTINCT p['metadata']['name'])\
+    \ AS pods\nORDER BY endpoint_slice;"
+  expected:
+    columns:
+    - endpoint_slice
+    - pods
+    rows:
+    - - chaos-litmus-auth-server-service-4wv95
+      - - chaos-litmus-auth-server-6b79d4d5bd-hpjfz
+    - - chaos-litmus-frontend-service-5b254
+      - - chaos-litmus-frontend-86ccb7c787-m8m85
+    - - chaos-litmus-server-service-llhkx
+      - - chaos-litmus-server-68bf554745-zbr95
+    - - chaos-mongodb-arbiter-headless-l9rf2
+      - - chaos-mongodb-arbiter-0
+    - - chaos-mongodb-headless-n2ljb
+      - - chaos-mongodb-1
+        - chaos-mongodb-2
+        - chaos-mongodb-0
+    ordered: false
+- id: m17
+  question: For namespace litmus, list events concerning services.
+  tags:
+  - event
+  - service
+  - namespace
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\n\
+    MATCH (s:Service)-[:BelongsTo]->(ns)\nMATCH (e:Event)-[:Concerns]->(s)\nRETURN\n\
+    \  s['metadata']['name'] AS service,\n  e['type'] AS type,\n  e['reason'] AS reason,\n\
+    \  e['note'] AS note,\n  e['action'] AS action,\n  e['deprecatedCount'] AS count,\n\
+    \  e['deprecatedFirstTimestamp'] AS firstTimestamp,\n  e['deprecatedLastTimestamp']\
+    \ AS lastTimestamp,\n  e['eventTime'] AS eventTime\nORDER BY coalesce(e['eventTime'],\
+    \ e['deprecatedLastTimestamp'], e['deprecatedFirstTimestamp']) DESC, service ASC"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+- id: m20
+  question: For each namespace, count services.
+  tags:
+  - namespace
+  - service
+  - aggregation
+  deterministic: true
+  reference_cypher: 'MATCH (ns:Namespace)
+
+    OPTIONAL MATCH (s:Service)-[:BelongsTo]->(ns)
+
+    WITH ns, count(DISTINCT s) AS service_count
+
+    RETURN ns[''metadata''][''name''] AS namespace, service_count
+
+    ORDER BY service_count DESC, namespace ASC'
+  expected:
+    columns:
+    - namespace
+    - service_count
+    rows:
+    - - pyroscope
+      - 22
+    - - storefront
+      - 20
+    - - tempo
+      - 13
+    - - loki
+      - 12
+    - - kube-system
+      - 6
+    - - default
+      - 5
+    - - litmus
+      - 5
+    - - opal
+      - 4
+    - - infra-gitlab-ci
+      - 3
+    - - nomasec
+      - 3
+    - - soveren
+      - 3
+    - - agoda-system
+      - 2
+    - - ceph
+      - 2
+    - - chaos
+      - 2
+    - - contour
+      - 2
+    - - fleet
+      - 2
+    - - upwind
+      - 2
+    - - fleet-eso-identity
+      - 1
+    - - monitoring
+      - 1
+    - - sandbox
+      - 1
+    - - adp
+      - 0
+    - - adp-cumulative-delta
+      - 0
+    - - argocd
+      - 0
+    - - awx-platform
+      - 0
+    - - content-downloader
+      - 0
+    - - dbops-awx
+      - 0
+    - - hk
+      - 0
+    - - kube-node-lease
+      - 0
+    - - kube-public
+      - 0
+    - - otelcol-discovery
+      - 0
+    - - pact
+      - 0
+    - - perforator
+      - 0
+    - - sg
+      - 0
+    - - whitefalcon
+      - 0
+    ordered: false
+hard:
+- id: h04
+  question: Find services in namespace default that have no endpoint slices.
+  tags:
+  - service
+  - endpointslice
+  - namespace
+  - negative
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'default'\n\
+    MATCH (s:Service)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)\n\
+    WITH s, count(DISTINCT es) AS endpoint_slices\nWHERE endpoint_slices = 0\nRETURN\
+    \ s['metadata']['name'] AS service,\n       s['metadata']['namespace'] AS namespace,\n\
+    \       endpoint_slices\nORDER BY service;"
+  expected:
+    columns:
+    - endpoint_slices
+    - namespace
+    - service
+    rows:
+    - - 0
+      - default
+      - apps
+    - - 0
+      - default
+      - ca
+    - - 0
+      - default
+      - dns
+    - - 0
+      - default
+      - kubernetes
+    ordered: false
+- id: h07
+  question: For each service, count distinct backing pod IPs.
+  tags:
+  - service
+  - pod
+  - aggregation
+  deterministic: true
+  reference_cypher: "MATCH (s:Service)\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(e:Endpoint)\n\
+    WITH s, e, (CASE WHEN e IS NULL THEN [] ELSE e['addresses'] END) AS addrs\nUNWIND\
+    \ addrs AS ip\nWITH s, ip\nWHERE ip IS NOT NULL\nRETURN s['metadata']['namespace']\
+    \ AS namespace,\n       s['metadata']['name'] AS service,\n       count(DISTINCT\
+    \ ip) AS distinct_backing_pod_ips\nORDER BY distinct_backing_pod_ips DESC, namespace,\
+    \ service;"
+  expected:
+    columns:
+    - distinct_backing_pod_ips
+    - namespace
+    - service
+    rows:
+    - - 40
+      - ceph
+      - ceph-csi-rbd-nodeplugin-http-metrics
+    - - 40
+      - kube-system
+      - cilium-agent
+    - - 40
+      - kube-system
+      - hubble-peer
+    - - 40
+      - kube-system
+      - identity-webhook
+    - - 40
+      - storefront
+      - avoid-ice-lakes
+    - - 40
+      - storefront
+      - ceph
+    - - 40
+      - storefront
+      - ceph-am
+    - - 40
+      - storefront
+      - ceph-as
+    - - 40
+      - storefront
+      - ceph-hk
+    - - 40
+      - storefront
+      - ceph-qa
+    - - 40
+      - storefront
+      - ceph-sg
+    - - 40
+      - storefront
+      - ceph2vast
+    - - 40
+      - storefront
+      - s3
+    - - 40
+      - storefront
+      - s3-service
+    - - 40
+      - storefront
+      - s3-service-am
+    - - 40
+      - storefront
+      - s3-service-as
+    - - 40
+      - storefront
+      - s3-service-hk
+    - - 40
+      - storefront
+      - s3-service-sg
+    - - 40
+      - storefront
+      - vast
+    - - 40
+      - storefront
+      - vast-am
+    - - 40
+      - storefront
+      - vast-hk
+    - - 40
+      - storefront
+      - vast-no-tls
+    - - 40
+      - storefront
+      - vast-sg
+    - - 40
+      - storefront
+      - vast-sg-sparksql
+    - - 40
+      - tempo
+      - store-proxy
+    - - 38
+      - contour
+      - contour-envoy
+    - - 38
+      - monitoring
+      - telegraf-node
+    - - 19
+      - pyroscope
+      - pyroscope-memberlist
+    - - 8
+      - tempo
+      - gossip-ring
+    - - 7
+      - loki
+      - gossip-ring
+    - - 5
+      - tempo
+      - memcached
+    - - 5
+      - upwind
+      - upwind-cluster-agent
+    - - 5
+      - upwind
+      - upwind-cluster-agent-hl
+    - - 3
+      - ceph
+      - ceph-csi-rbd-provisioner-http-metrics
+    - - 3
+      - kube-system
+      - coredns
+    - - 3
+      - litmus
+      - chaos-mongodb-headless
+    - - 3
+      - loki
+      - distributor
+    - - 3
+      - loki
+      - querier
+    - - 3
+      - pyroscope
+      - pyroscope-distributor
+    - - 3
+      - pyroscope
+      - pyroscope-distributor-headless
+    - - 3
+      - pyroscope
+      - pyroscope-ingester
+    - - 3
+      - pyroscope
+      - pyroscope-ingester-headless
+    - - 3
+      - tempo
+      - ingester
+    - - 3
+      - tempo
+      - querier
+    - - 2
+      - loki
+      - memcached
+    - - 2
+      - loki
+      - memcached-frontend
+    - - 2
+      - loki
+      - memcached-index-queries
+    - - 2
+      - loki
+      - query-frontend
+    - - 2
+      - loki
+      - query-frontend-headless
+    - - 2
+      - nomasec
+      - llm-service
+    - - 2
+      - nomasec
+      - llm-service-headless
+    - - 2
+      - pyroscope
+      - pyroscope-gateway
+    - - 2
+      - pyroscope
+      - pyroscope-query-frontend
+    - - 2
+      - pyroscope
+      - pyroscope-query-frontend-headless
+    - - 2
+      - pyroscope
+      - pyroscope-sentinel
+    - - 2
+      - pyroscope
+      - pyroscope-store-gateway
+    - - 2
+      - pyroscope
+      - pyroscope-store-gateway-headless
+    - - 2
+      - tempo
+      - distributor
+    - - 2
+      - tempo
+      - federation
+    - - 2
+      - tempo
+      - ingest
+    - - 2
+      - tempo
+      - query-frontend
+    - - 2
+      - tempo
+      - query-frontend-discovery
+    - - 2
+      - tempo
+      - tempo
+    - - 1
+      - agoda-system
+      - cert-manager
+    - - 1
+      - agoda-system
+      - cert-manager-webhook
+    - - 1
+      - chaos
+      - chaos-exporter
+    - - 1
+      - chaos
+      - workflow-controller-metrics
+    - - 1
+      - contour
+      - contour
+    - - 1
+      - fleet
+      - docker-cache
+    - - 1
+      - fleet
+      - monitoring
+    - - 1
+      - fleet-eso-identity
+      - external-secrets-webhook
+    - - 1
+      - infra-gitlab-ci
+      - uptime-mr-16-otelcol-discovery
+    - - 1
+      - infra-gitlab-ci
+      - uptime-mr-17-otelcol-discovery
+    - - 1
+      - infra-gitlab-ci
+      - uptime-testing-otelcol-discovery
+    - - 1
+      - kube-system
+      - hubble-relay
+    - - 1
+      - kube-system
+      - hubble-ui
+    - - 1
+      - litmus
+      - chaos-litmus-auth-server-service
+    - - 1
+      - litmus
+      - chaos-litmus-frontend-service
+    - - 1
+      - litmus
+      - chaos-litmus-server-service
+    - - 1
+      - litmus
+      - chaos-mongodb-arbiter-headless
+    - - 1
+      - loki
+      - compactor
+    - - 1
+      - loki
+      - ingester-zone-a
+    - - 1
+      - loki
+      - ingester-zone-b
+    - - 1
+      - loki
+      - ingester-zone-c
+    - - 1
+      - nomasec
+      - aidr-broker-service
+    - - 1
+      - opal
+      - kafka-broadcast-channel
+    - - 1
+      - opal
+      - opal-client
+    - - 1
+      - opal
+      - opal-server
+    - - 1
+      - opal
+      - zookeeper
+    - - 1
+      - pyroscope
+      - pyroscope-compactor
+    - - 1
+      - pyroscope
+      - pyroscope-compactor-headless
+    - - 1
+      - pyroscope
+      - pyroscope-homepage
+    - - 1
+      - pyroscope
+      - pyroscope-querier
+    - - 1
+      - pyroscope
+      - pyroscope-querier-headless
+    - - 1
+      - pyroscope
+      - pyroscope-query-scheduler
+    - - 1
+      - pyroscope
+      - pyroscope-query-scheduler-headless
+    - - 1
+      - pyroscope
+      - pyroscope-tenant-settings
+    - - 1
+      - pyroscope
+      - pyroscope-tenant-settings-headless
+    - - 1
+      - soveren
+      - soveren-dar-sensor-crawler
+    - - 1
+      - soveren
+      - soveren-dar-sensor-detection-tool
+    - - 1
+      - soveren
+      - soveren-dar-sensor-kafka
+    - - 1
+      - tempo
+      - compactor
+    ordered: false
+- id: h08
+  question: List deployments where ready replicas are fewer than desired replicas.
+  tags:
+  - deployment
+  - status
+  - filter
+  deterministic: true
+  reference_cypher: "MATCH (d:Deployment)\nWITH d,\n  coalesce(d['spec']['replicas'],\
+    \ 0) AS desired,\n  coalesce(d['status']['readyReplicas'], 0) AS ready\nWHERE\
+    \ ready < desired\nRETURN\n  d['metadata']['namespace'] AS namespace,\n  d['metadata']['name']\
+    \ AS deployment,\n  desired AS desired_replicas,\n  ready AS ready_replicas,\n\
+    \  (desired - ready) AS missing_ready_replicas\nORDER BY missing_ready_replicas\
+    \ DESC, namespace ASC, deployment ASC"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+- id: h09
+  question: List pods in namespace storefront that are not managed by any Deployment,
+    StatefulSet, DaemonSet, Job, or ReplicaSet.
+  tags:
+  - pod
+  - namespace
+  - negative
+  deterministic: true
+  reference_cypher: "MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'storefront'\n\
+    MATCH (p:Pod)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (rs:ReplicaSet)-[:Manages]->(p)\n\
+    OPTIONAL MATCH (dep:Deployment)-[:Manages]->(rs)\nOPTIONAL MATCH (ss:StatefulSet)-[:Manages]->(p)\n\
+    OPTIONAL MATCH (ds:DaemonSet)-[:Manages]->(p)\nOPTIONAL MATCH (j:Job)-[:Manages]->(p)\n\
+    WITH p,\n  collect(DISTINCT rs) AS rss,\n  collect(DISTINCT dep) AS deps,\n  collect(DISTINCT\
+    \ ss) AS sss,\n  collect(DISTINCT ds) AS dss,\n  collect(DISTINCT j) AS js\nWHERE\
+    \ size(rss) = 0 AND size(deps) = 0 AND size(sss) = 0 AND size(dss) = 0 AND size(js)\
+    \ = 0\nRETURN p['metadata']['name'] AS pod,\n       p['metadata']['namespace']\
+    \ AS namespace,\n       p['status']['phase'] AS phase\nORDER BY pod"
+  expected:
+    columns:
+    - namespace
+    - phase
+    - pod
+    rows:
+    - - storefront
+      - Running
+      - dxu3
+    ordered: false
+- id: h12
+  question: For each ingress in namespace litmus, list backend services that have
+    no endpoint slices.
+  tags:
+  - ingress
+  - service
+  - endpointslice
+  - namespace
+  - negative
+  deterministic: true
+  reference_cypher: "MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name']\
+    \ = 'litmus'\nMATCH (ing)-[:DefinesBackend]->(isb:IngressServiceBackend)-[:TargetsService]->(svc:Service)\n\
+    OPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)\nWITH ing, svc, count(es)\
+    \ AS endpoint_slices\nWHERE endpoint_slices = 0\nRETURN\n  ing['metadata']['name']\
+    \ AS ingress,\n  svc['metadata']['name'] AS backend_service,\n  svc['metadata']['namespace']\
+    \ AS service_namespace\nORDER BY ingress, backend_service"
+  expected:
+    columns: []
+    rows: []
+    ordered: false
+- id: h19
+  question: List hosts and the backend services they route to.
+  tags:
+  - host
+  - ingress
+  - service
+  - join
+  deterministic: true
+  reference_cypher: "MATCH (h:Host)-[:IsClaimedBy]->(i:Ingress)\nMATCH (i)-[:DefinesBackend]->(isb:IngressServiceBackend)\n\
+    MATCH (isb)-[:TargetsService]->(s:Service)\nRETURN\n  h['name'] AS host,\n  i['metadata']['name']\
+    \ AS ingress,\n  i['metadata']['namespace'] AS ingress_namespace,\n  collect(DISTINCT\
+    \ {\n    service: s['metadata']['name'],\n    namespace: s['metadata']['namespace'],\n\
+    \    backend_name: isb['name'],\n    backend_port_name: isb['port']['name'],\n\
+    \    backend_port_number: isb['port']['number']\n  }) AS backend_services\nORDER\
+    \ BY host, ingress_namespace, ingress;"
+  expected:
+    columns:
+    - backend_services
+    - host
+    - ingress
+    - ingress_namespace
+    rows:
+    - - - backend_name: chaos-litmus-frontend-service
+          backend_port_name: null
+          backend_port_number: 9091
+          namespace: litmus
+          service: chaos-litmus-frontend-service
+        - backend_name: chaos-litmus-server-service
+          backend_port_name: null
+          backend_port_number: 9002
+          namespace: litmus
+          service: chaos-litmus-server-service
+      - litmus.qa.agoda.is
+      - litmus-ingress
+      - litmus
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.client.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.client.tools.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.kafka.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.kafka.tools.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.opa.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.opa.tools.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.server.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    - - - backend_name: opal-server
+          backend_port_name: null
+          backend_port_number: 7002
+          namespace: opal
+          service: opal-server
+        - backend_name: kafka-broadcast-channel
+          backend_port_name: null
+          backend_port_number: 29092
+          namespace: opal
+          service: kafka-broadcast-channel
+        - backend_name: opal-client
+          backend_port_name: null
+          backend_port_number: 8181
+          namespace: opal
+          service: opal-client
+      - opal.server.tools.qa.agoda.is
+      - ingress-opal-host
+      - opal
+    ordered: false

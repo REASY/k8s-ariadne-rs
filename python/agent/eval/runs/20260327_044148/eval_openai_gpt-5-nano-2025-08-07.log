@@ -1,0 +1,297 @@
+2026-03-27 04:42:37,833 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:55 no viable alternative at input 'MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:42:37,833 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN sa['metadata']['name'] AS serviceAccountName, ns['metadata']['name'] AS namespace\nORDER BY serviceAccountName
+2026-03-27 04:42:38,203 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_11]: cypher validation failed: Cypher parse failed: line 1:51 no viable alternative at input 'MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:42:38,203 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_11]: invalid cypher:
+MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN DISTINCT rs['metadata']['name'] AS replicaSetName\nORDER BY replicaSetName
+2026-03-27 04:42:39,290 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: cypher validation failed: Cypher parse failed: line 1:43 no viable alternative at input 'MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:42:39,291 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN p['metadata']['name'] AS pod_name, ns['metadata']['name'] AS namespace\nORDER BY pod_name
+2026-03-27 04:42:41,525 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:42:41,525 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['name'] = 'litmus'\nMATCH (es:EndpointSlice)-[:BelongsTo]->(ns)\nRETURN es['metadata']['name'] AS endpoint_slice_name
+2026-03-27 04:42:45,449 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: cypher validation failed: Cypher parse failed: line 1:47 no viable alternative at input 'MATCH (i:Ingress)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:42:45,450 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: invalid cypher:
+MATCH (i:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN i['metadata']['name'] AS ingress_name, ns['metadata']['name'] AS namespace\nORDER BY ingress_name
+2026-03-27 04:42:54,350 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: StatefulSet -> Namespace via PartOf. Allowed: PersistentVolumeClaim -> Cluster; Container -> Cluster; PersistentVolume -> Cluster; Ingress -> Cluster; ServiceAccount -> Cluster; NetworkPolicy -> Cluster; Job -> Cluster; ReplicaSet -> Cluster; EndpointSlice -> Cluster; ConfigMap -> Cluster; Deployment -> Cluster; StatefulSet -> Cluster; Service -> Cluster; Pod -> Cluster; Node -> Cluster; Namespace -> Cluster; Provisioner -> Cluster; StorageClass -> Cluster; DaemonSet -> Cluster. Pattern: (ss:StatefulSet)-[:PartOf]->(ns) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: PartOf is only allowed as PersistentVolumeClaim -> Cluster; Container -> Cluster; PersistentVolume -> Cluster; Ingress -> Cluster; ServiceAccount -> Cluster; NetworkPolicy -> Cluster; Job -> Cluster; ReplicaSet -> Cluster; EndpointSlice -> Cluster; ConfigMap -> Cluster; Deployment -> Cluster; StatefulSet -> Cluster; Service -> Cluster; Pod -> Cluster; Node -> Cluster; Namespace -> Cluster; Provisioner -> Cluster; StorageClass -> Cluster; DaemonSet -> Cluster. Check direction and node labels.
+2026-03-27 04:42:54,350 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (ns:Namespace) WHERE ns['metadata']['name'] = 'litmus' MATCH (ss:StatefulSet)-[:PartOf]->(ns) MATCH (ss)-[:Manages]->(p:Pod) RETURN DISTINCT ss['metadata']['name'] AS statefulset, p['metadata']['name'] AS pod ORDER BY statefulset, pod
+2026-03-27 04:43:01,053 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:43:01,053 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH (s:Service)-[:BelongsTo]->(ns)\nMATCH (s)-[:Manages]->(es:EndpointSlice)\nMATCH (es)-[:BelongsTo]->(ns)\nRETURN s['metadata']['name'] AS service_name, es['metadata']['name'] AS endpoint_slice_name\nORDER BY service_name, endpoint_slice_name
+2026-03-27 04:43:05,194 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_0]: execution failed for m08; attempting repair: MemgraphError: QueryError: Query execution error: Parameter $nodeName not provided.
+2026-03-27 04:43:05,879 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_12]: cypher validation failed: Cypher parse failed: line 1:52 no viable alternative at input 'MATCH (pod:Pod)-[:BelongsTo|PartOf]->(ns:Namespace)nWHERE'
+2026-03-27 04:43:05,879 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_12]: invalid cypher:
+MATCH (pod:Pod)-[:BelongsTo|PartOf]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN COUNT(DISTINCT pod) AS pod_count
+2026-03-27 04:43:06,405 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:66 no viable alternative at input 'MATCH (e:Event)-[:Concerns]->(p:Pod)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:43:06,405 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (e:Event)-[:Concerns]->(p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nRETURN e['reason'] AS reason, p['metadata']['name'] AS pod_name\nORDER BY e['eventTime'] DESC
+2026-03-27 04:43:15,109 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher parse failed: line 1:15 no viable alternative at input 'MATCH (n:Node)nOPTIONAL'
+2026-03-27 04:43:15,109 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (n:Node)\nOPTIONAL MATCH (p:Pod)-[:RunsOn]->(n)\nWITH n, COUNT(DISTINCT p) AS pod_count\nRETURN n['metadata']['name'] AS node_name, pod_count\nORDER BY pod_count DESC
+2026-03-27 04:43:19,695 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Namespace -> Service via BelongsTo. Allowed: Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Pattern: (ns:Namespace)-[:BelongsTo]->(s:Service) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: BelongsTo is only allowed as Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Check direction and node labels.
+2026-03-27 04:43:19,695 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: invalid cypher:
+MATCH (ns:Namespace)-[:BelongsTo]->(s:Service)
+MATCH (e:Event)-[:Concerns]->(s)
+WHERE ns['metadata']['name'] = 'litmus'
+RETURN e['metadata']['name'] AS event_name, e['reason'] AS reason, e['message'] AS message, e['eventTime'] AS event_time, s['metadata']['name'] AS service_name
+ORDER BY event_time DESC
+LIMIT 200
+2026-03-27 04:43:19,901 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/multiPartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:43:19,901 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: invalid cypher:
+MATCH (ns:Namespace)
+WHERE ns['metadata']['name'] = 'litmus'
+MATCH (c:Container)-[:BelongsTo]->(ns)
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)
+OPTIONAL MATCH (p)-[:HasLogs]->(l:Logs)
+WITH c, p, collect(l['content']) AS logs
+RETURN c['metadata']['name'] AS container_name,
+       CASE WHEN p IS NULL THEN null ELSE p['metadata']['name'] END AS pod_name,
+       logs
+ORDER BY container_name
+2026-03-27 04:43:24,165 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nOPTIONAL'
+2026-03-27 04:43:24,165 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (ns:Namespace)\nOPTIONAL MATCH (svc:Service)-[:BelongsTo]->(ns)\nWITH ns, count(svc) AS service_count\nRETURN ns['metadata']['name'] AS namespace, service_count\nORDER BY service_count DESC
+2026-03-27 04:43:26,152 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher parse failed: line 1:15 no viable alternative at input 'MATCH (n:Node)nOPTIONAL'
+2026-03-27 04:43:26,152 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (n:Node)\nOPTIONAL MATCH (p:Pod)-[:RunsOn]->(n)\nWITH n, COUNT(DISTINCT p) AS pod_count\nRETURN n['metadata']['name'] AS node_name, pod_count\nORDER BY pod_count DESC
+2026-03-27 04:43:39,112 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:43 no viable alternative at input 'MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:43:39,112 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'storefront'\n  AND NOT (\n  (p)<-[:Manages]-(:Deployment)\n  OR (p)<-[:Manages]-(:ReplicaSet)\n  OR (p)<-[:Manages]-(:DaemonSet)\n  OR (p)<-[:Manages]-(:StatefulSet)\n  OR (p)<-[:Manages]-(:Job)\n)\nRETURN DISTINCT p['metadata']['name'] AS pod_name\nORDER BY pod_name
+2026-03-27 04:43:39,839 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nOPTIONAL'
+2026-03-27 04:43:39,839 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (ns:Namespace)\nOPTIONAL MATCH (svc:Service)-[:BelongsTo]->(ns)\nWITH ns, count(svc) AS service_count\nRETURN ns['metadata']['name'] AS namespace, service_count\nORDER BY service_count DESC
+2026-03-27 04:43:42,498 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_15]: execution failed for h13; attempting repair: MemgraphError: QueryError: Query execution error: Unbound variable: ns.
+2026-03-27 04:43:45,287 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_13]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Endpoint -> Pod via IsAddressOf. Allowed: EndpointAddress -> Pod. Pattern: (ep:Endpoint)-[:IsAddressOf]->(pod:Pod) [rule=script/query/regularQuery/singleQuery/multiPartQ/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: IsAddressOf is only allowed as EndpointAddress -> Pod. Check direction and node labels.
+2026-03-27 04:43:45,288 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_13]: invalid cypher:
+MATCH (h:Host)
+WHERE h['name'] = 'litmus.qa.agoda.is'
+WITH h
+MATCH (h)-[:IsClaimedBy]->(ing:Ingress)
+OPTIONAL MATCH (ing)-[:DefinesBackend]->(ibs:IngressServiceBackend)-[:TargetsService]->(svc:Service)
+OPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:IsAddressOf]->(pod:Pod)
+RETURN DISTINCT svc['metadata']['name'] AS service, pod['metadata']['name'] AS pod
+ORDER BY service, pod
+2026-03-27 04:43:46,073 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:53 no viable alternative at input 'MATCH ( ing:Ingress )-[:BelongsTo]->( ns:Namespace )nWHERE'
+2026-03-27 04:43:46,073 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH ( ing:Ingress )-[:BelongsTo]->( ns:Namespace )\nWHERE ns['metadata']['name'] = 'litmus'\nMATCH ( ing)-[:DefinesBackend]->( be:IngressServiceBackend)-[:TargetsService]->( svc:Service )\nMATCH ( svc)-[:Manages]->( es:EndpointSlice)-[:ContainsEndpoint]->( ep:Endpoint)-[:HasAddress]->( addr:EndpointAddress)\nWITH ing, svc, COUNT(DISTINCT addr) AS endpoint_count\nRETURN ing['metadata']['name'] AS ingress_name, svc['metadata']['name'] AS service_name, endpoint_count\nORDER BY endpoint_count DESC
+2026-03-27 04:43:46,711 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher parse failed: line 1:34 no viable alternative at input 'MATCH (p:Pod)-[:RunsOn]->(n:Node)nMATCH'
+2026-03-27 04:43:46,711 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (p:Pod)-[:RunsOn]->(n:Node)\nMATCH (p)-[:BelongsTo]->(ns:Namespace)\nWITH n, COUNT(DISTINCT ns) AS namespace_count\nWHERE namespace_count > 1\nRETURN n['metadata']['name'] AS node_name, namespace_count\nORDER BY namespace_count DESC
+2026-03-27 04:43:50,145 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_11]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:43:50,244 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_11]: execution failed for h03; attempting repair: MemgraphError: CommitError: Query execution error: No current transaction to commit.
+2026-03-27 04:43:57,307 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod <- Deployment via Manages. Allowed: Job -> Pod; AWX -> Deployment; Node -> Pod; Service -> EndpointSlice; DaemonSet -> Pod; Pod -> PersistentVolumeClaim; StatefulSet -> Pod; ReplicaSet -> Pod; Deployment -> ReplicaSet; Deployment -> Deployment; AWX -> Ingress; Deployment -> DaemonSet. Pattern: (p)<-[:Manages]-(:Deployment) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/where/expression/xorExpression/andExpression/notExpression/comparisonExpression/addSubExpression/multDivExpression/powerExpression/unaryAddSubExpression/atomicExpression/propertyOrLabelExpression/propertyExpression/atom/parenthesizedExpression/expression/xorExpression/andExpression/notExpression/comparisonExpression/addSubExpression/multDivExpression/powerExpression/unaryAddSubExpression/atomicExpression/propertyOrLabelExpression/propertyExpression/atom/relationshipsChainPattern/patternElemChain/relationshipPattern]
+  Hint: Manages is only allowed as Job -> Pod; AWX -> Deployment; Node -> Pod; Service -> EndpointSlice; DaemonSet -> Pod; Pod -> PersistentVolumeClaim; StatefulSet -> Pod; ReplicaSet -> Pod; Deployment -> ReplicaSet; Deployment -> Deployment; AWX -> Ingress; Deployment -> DaemonSet. Check direction and node labels.
+2026-03-27 04:43:57,307 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace) WHERE ns['metadata']['name'] = 'storefront' AND NOT ((p)<-[:Manages]-(:Deployment) OR (p)<-[:Manages]-(:ReplicaSet) OR (p)<-[:Manages]-(:DaemonSet) OR (p)<-[:Manages]-(:StatefulSet) OR (p)<-[:Manages]-(:Job)) RETURN DISTINCT p['metadata']['name'] AS pod_name ORDER BY pod_name
+2026-03-27 04:43:58,175 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_0]: execution failed for h12; attempting repair: MemgraphError: QueryError: Query execution error: Not yet implemented: Exists cannot be used within WITH!
+2026-03-27 04:44:06,172 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:49 no viable alternative at input 'MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:06,172 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (ing)-[:DefinesBackend]->(be:IngressServiceBackend)-[:TargetsService]->(svc:Service)\nOPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(addr:EndpointAddress)\nWITH ing, svc, COUNT(DISTINCT addr) AS endpoint_count\nRETURN ing['metadata']['name'] AS ingress_name, svc['metadata']['name'] AS service_name, endpoint_count\nORDER BY endpoint_count DESC
+2026-03-27 04:44:08,205 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:54 no viable alternative at input 'MATCH (ss: StatefulSet)-[:BelongsTo]->(ns: Namespace)nWHERE'
+2026-03-27 04:44:08,205 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (ss: StatefulSet)-[:BelongsTo]->(ns: Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nRETURN ss['metadata']['name'] AS statefulSetName\nORDER BY statefulSetName
+2026-03-27 04:44:16,116 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: cypher validation failed: Cypher parse failed: line 1:63 no viable alternative at input 'MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:16,116 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: invalid cypher:
+MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nRETURN pvc['metadata']['name'] AS pvc_name\nORDER BY pvc_name
+2026-03-27 04:44:19,334 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_12]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:44:23,914 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher parse failed: line 1:49 no viable alternative at input 'MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:23,914 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (ing:Ingress)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'litmus'\nOPTIONAL MATCH (ing)-[:DefinesBackend]->(b:IngressServiceBackend)-[:TargetsService]->(svc:Service)\nWHERE svc IS NOT NULL\nWITH ing, ns, svc\nOPTIONAL MATCH (svc)-[:Manages]->(es:EndpointSlice)-[:BelongsTo]->(ns)\nWITH ing, ns, svc, COUNT(es) AS es_count\nWHERE es_count = 0\nRETURN ing['metadata']['name'] AS ingress_name, svc['metadata']['name'] AS service_name\nORDER BY ingress_name, service_name
+2026-03-27 04:44:30,234 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: cypher validation failed: Cypher parse failed: line 1:63 no viable alternative at input 'MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:30,235 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: invalid cypher:
+MATCH (pvc:PersistentVolumeClaim)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nRETURN pvc['metadata']['name'] AS pvc_name\nORDER BY pvc_name
+2026-03-27 04:44:31,002 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_11]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:44:39,149 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_7]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:44:40,311 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:44:40,312 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'kube-system'\nMATCH (ns)-[:BelongsTo]->(s:Service)\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)\nWITH s, collect(DISTINCT p) AS podsNodes\nRETURN s['metadata']['name'] AS service_name, [pod IN podsNodes WHERE pod IS NOT NULL | pod['metadata']['name']] AS pods\nORDER BY service_name
+2026-03-27 04:44:46,633 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:44:46,634 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'kube-system'\nMATCH (pod:Pod)-[:BelongsTo]->(ns)\nMATCH (container:Container)-[:Runs]->(pod)\nOPTIONAL MATCH (pod)-[:HasLogs]->(l:Logs)\nRETURN container['pod_name'] AS container_name, container['container_type'] AS container_type, pod['metadata']['name'] AS pod_name, l['content'] AS logs\nORDER BY pod_name, container_name
+2026-03-27 04:44:48,863 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_3]: cypher validation failed: Cypher parse failed: line 1:51 no viable alternative at input 'MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:48,863 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_3]: invalid cypher:
+MATCH (rs:ReplicaSet)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nRETURN rs['metadata']['name'] AS replicaSetName
+2026-03-27 04:44:51,048 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:44:51,049 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'kube-system'\nMATCH (pod:Pod)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (pod)-[:ClaimsVolume]->(pvc:PersistentVolumeClaim)\nWITH pod, collect(pvc) AS pvcs\nRETURN pod['metadata']['name'] AS pod_name, [vc IN pvcs WHERE vc IS NOT NULL | vc['metadata']['name']] AS claimed_pvcs\nORDER BY pod_name
+2026-03-27 04:44:53,813 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:44:53,814 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nMATCH (ss:StatefulSet)-[:BelongsTo]->(ns)\nRETURN ss['metadata']['name'] AS statefulSetName
+2026-03-27 04:44:55,362 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: cypher validation failed: Cypher parse failed: line 1:54 no viable alternative at input 'MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:55,362 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: invalid cypher:
+MATCH (es:EndpointSlice)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nOPTIONAL MATCH (es)-[:ContainsEndpoint]->(ep:Endpoint)\nWITH es, count(ep) AS endpoint_count\nRETURN es['metadata']['name'] AS endpoint_slice_name, endpoint_count\nORDER BY endpoint_slice_name
+2026-03-27 04:44:55,605 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher parse failed: line 1:43 no viable alternative at input 'MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:44:55,606 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nRETURN count(p) AS pod_count
+2026-03-27 04:44:57,490 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_12]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:45:02,291 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Namespace -> Service via BelongsTo. Allowed: Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Pattern: (ns)-[:BelongsTo]->(s:Service) [rule=script/query/regularQuery/singleQuery/multiPartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: BelongsTo is only allowed as Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Check direction and node labels.
+2026-03-27 04:45:02,292 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_6]: invalid cypher:
+MATCH (ns:Namespace)
+WHERE ns['metadata']['name'] = 'kube-system'
+MATCH (ns)-[:BelongsTo]->(s:Service)
+OPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(ea:EndpointAddress)-[:IsAddressOf]->(p:Pod)
+WITH s, collect(DISTINCT p) AS pods
+RETURN s['metadata']['name'] AS service_name, [pod IN pods WHERE pod IS NOT NULL | pod['metadata']['name']] AS pods
+ORDER BY service_name
+2026-03-27 04:45:09,477 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher parse failed: line 1:50 no viable alternative at input 'MATCH (cm:ConfigMap)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:45:09,477 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (cm:ConfigMap)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nRETURN cm['metadata']['name'] AS configMapName\nORDER BY configMapName
+2026-03-27 04:45:09,922 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher parse failed: line 1:43 no viable alternative at input 'MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:45:09,923 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (p:Pod)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nRETURN count(p) AS pod_count
+2026-03-27 04:45:14,548 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:45:14,548 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: invalid cypher:
+MATCH (ns:Namespace)
+WHERE ns['metadata']['name'] = 'kube-system'
+MATCH (container:Container)-[:BelongsTo]->(ns)
+OPTIONAL MATCH (container)-[:Runs]->(pod:Pod)
+OPTIONAL MATCH (pod)-[:HasLogs]->(l:Logs)
+RETURN container['pod_name'] AS container_name, container['container_type'] AS container_type, pod['metadata']['name'] AS pod_name, l['content'] AS logs
+ORDER BY pod_name, container_name
+2026-03-27 04:45:20,838 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Endpoint -> Pod via IsAddressOf. Allowed: EndpointAddress -> Pod. Pattern: (ep:Endpoint)-[:IsAddressOf]->(pod:Pod) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: IsAddressOf is only allowed as EndpointAddress -> Pod. Check direction and node labels.
+2026-03-27 04:45:20,840 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: invalid cypher:
+MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+MATCH (s)-[:Manages]->(:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:IsAddressOf]->(pod:Pod)
+WHERE pod['status']['phase'] IS NOT NULL
+RETURN s['metadata']['name'] AS service, pod['status']['phase'] AS phase, count(*) AS pods
+ORDER BY service, phase
+2026-03-27 04:45:28,479 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: cypher validation failed: Cypher parse failed: line 1:49 no viable alternative at input 'MATCH (svc:Service)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:45:28,479 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_8]: invalid cypher:
+MATCH (svc:Service)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nRETURN svc['metadata']['name'] AS service_name\nORDER BY service_name
+2026-03-27 04:45:30,882 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:45:30,882 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nMATCH (c:Container)-[:Runs]->(p:Pod)\nWHERE (c)-[:BelongsTo]->(ns) AND (p)-[:BelongsTo]->(ns)\nRETURN c['pod_name'] AS container_pod_name, p['metadata']['name'] AS pod_name\nORDER BY container_pod_name
+2026-03-27 04:45:32,181 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_14]: cypher validation failed: Cypher parse failed: line 1:55 no viable alternative at input 'MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:45:32,182 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_14]: invalid cypher:
+MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'content-downloader'\nRETURN sa['metadata']['name'] AS service_account, ns['metadata']['name'] AS namespace\nORDER BY service_account
+2026-03-27 04:45:34,456 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:45:34,457 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'pyroscope'\nMATCH (ss:StatefulSet)-[:BelongsTo]->(ns)\nOPTIONAL MATCH (ss)-[:Manages]->(pod:Pod)\nWITH ss, collect(pod) AS pods\nRETURN ss['metadata']['name'] AS statefulSet, [p IN pods WHERE p IS NOT NULL | p['metadata']['name']] AS pods\nORDER BY statefulSet
+2026-03-27 04:45:35,322 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:45:35,322 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'ceph'\nMATCH (ns)-[:BelongsTo]->(slice:EndpointSlice)\nOPTIONAL MATCH (slice)-[:ContainsEndpoint]->(ep:Endpoint)\nOPTIONAL MATCH (ep)-[:HasAddress]->(addr:EndpointAddress)\nOPTIONAL MATCH (addr)-[:IsAddressOf]->(pod:Pod)\nWITH slice, collect(pod) AS pods\nRETURN slice['metadata']['name'] AS endpointSliceName,\n       [p IN pods WHERE p IS NOT NULL | p['metadata']['name']] AS pods
+2026-03-27 04:45:43,820 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: cypher validation failed: Cypher uses constructs not supported by Memgraph:
+- Inline property maps in MATCH are not supported; move filters into WHERE (found: (h:Host {name: 'opal.client.tools.qa.agoda.is'}))
+2026-03-27 04:45:43,821 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: invalid cypher:
+MATCH (h:Host {name: 'opal.client.tools.qa.agoda.is'})-[:IsClaimedBy]->(ing:Ingress)-[:DefinesBackend]->(ibs:IngressServiceBackend)-[:TargetsService]->(s:Service)
+OPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:IsAddressOf]->(pod:Pod)
+WITH s, collect(DISTINCT pod) AS pods
+RETURN s.metadata.name AS service_name, [p IN pods | p.metadata.name] AS pods
+2026-03-27 04:45:50,014 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Namespace -> EndpointSlice via BelongsTo. Allowed: Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Pattern: (ns)-[:BelongsTo]->(slice:EndpointSlice) [rule=script/query/regularQuery/singleQuery/multiPartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: BelongsTo is only allowed as Job -> Namespace; Pod -> Namespace; ServiceAccount -> Namespace; Service -> Namespace; EndpointSlice -> Namespace; DaemonSet -> Namespace; ReplicaSet -> Namespace; ConfigMap -> Namespace; Deployment -> Namespace; Container -> Namespace; StatefulSet -> Namespace; Ingress -> Namespace; PersistentVolumeClaim -> Namespace; NetworkPolicy -> Namespace. Check direction and node labels.
+2026-03-27 04:45:50,014 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_9]: invalid cypher:
+MATCH (ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+MATCH (ns)-[:BelongsTo]->(slice:EndpointSlice)
+OPTIONAL MATCH (slice)-[:ContainsEndpoint]->(ep:Endpoint)
+OPTIONAL MATCH (ep)-[:HasAddress]->(addr:EndpointAddress)
+OPTIONAL MATCH (addr)-[:IsAddressOf]->(pod:Pod)
+WITH slice, collect(DISTINCT pod) AS pods
+RETURN slice['metadata']['name'] AS endpointSliceName,
+       [p IN pods WHERE p IS NOT NULL | p['metadata']['name']] AS pods
+ORDER BY endpointSliceName
+2026-03-27 04:45:50,296 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_4]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:45:50,296 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (p)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:45:50,296 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: invalid cypher:
+MATCH (ns:Namespace)
+WHERE ns['metadata']['name'] = 'ceph'
+MATCH (c:Container)-[:BelongsTo]->(ns)
+OPTIONAL MATCH (c)-[:Runs]->(p:Pod)
+OPTIONAL MATCH (p)-[:HasLogs]->(l:Logs)
+WITH c, collect(DISTINCT l) AS logs
+WITH c, [log IN logs WHERE log IS NOT NULL AND log['container_uid'] = c['metadata']['uid']] AS logs_filtered
+RETURN c['metadata']['name'] AS container_name, [ln IN logs_filtered | ln['content']] AS logs
+ORDER BY container_name
+2026-03-27 04:45:58,625 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_6]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:17,895 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_13]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:18,106 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: cypher validation failed: Cypher parse failed: line 1:108 no viable alternative at input 'MATCH (s:Service)-[:BelongsTo]->(ns:Namespace), (s)-[:Manages]->(es:EndpointSlice), (es)-[:BelongsTo]->(ns)nWHERE'
+2026-03-27 04:46:18,106 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: invalid cypher:
+MATCH (s:Service)-[:BelongsTo]->(ns:Namespace), (s)-[:Manages]->(es:EndpointSlice), (es)-[:BelongsTo]->(ns)\nWHERE ns['metadata']['name'] = $namespace\nRETURN DISTINCT s['metadata']['name'] AS service_name, es['metadata']['name'] AS endpoint_slice_name\nORDER BY service_name, endpoint_slice_name
+2026-03-27 04:46:18,183 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: cypher validation failed: Cypher parse failed: line 1:50 no viable alternative at input 'MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:46:18,183 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_10]: invalid cypher:
+MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nOPTIONAL MATCH (d)-[:Manages]->(rs:ReplicaSet)-[:Manages]->(p:Pod)\nWHERE rs-[:BelongsTo]->(ns) AND p-[:BelongsTo]->(ns)\nWITH d, collect(DISTINCT p) AS pods\nRETURN d['metadata']['name'] AS deployment_name, size(pods) AS pods_managed\nORDER BY pods_managed DESC
+2026-03-27 04:46:18,392 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: cypher validation failed: Cypher parse failed: line 1:21 no viable alternative at input 'MATCH (ns:Namespace)nWHERE'
+2026-03-27 04:46:18,392 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_0]: invalid cypher:
+MATCH (ns:Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nMATCH (es:EndpointSlice)-[:BelongsTo]->(ns)\nMATCH (es)-[:ContainsEndpoint]->(ep:Endpoint)\nMATCH (ep)-[:HasAddress]->(ea:EndpointAddress)\nMATCH (ea)-[:IsAddressOf]->(p:Pod)\nRETURN es['metadata']['name'] AS endpoint_slice, p['metadata']['name'] AS pod\nORDER BY endpoint_slice, pod
+2026-03-27 04:46:18,635 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: cypher validation failed: Cypher parse failed: line 1:15 no viable alternative at input 'MATCH (h:Host)nWHERE'
+2026-03-27 04:46:18,635 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_15]: invalid cypher:
+MATCH (h:Host)\nWHERE h.name = 'opal.client.tools.qa.agoda.is'\nMATCH (h)-[:IsClaimedBy]->(ing:Ingress)-[:DefinesBackend]->(ibs:IngressServiceBackend)-[:TargetsService]->(s:Service)\nOPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:HasAddress]->(epaddr:EndpointAddress)-[:IsAddressOf]->(pod:Pod)\nWITH s.metadata.name AS service_name, collect(DISTINCT pod.metadata.name) AS pods\nRETURN service_name AS service_name, pods AS pods
+2026-03-27 04:46:19,371 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:55 no viable alternative at input 'MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:46:19,372 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nRETURN sa['metadata']['name'] AS serviceAccountName\nORDER BY serviceAccountName
+2026-03-27 04:46:25,028 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_4]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:25,206 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_11]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:29,354 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Pod -> Logs via HasLogs. Allowed: none. Pattern: (pod)-[:HasLogs]->(l:Logs) [rule=script/query/regularQuery/singleQuery/multiPartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: HasLogs is only allowed as none. Check direction and node labels.
+2026-03-27 04:46:29,354 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_1]: invalid cypher:
+MATCH (ns:Namespace) WHERE ns['name'] = 'content-downloader' MATCH (c:Container)-[:BelongsTo]->(ns) OPTIONAL MATCH (c)-[:Runs]->(pod:Pod) OPTIONAL MATCH (pod)-[:HasLogs]->(l:Logs) WITH ns, c, pod, collect(l['content']) AS logs RETURN ns['name'] AS namespace, c['metadata']['name'] AS container_name, CASE WHEN pod IS NULL THEN NULL ELSE pod['metadata']['name'] END AS pod_name, logs
+2026-03-27 04:46:34,513 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: cypher validation failed: Cypher parse failed: line 1:55 no viable alternative at input 'MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:46:34,513 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_5]: invalid cypher:
+MATCH (sa:ServiceAccount)-[:BelongsTo]->(ns:Namespace)\nWHERE ns['metadata']['name'] = 'tempo'\nRETURN sa['metadata']['name'] AS serviceAccountName\nORDER BY serviceAccountName
+2026-03-27 04:46:38,462 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_10]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:38,481 WARNING k8s_graph_agent.eval.runner [ThreadPoolExecutor-0_10]: execution failed for h16_namespace_variant_tempo; attempting repair: MemgraphError: QueryError: Query execution error: Error on line 4 position 11 with the : token. The underlying parsing error is no viable alternative at input '[:'. Take a look at clauses around and try to fix the query.
+2026-03-27 04:46:38,539 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: cypher validation failed: Cypher parse failed: line 1:108 no viable alternative at input 'MATCH (s:Service)-[:BelongsTo]->(ns:Namespace), (s)-[:Manages]->(es:EndpointSlice), (es)-[:BelongsTo]->(ns)nWHERE'
+2026-03-27 04:46:38,539 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_2]: invalid cypher:
+MATCH (s:Service)-[:BelongsTo]->(ns:Namespace), (s)-[:Manages]->(es:EndpointSlice), (es)-[:BelongsTo]->(ns)\nWHERE ns['metadata']['name'] = 'tempo'\nRETURN DISTINCT s['metadata']['name'] AS service_name, es['metadata']['name'] AS endpoint_slice_name\nORDER BY service_name, endpoint_slice_name
+2026-03-27 04:46:38,580 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_3]: cypher validation failed: Cypher parse failed: line 1:50 no viable alternative at input 'MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)nWHERE'
+2026-03-27 04:46:38,580 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_3]: invalid cypher:
+MATCH (d:Deployment)-[:BelongsTo]->(ns:Namespace)\nWHERE ns.metadata.name = 'pyroscope'\nRETURN d.metadata.name AS deployment_name\nORDER BY deployment_name
+2026-03-27 04:46:41,089 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_12]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:46:58,134 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_8]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:47:04,589 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_10]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:47:14,677 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_4]: Cypher parse failed; using fallback segmentation for schema validation
+2026-03-27 04:47:14,678 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Endpoint -> Pod via IsAddressOf. Allowed: EndpointAddress -> Pod. Pattern: (ep:Endpoint)-[:IsAddressOf]->(p:Pod) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: IsAddressOf is only allowed as EndpointAddress -> Pod. Check direction and node labels.
+2026-03-27 04:47:14,678 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_4]: invalid cypher:
+MATCH (s:Service)-[:BelongsTo]->(ns:Namespace)
+WHERE ns['metadata']['name'] = 'pyroscope'
+OPTIONAL MATCH (s)-[:Manages]->(es:EndpointSlice)-[:BelongsTo]->(ns)
+OPTIONAL MATCH (es)-[:ContainsEndpoint]->(ep:Endpoint)-[:IsAddressOf]->(p:Pod)
+WITH s, ns, collect(DISTINCT p) AS pods
+WITH s, ns, 
+     size([pp IN pods WHERE pp IS NOT NULL AND pp['status']['phase'] = 'Pending'  | 1]) AS pending,
+     size([pp IN pods WHERE pp IS NOT NULL AND pp['status']['phase'] = 'Running'  | 1]) AS running,
+     size([pp IN pods WHERE pp IS NOT NULL AND pp['status']['phase'] = 'Succeeded'| 1]) AS succeeded,
+     size([pp IN pods WHERE pp IS NOT NULL AND pp['status']['phase'] = 'Failed'   | 1]) AS failed,
+     size([pp IN pods WHERE pp IS NOT NULL AND pp['status']['phase'] = 'Unknown'  | 1]) AS unknown
+RETURN s['metadata']['name'] AS service, ns['metadata']['name'] AS namespace,
+       pending AS Pending, running AS Running, succeeded AS Succeeded, 
+       failed AS Failed, unknown AS Unknown
+ORDER BY namespace, service
+2026-03-27 04:47:17,509 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: cypher validation failed: Cypher schema validation failed:
+- Invalid relationship: Endpoint -> Pod via IsAddressOf. Allowed: EndpointAddress -> Pod. Pattern: (ep:Endpoint)-[:IsAddressOf]->(pod:Pod) [rule=script/query/regularQuery/singleQuery/singlePartQ/readingStatement/matchSt/patternWhere/pattern/patternPart/patternElem/patternElemChain/relationshipPattern]
+  Hint: IsAddressOf is only allowed as EndpointAddress -> Pod. Check direction and node labels.
+2026-03-27 04:47:17,509 WARNING k8s_graph_agent.adk_translate [ThreadPoolExecutor-0_7]: invalid cypher:
+MATCH (h:Host)-[:IsClaimedBy]->(ing:Ingress)
+WHERE h['name'] = 'opal.kafka.tools.qa.agoda.is'
+MATCH (ing)-[:DefinesBackend]->(ibs:IngressServiceBackend)-[:TargetsService]->(svc:Service)
+MATCH (svc)-[:BelongsTo]->(ns:Namespace)
+MATCH (svc)-[:Manages]->(es:EndpointSlice)-[:ContainsEndpoint]->(ep:Endpoint)-[:IsAddressOf]->(pod:Pod)
+MATCH (es)-[:BelongsTo]->(ns2:Namespace)
+MATCH (pod)-[:BelongsTo]->(ns3:Namespace)
+WHERE ns = ns2 AND ns = ns3
+RETURN DISTINCT svc['metadata']['name'] AS service_name, pod['metadata']['name'] AS pod_name
+ORDER BY service_name, pod_name
+2026-03-27 04:47:53,478 WARNING k8s_graph_agent.cypher_validator.validator [ThreadPoolExecutor-0_4]: Cypher parse failed; using fallback segmentation for schema validation
