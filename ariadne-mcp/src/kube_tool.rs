@@ -648,7 +648,7 @@ fn normalize_schema_type(data_type: &str) -> String {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for KubeTool {
     async fn initialize(
         &self,

@@ -22,6 +22,7 @@ struct AppState {
     cluster_state: SharedClusterState,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_route(
     cluster_name: String,
     backend_kind: String,
