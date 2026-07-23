@@ -265,6 +265,76 @@ fn watch_health_marks_errors_and_clears_recovered_kinds() {
     );
 }
 
+#[test]
+fn watch_health_waits_for_complete_initialization_before_recovery() {
+    let watch_health = WatchHealth::new();
+    update_watch_health(&watch_health, "Namespace", false);
+
+    update_watch_health_for_event(
+        &watch_health,
+        "Namespace",
+        &watcher::Event::<Namespace>::Init,
+    );
+    update_watch_health_for_event(
+        &watch_health,
+        "Namespace",
+        &watcher::Event::InitApply(test_namespace("team-a").as_ref().clone()),
+    );
+    assert!(
+        watch_health
+            .degraded_resource_kinds
+            .lock()
+            .expect("degraded lock poisoned")
+            .contains("Namespace"),
+        "starting and partially populating a reflector must not report recovery"
+    );
+
+    update_watch_health(&watch_health, "Namespace", false);
+    assert!(
+        watch_health
+            .degraded_resource_kinds
+            .lock()
+            .expect("degraded lock poisoned")
+            .contains("Namespace"),
+        "an initialization failure must remain degraded"
+    );
+
+    update_watch_health_for_event(
+        &watch_health,
+        "Namespace",
+        &watcher::Event::<Namespace>::Init,
+    );
+    update_watch_health_for_event(
+        &watch_health,
+        "Namespace",
+        &watcher::Event::<Namespace>::InitDone,
+    );
+    assert!(
+        watch_health
+            .degraded_resource_kinds
+            .lock()
+            .expect("degraded lock poisoned")
+            .is_empty(),
+        "InitDone must recover an empty but successfully initialized reflector"
+    );
+
+    for event in [
+        watcher::Event::Apply(test_namespace("team-a").as_ref().clone()),
+        watcher::Event::Delete(test_namespace("team-a").as_ref().clone()),
+    ] {
+        update_watch_health(&watch_health, "Namespace", false);
+        update_watch_health_for_event(&watch_health, "Namespace", &event);
+        assert!(
+            watch_health
+                .degraded_resource_kinds
+                .lock()
+                .expect("degraded lock poisoned")
+                .is_empty(),
+            "an established watch must recover on subsequent object events"
+        );
+    }
+}
+
 #[tokio::test]
 async fn start_store_with_factory_respects_allowed_flag() {
     let calls = Arc::new(AtomicUsize::new(0));

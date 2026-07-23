@@ -343,7 +343,9 @@ where
         })
         .for_each(move |result| {
             match &result {
-                Ok(_) => update_watch_health(&watch_health, &resource_kind, true),
+                Ok(event) => {
+                    update_watch_health_for_event(&watch_health, &resource_kind, event);
+                }
                 Err(err) => {
                     update_watch_health(&watch_health, &resource_kind, false);
                     warn!("Error in watch loop for {resource_kind}: {err:?}");
@@ -352,6 +354,19 @@ where
             future::ready(())
         });
     (reader, fut)
+}
+
+fn update_watch_health_for_event<T>(
+    watch_health: &WatchHealth,
+    resource_kind: &str,
+    event: &watcher::Event<T>,
+) {
+    if matches!(
+        event,
+        watcher::Event::Apply(_) | watcher::Event::Delete(_) | watcher::Event::InitDone
+    ) {
+        update_watch_health(watch_health, resource_kind, true);
+    }
 }
 
 fn update_watch_health(watch_health: &WatchHealth, resource_kind: &str, healthy: bool) {
