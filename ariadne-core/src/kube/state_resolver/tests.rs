@@ -783,6 +783,169 @@ fn applies_to_targets(state: &ClusterState, network_policy_uid: &str) -> BTreeSe
 }
 
 #[tokio::test]
+async fn manages_edges_require_valid_controller_owner_identity_and_scope() {
+    let replica_set = |name: &str, namespace: &str, uid: &str| {
+        Arc::new(ReplicaSet {
+            metadata: ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                uid: Some(uid.to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+    };
+    let mut non_controller = owner_reference("ReplicaSet", "non-controller", "rs-non-controller");
+    non_controller.controller = Some(false);
+    let mut missing_controller =
+        owner_reference("ReplicaSet", "missing-controller", "rs-missing-controller");
+    missing_controller.controller = None;
+
+    let snapshot = SnapshotFrame {
+        replica_sets: vec![
+            replica_set("valid", "team-a", "rs-valid"),
+            replica_set("non-controller", "team-a", "rs-non-controller"),
+            replica_set("missing-controller", "team-a", "rs-missing-controller"),
+            replica_set("actual-name", "team-a", "rs-name-mismatch"),
+            replica_set("cross-namespace", "team-a", "rs-cross-namespace"),
+        ],
+        deployments: vec![Arc::new(Deployment {
+            metadata: ObjectMeta {
+                name: Some("kind-owner".to_string()),
+                namespace: Some("team-a".to_string()),
+                uid: Some("deployment-kind-owner".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })],
+        nodes: vec![Arc::new(Node {
+            metadata: ObjectMeta {
+                name: Some("cluster-owner".to_string()),
+                uid: Some("node-cluster-owner".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })],
+        pods: vec![
+            pod(
+                "valid",
+                "team-a",
+                "pod-valid-owner",
+                vec![owner_reference("ReplicaSet", "valid", "rs-valid")],
+            ),
+            pod(
+                "non-controller",
+                "team-a",
+                "pod-non-controller-owner",
+                vec![non_controller],
+            ),
+            pod(
+                "missing-controller",
+                "team-a",
+                "pod-missing-controller-owner",
+                vec![missing_controller],
+            ),
+            pod(
+                "kind-mismatch",
+                "team-a",
+                "pod-kind-mismatch",
+                vec![owner_reference(
+                    "ReplicaSet",
+                    "kind-owner",
+                    "deployment-kind-owner",
+                )],
+            ),
+            pod(
+                "name-mismatch",
+                "team-a",
+                "pod-name-mismatch",
+                vec![owner_reference(
+                    "ReplicaSet",
+                    "declared-name",
+                    "rs-name-mismatch",
+                )],
+            ),
+            pod(
+                "cross-namespace",
+                "team-b",
+                "pod-cross-namespace",
+                vec![owner_reference(
+                    "ReplicaSet",
+                    "cross-namespace",
+                    "rs-cross-namespace",
+                )],
+            ),
+            pod(
+                "cluster-owner",
+                "team-b",
+                "pod-cluster-owner",
+                vec![owner_reference(
+                    "Node",
+                    "cluster-owner",
+                    "node-cluster-owner",
+                )],
+            ),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("malformed owner references must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(has_edge(
+        &state,
+        Edge::Manages,
+        "rs-valid",
+        "pod-valid-owner"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::Manages,
+        "node-cluster-owner",
+        "pod-cluster-owner"
+    ));
+    for pod_uid in [
+        "pod-non-controller-owner",
+        "pod-missing-controller-owner",
+        "pod-kind-mismatch",
+        "pod-name-mismatch",
+        "pod-cross-namespace",
+    ] {
+        assert!(
+            !state
+                .get_edges_by_type(&Edge::Manages)
+                .any(|edge| edge.target == pod_uid),
+            "{pod_uid} must not receive a Manages edge from an invalid owner reference"
+        );
+        assert!(
+            state.node_by_uid(pod_uid).is_some(),
+            "invalid ownership must not prevent dependent materialization"
+        );
+    }
+    assert_eq!(state.get_edges_by_type(&Edge::Manages).count(), 2);
+}
+
+#[test]
+fn cluster_scoped_dependents_reject_namespaced_owner_references() {
+    assert!(!ClusterStateResolver::owner_reference_scope_is_valid(
+        None,
+        Some("team-a")
+    ));
+    assert!(ClusterStateResolver::owner_reference_scope_is_valid(
+        None, None
+    ));
+}
+
+#[tokio::test]
 async fn pod_container_inventory_includes_standard_init_and_ephemeral_containers() {
     let snapshot = SnapshotFrame {
         pods: vec![pod_with_containers(

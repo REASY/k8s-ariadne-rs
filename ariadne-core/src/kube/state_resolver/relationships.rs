@@ -77,18 +77,78 @@ impl ClusterStateResolver {
     }
 
     pub(super) fn set_manages_edge<T: Resource + ResourceExt>(
-        objs: &Vec<Arc<T>>,
+        objs: &[Arc<T>],
         resource_type: ResourceType,
         cluster_state: &mut ClusterState,
     ) {
         for item in objs {
             if let Some(item_uid) = item.uid() {
                 for owner in item.owner_references() {
+                    if owner.controller != Some(true) {
+                        trace!(
+                            dependent_uid = %item_uid,
+                            owner_uid = owner.uid,
+                            owner_kind = owner.kind,
+                            "Skipping non-controller owner reference for Manages relationship"
+                        );
+                        continue;
+                    }
+
                     match ResourceType::try_new(owner.kind.as_str()) {
                         Ok(owner_resource_type) => {
+                            let Some(owner_node) = cluster_state.node_by_uid(owner.uid.as_ref())
+                            else {
+                                trace!(
+                                    dependent_uid = %item_uid,
+                                    owner_uid = owner.uid,
+                                    owner_kind = owner.kind,
+                                    "Skipping unresolved controller owner reference"
+                                );
+                                continue;
+                            };
+                            let actual_owner_type = owner_node.resource_type.clone();
+                            let actual_owner_name = owner_node.id.name.clone();
+                            let actual_owner_namespace = owner_node.id.namespace.clone();
+
+                            if actual_owner_type != owner_resource_type {
+                                warn!(
+                                    dependent_uid = %item_uid,
+                                    owner_uid = owner.uid,
+                                    declared_owner_kind = owner.kind,
+                                    actual_owner_kind = %actual_owner_type,
+                                    "Skipping controller owner reference with mismatched kind"
+                                );
+                                continue;
+                            }
+                            if actual_owner_name != owner.name {
+                                warn!(
+                                    dependent_uid = %item_uid,
+                                    owner_uid = owner.uid,
+                                    declared_owner_name = owner.name,
+                                    actual_owner_name,
+                                    "Skipping controller owner reference with mismatched name"
+                                );
+                                continue;
+                            }
+                            if !Self::owner_reference_scope_is_valid(
+                                item.meta().namespace.as_deref(),
+                                actual_owner_namespace.as_deref(),
+                            ) {
+                                warn!(
+                                    dependent_uid = %item_uid,
+                                    dependent_namespace =
+                                        item.meta().namespace.as_deref().unwrap_or(""),
+                                    owner_uid = owner.uid,
+                                    owner_namespace =
+                                        actual_owner_namespace.as_deref().unwrap_or(""),
+                                    "Skipping controller owner reference with invalid namespace scope"
+                                );
+                                continue;
+                            }
+
                             cluster_state.add_edge(
                                 owner.uid.as_ref(),
-                                owner_resource_type,
+                                actual_owner_type,
                                 item_uid.as_ref(),
                                 resource_type.clone(),
                                 Edge::Manages,
@@ -103,6 +163,17 @@ impl ClusterStateResolver {
                     }
                 }
             }
+        }
+    }
+
+    pub(super) fn owner_reference_scope_is_valid(
+        dependent_namespace: Option<&str>,
+        owner_namespace: Option<&str>,
+    ) -> bool {
+        match (dependent_namespace, owner_namespace) {
+            (Some(dependent), Some(owner)) => dependent == owner,
+            (Some(_), None) | (None, None) => true,
+            (None, Some(_)) => false,
         }
     }
 
