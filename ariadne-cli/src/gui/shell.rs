@@ -1,4 +1,13 @@
-use super::*;
+//! eframe shell for arranging panels and dispatching user interactions.
+//!
+//! The shell may call controller methods but must not duplicate query,
+//! context-selection, or result-classification policy.
+
+use super::{
+    Align, Color32, CornerRadius, Frame, GRAPH_PULSE_HEIGHT, GuiApp, InspectorValue, Layout,
+    Margin, RichText, RowCard, SHORT_TERM_CONTEXT_LIMIT, ScrollArea, Stroke, TextEdit, TextStyle,
+    Vec2, egui, estimate_context_tokens, format_duration, render_feed_item, render_graph_pulse,
+};
 
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

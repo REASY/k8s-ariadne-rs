@@ -1,3 +1,8 @@
+//! Loss-aware conversion from Memgraph Bolt values into JSON query results.
+//!
+//! Temporal, spatial, graph, and numeric values must either preserve their
+//! information in JSON or return an error; conversions must never panic.
+
 use super::MemgraphError;
 use crate::prelude::*;
 use rsmgclient::Record;

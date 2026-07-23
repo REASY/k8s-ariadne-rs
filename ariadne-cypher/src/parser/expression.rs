@@ -1,4 +1,15 @@
-use super::*;
+//! Translation of tree-sitter expression nodes into the typed Cypher AST.
+//!
+//! Parsing must retain source spans and reject unsupported tree shapes rather
+//! than silently manufacturing an expression.
+
+use super::{
+    named_children, node_text, parse_identifier, parse_label, parse_parameter, parse_pattern,
+    parse_where, unescape_string,
+};
+use crate::CypherError;
+use crate::ast::{BinaryOp, Expr, Literal, QuantifierKind, Span, UnaryOp};
+use tree_sitter::Node;
 
 pub(super) fn parse_expression(node: Node, input: &str) -> Result<Expr, CypherError> {
     match node.kind() {

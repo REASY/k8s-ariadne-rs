@@ -1,4 +1,22 @@
-use super::*;
+//! Read-only Kubernetes client backed by an exported snapshot directory.
+//!
+//! Construction eagerly validates and loads the snapshot so trait methods can
+//! return stable, immutable resource collections without filesystem I/O.
+
+use super::{
+    Arc, BTreeSet, Cluster, ConfigMap, DaemonSet, Deployment, EndpointSlice, Event, Info, Ingress,
+    Job, KubeClient, Mutex, Namespace, NetworkPolicy, Node, PersistentVolume,
+    PersistentVolumeClaim, Pod, ReplicaSet, Result, SNAPSHOT_CLUSTER_FILE,
+    SNAPSHOT_CONFIG_MAPS_FILE, SNAPSHOT_DAEMON_SETS_FILE, SNAPSHOT_DEPLOYMENTS_FILE,
+    SNAPSHOT_ENDPOINT_SLICES_FILE, SNAPSHOT_EVENTS_FILE, SNAPSHOT_INGRESSES_FILE,
+    SNAPSHOT_JOBS_FILE, SNAPSHOT_NAMESPACES_FILE, SNAPSHOT_NETWORK_POLICIES_FILE,
+    SNAPSHOT_NODES_FILE, SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE, SNAPSHOT_PERSISTENT_VOLUMES_FILE,
+    SNAPSHOT_PODS_FILE, SNAPSHOT_REPLICA_SETS_FILE, SNAPSHOT_SERVICE_ACCOUNTS_FILE,
+    SNAPSHOT_SERVICES_FILE, SNAPSHOT_STATEFUL_SETS_FILE, SNAPSHOT_STORAGE_CLASSES_FILE, Service,
+    ServiceAccount, StatefulSet, StorageClass, read_json_from_dir, read_list_from_dir,
+};
+use async_trait::async_trait;
+use std::path::Path;
 
 pub struct SnapshotKubeClient {
     cluster: Cluster,

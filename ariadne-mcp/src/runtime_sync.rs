@@ -1,4 +1,29 @@
-use super::*;
+//! Live source-sync and full-rebuild runtime loops plus their metrics.
+//!
+//! Health timestamps and metrics describe the same attempt, and cancellation
+//! must leave each loop marked as no longer alive.
+
+use super::{
+    SOURCE_SYNC_ATTEMPT_DURATION_MS, SOURCE_SYNC_ATTEMPTS_TOTAL, SOURCE_SYNC_DIFF_DURATION_MS,
+    SOURCE_SYNC_FETCH_DURATION_MS, SOURCE_SYNC_LAST_ATTEMPT_DURATION_MS,
+    SOURCE_SYNC_LAST_DIFF_DURATION_MS, SOURCE_SYNC_LAST_FETCH_DURATION_MS,
+    SOURCE_SYNC_LAST_WRITE_DURATION_MS, SOURCE_SYNC_METRICS_INIT, SOURCE_SYNC_WRITE_DURATION_MS,
+    duration_ms, duration_ms_f64, sum_durations,
+};
+use ariadne_core::graph_backend::GraphBackend;
+use ariadne_core::state_resolver::{
+    ClusterStateResolver, RebuildStage, SourceSyncStage, StateDiffSummary,
+};
+use ariadne_mcp::errors;
+use ariadne_mcp::health::{DiffSummary, HealthError, RebuildHealth, SyncHealth};
+use metrics::{
+    Unit, counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram,
+};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 pub(super) fn describe_source_sync_metrics() {
     SOURCE_SYNC_METRICS_INIT.call_once(|| {

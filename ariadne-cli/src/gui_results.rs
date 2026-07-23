@@ -1,3 +1,8 @@
+//! Pure conversion of backend records into GUI result and inspector models.
+//!
+//! These functions must not mutate frontend state or depend on a rendering
+//! framework so both desktop implementations classify results identically.
+
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};

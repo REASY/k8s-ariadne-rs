@@ -1,4 +1,15 @@
-use super::*;
+//! Projection, aggregation, ordering, distinct, and pagination operations.
+//!
+//! Projection labels and ordering semantics are shared by `WITH` and `RETURN`
+//! and must remain deterministic for equivalent input rows.
+
+use super::{
+    ClusterState, Expr, OrderBy, ProjectionItem, QueryStats, Result, Row, Value, eval_expr,
+    literal_to_value, value_to_string,
+};
+use serde_json::Map;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 
 pub(super) fn project_rows_internal(
     rows: Vec<Row>,

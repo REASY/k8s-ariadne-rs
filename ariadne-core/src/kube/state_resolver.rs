@@ -1,6 +1,5 @@
 use crate::prelude::*;
 
-use crate::create_generic_object;
 use crate::graph_backend::GraphBackend;
 use crate::kube_client::{CachedKubeClient, KubeClient};
 use crate::snapshot::{
@@ -41,8 +40,10 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace, warn};
 
-#[path = "state_resolver/graph_builder.rs"]
-mod graph_builder;
+#[path = "state_resolver/nodes.rs"]
+mod nodes;
+#[path = "state_resolver/relationships.rs"]
+mod relationships;
 
 type IngressDerived = (Vec<Arc<Host>>, Vec<Arc<IngressServiceBackend>>);
 type EndpointSliceDerived = (Vec<Arc<Endpoint>>, Vec<Arc<EndpointAddress>>);

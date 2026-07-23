@@ -1,3 +1,8 @@
+//! Data model shared by the egui and Dioxus frontends.
+//!
+//! Types here must remain framework-neutral: no renderer handles, signals, or
+//! event-loop state belong in this module.
+
 use std::collections::HashMap;
 
 use serde_json::Value;

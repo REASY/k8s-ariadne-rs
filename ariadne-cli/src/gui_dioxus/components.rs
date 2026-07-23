@@ -1,4 +1,16 @@
-use super::*;
+//! Stateless Dioxus components for feed cards, result tables, and inspection.
+//!
+//! Components emit actions through the parent adapter; query policy and state
+//! transitions remain outside the rendering layer.
+
+use super::{
+    AppContext, FeedItem, FeedState, InspectorState, InspectorValue, ResultPayload, RowCard,
+    build_header_defs, format_duration, highlight_cypher_spans, open_inspector_from_row,
+    rerun_cypher, sort_rows, table_spec, toggle_table_sort, update_shared,
+};
+use crate::gui_results::{find_field, format_value};
+use dioxus::prelude::*;
+use serde_json::{Map, Value};
 
 pub(super) fn render_feed_card(item: &FeedItem, context: &AppContext) -> Element {
     let item = item.clone();

@@ -1,4 +1,27 @@
-use super::*;
+//! Reflector-backed Kubernetes client for continuously refreshed live state.
+//!
+//! Denied resource kinds remain absent and are recorded as degraded coverage;
+//! allowed stores must become ready before their contents are returned.
+
+use super::{
+    AccessChecker, Api, Arc, BTreeSet, Client, Config, ConfigMap, DaemonSet, Deployment,
+    EndpointSlice, Event, Info, Ingress, Job, JoinHandle, KubeClient, KubeConfigOptions, Mutex,
+    Namespace, NetworkPolicy, Node, PersistentVolume, PersistentVolumeClaim, Pod,
+    RESOURCE_CONFIG_MAP, RESOURCE_DAEMON_SET, RESOURCE_DEPLOYMENT, RESOURCE_ENDPOINT_SLICE,
+    RESOURCE_EVENT, RESOURCE_INGRESS, RESOURCE_JOB, RESOURCE_NAMESPACE, RESOURCE_NETWORK_POLICY,
+    RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME, RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD,
+    RESOURCE_REPLICA_SET, RESOURCE_SERVICE, RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET,
+    RESOURCE_STORAGE_CLASS, ReplicaSet, Resource, Result, STORE_READY_TIMEOUT_SECONDS, Service,
+    ServiceAccount, StatefulSet, StorageClass, Store, install_rustls_provider,
+    make_store_and_watch,
+};
+use async_trait::async_trait;
+use serde::de::DeserializeOwned;
+use std::fmt::Debug;
+use std::future::Future;
+use std::time::Duration;
+use tokio::time::timeout;
+use tracing::{info, warn};
 
 pub struct CachedKubeClient {
     config: Config,

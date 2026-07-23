@@ -1,4 +1,11 @@
-use super::*;
+//! Graph-pulse summary renderer.
+//!
+//! This nested module owns only the compact metric strip and its sparklines.
+
+use crate::gui::{
+    Align, ClusterMeta, Color32, CornerRadius, Frame, Layout, Margin, Palette, RichText, Stroke,
+    Vec2, egui, format_count, truncate_text,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_graph_pulse(

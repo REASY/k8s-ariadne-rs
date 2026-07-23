@@ -3,13 +3,9 @@ use ariadne_core::graph_backend::GraphBackend;
 use ariadne_core::in_memory::InMemoryBackend;
 use ariadne_core::kube_client::SnapshotKubeClient;
 use ariadne_core::memgraph_async::MemgraphAsync;
-use ariadne_core::state_resolver::{
-    ClusterStateResolver, RebuildStage, SourceSyncStage, StateDiffSummary,
-    configured_source_sync_poll_interval,
-};
+use ariadne_core::state_resolver::{ClusterStateResolver, configured_source_sync_poll_interval};
 use ariadne_mcp::health::{
-    DiffSummary, GraphScope, HealthError, RebuildHealth, SharedCoverage, SnapshotManifest,
-    SyncHealth, format_timestamp, now,
+    GraphScope, RebuildHealth, SharedCoverage, SnapshotManifest, SyncHealth, format_timestamp, now,
 };
 use ariadne_mcp::{
     APP_VERSION, errors, logger, read_snapshot_manifest, routes, write_snapshot_manifest,
@@ -22,17 +18,13 @@ use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use clap::{Parser, Subcommand};
 use kube::config::KubeConfigOptions;
-use metrics::{
-    Unit, counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram,
-};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, Once};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::signal;
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;

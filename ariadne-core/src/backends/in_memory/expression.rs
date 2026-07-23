@@ -1,4 +1,15 @@
-use super::*;
+//! Cypher scalar-expression evaluation for the in-memory backend.
+//!
+//! Evaluation is side-effect free apart from query statistics and must produce
+//! the same JSON value semantics used by projection and matching.
+
+use super::{
+    ClusterState, Expr, Literal, QueryStats, Result, Row, Value, compare_values, eval_exists,
+    eval_list_slice,
+};
+use serde_json::Map;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 
 pub(super) fn eval_bool(
     expr: &Expr,

@@ -26,6 +26,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy, rustfmt
+      - name: Report Rust source health
+        run: bash scripts/rust-source-report.sh
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets --all-features
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings

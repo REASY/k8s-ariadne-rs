@@ -1,4 +1,16 @@
-use super::*;
+//! Pattern matching and existential checks for the in-memory Cypher engine.
+//!
+//! Every returned row is compatible with its input bindings; matching must not
+//! overwrite a non-null binding with a different graph value.
+
+use super::{
+    ClusterState, Edge, Expr, GenericObject, MatchClause, PathPattern, Pattern, QueryStats,
+    RelationshipDirection, RelationshipPattern, ResourceType, Result, Row, Value, eval_bool,
+    node_to_value,
+};
+use serde_json::Map;
+use std::collections::{HashMap, HashSet};
+use strum::IntoEnumIterator;
 
 pub(super) fn apply_match(
     rows: Vec<Row>,

@@ -32,12 +32,8 @@ use kube::runtime::{WatchStreamExt, reflector, watcher};
 use kube::{Api, Client, Config, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
-use std::future::Future;
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
 use tracing::{info, warn};
 
 use crate::kube_access::{

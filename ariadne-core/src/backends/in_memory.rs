@@ -9,12 +9,10 @@ use ariadne_cypher::{
 };
 use k8s_openapi::Metadata;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use serde_json::{Map, Value};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
-use strum::IntoEnumIterator;
 
 #[path = "in_memory/expression.rs"]
 mod expression;

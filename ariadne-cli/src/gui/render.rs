@@ -1,4 +1,14 @@
-use super::*;
+//! Stateless egui rendering for feed cards, results, analysis, and graphs.
+//!
+//! Renderers communicate actions through callbacks and never schedule backend
+//! or LLM work directly.
+
+use super::{
+    Align, Align2, Color32, Column, CornerRadius, FeedItem, FeedState, FontFamily, FontId, Frame,
+    GraphEdge, GraphNode, Layout, LayoutJob, Map, Margin, Palette, ResultPayload, RichText,
+    RowCard, ScrollArea, Stroke, TableBuilder, TextEdit, TextFormat, TextStyle, Value, Vec2, egui,
+    find_field, format_duration, format_value, lighten_color,
+};
 
 #[path = "render/pulse.rs"]
 mod pulse;

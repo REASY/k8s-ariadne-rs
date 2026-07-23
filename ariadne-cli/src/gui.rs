@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
@@ -12,26 +11,25 @@ use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
-use ariadne_core::cypher_validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
-use ariadne_core::query_issue::classify_ariadne_error;
 use ariadne_core::state::SharedClusterState;
 use ariadne_core::types::ResourceType;
 
-use crate::agent::{
-    Agentic, AnalysisResult, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
-};
+use crate::agent::{Agentic, Analyst, ConversationTurn, LlmUsage, Router, Translator};
 use crate::error::CliResult;
+use crate::gui_context::{
+    COMPACT_CONTEXT_LIMIT, SHORT_TERM_CONTEXT_LIMIT, build_context as select_context,
+    build_context_with_budget as select_context_with_budget, filter_suggestions,
+};
 use crate::gui_results::{
-    build_suggestions, classify_result, current_token, estimate_property_count,
-    extract_context_bindings, find_field, format_count, format_value, inspector_value,
-    merge_params, replace_last_token, summarize_records, truncate_text,
+    build_suggestions, estimate_property_count, find_field, format_count, format_value,
+    inspector_value, replace_last_token, truncate_text,
 };
 use crate::gui_shared::{
     FeedItem, FeedState, GraphEdge, GraphNode, InspectorProperty, InspectorState, InspectorValue,
-    ResultPayload, RowCard, UsageAccumulator, estimate_context_tokens, estimate_text_tokens,
-    estimate_turn_tokens, format_duration, log_llm_call,
+    ResultPayload, RowCard, estimate_context_tokens, format_duration,
 };
+use crate::gui_workflow::FeedPatch;
 
 #[path = "gui/render.rs"]
 mod render;
@@ -41,12 +39,7 @@ mod controller;
 #[path = "gui/shell.rs"]
 mod shell;
 
-const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
-const COMPACT_CONTEXT_LIMIT: usize = 12;
-const CONTEXT_RESERVED_TOKENS: usize = 2048;
-const CONTEXT_MIN_TOKENS: usize = 512;
 const GRAPH_PULSE_HEIGHT: f32 = 40.0;
-const LLM_MAX_RETRIES: usize = 1;
 
 pub struct GuiArgs {
     pub runtime_handle: tokio::runtime::Handle,
@@ -237,59 +230,9 @@ fn setup_style(ctx: &egui::Context, palette: &Palette) {
 }
 
 enum AppEvent {
-    RouteDecided {
+    FeedPatch {
         id: u64,
-        route: RouteDecision,
-        steps: Option<usize>,
-    },
-    TranslationStarted {
-        id: u64,
-    },
-    TranslationCompleted {
-        id: u64,
-        cypher: String,
-        params: Option<HashMap<String, Value>>,
-        usage: Option<LlmUsage>,
-        duration_ms: u128,
-    },
-    TranslationFailed {
-        id: u64,
-        error: String,
-    },
-    ValidationFailed {
-        id: u64,
-        error: String,
-        cypher: String,
-    },
-    QueryStarted {
-        id: u64,
-        cypher: String,
-        params: Option<HashMap<String, Value>>,
-    },
-    QueryCompleted {
-        id: u64,
-        cypher: String,
-        records: Vec<Value>,
-        duration_ms: u128,
-    },
-    QueryFailed {
-        id: u64,
-        error: String,
-        cypher: String,
-        duration_ms: u128,
-    },
-    AnalysisStarted {
-        id: u64,
-    },
-    AnalysisCompleted {
-        id: u64,
-        analysis: AnalysisResult,
-        duration_ms: u128,
-    },
-    AnalysisFailed {
-        id: u64,
-        error: String,
-        duration_ms: u128,
+        patch: FeedPatch,
     },
     ContextCompactionStarted,
     ContextCompactionCompleted {
@@ -352,7 +295,7 @@ mod tests {
 
     #[test]
     fn current_token_picks_last_word() {
-        assert_eq!(current_token("MATCH (p:Pod"), "Pod");
+        assert_eq!(crate::gui_results::current_token("MATCH (p:Pod"), "Pod");
     }
 
     #[test]

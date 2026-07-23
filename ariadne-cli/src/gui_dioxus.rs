@@ -2,29 +2,27 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use dioxus::prelude::*;
-use serde_json::{Map, Value};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
-use ariadne_core::cypher_validation::validate_cypher;
 use ariadne_core::graph_backend::GraphBackend;
-use ariadne_core::query_issue::classify_ariadne_error;
 use ariadne_core::state::SharedClusterState;
 use ariadne_core::types::ResourceType;
 
-use crate::agent::{
-    Agentic, Analyst, ConversationTurn, LlmUsage, RouteDecision, Router, Translator,
-};
+use crate::agent::{Agentic, Analyst, ConversationTurn, LlmUsage, Router, Translator};
 use crate::error::CliResult;
+use crate::gui_context::{
+    COMPACT_CONTEXT_LIMIT, SHORT_TERM_CONTEXT_LIMIT, build_context as select_context,
+    build_context_with_budget as select_context_with_budget, context_budget_tokens,
+    filter_suggestions,
+};
 use crate::gui_results::{
-    build_suggestions, classify_result, current_token, estimate_property_count,
-    extract_context_bindings, find_field, format_count, format_value, inspector_value,
-    merge_params, replace_last_token, summarize_records,
+    build_suggestions, estimate_property_count, find_field, format_count, inspector_value,
+    replace_last_token,
 };
 use crate::gui_shared::{
     FeedItem, FeedState, InspectorProperty, InspectorState, InspectorValue, ResultPayload, RowCard,
-    UsageAccumulator, estimate_context_tokens, estimate_text_tokens, estimate_turn_tokens,
-    format_duration, log_llm_call,
+    estimate_context_tokens, format_duration,
 };
 
 #[path = "gui_dioxus/components.rs"]
@@ -35,12 +33,6 @@ mod workflow;
 use workflow::{
     open_inspector_from_row, rerun_cypher, reset_context, start_context_compaction, submit_question,
 };
-
-const SHORT_TERM_CONTEXT_LIMIT: usize = 4;
-const COMPACT_CONTEXT_LIMIT: usize = 12;
-const CONTEXT_RESERVED_TOKENS: usize = 2048;
-const CONTEXT_MIN_TOKENS: usize = 512;
-const LLM_MAX_RETRIES: usize = 1;
 
 const APP_CSS: &str = include_str!("gui_dioxus/style.css");
 
@@ -397,77 +389,16 @@ fn build_context_with_budget_shared(
     shared: &SharedState,
     context_window_tokens: Option<usize>,
 ) -> Vec<ConversationTurn> {
-    let Some(budget) = context_budget_tokens(context_window_tokens) else {
-        return build_context(shared, SHORT_TERM_CONTEXT_LIMIT);
-    };
-
-    let summary_tokens = shared
-        .context_compact_summary
-        .as_deref()
-        .map(estimate_text_tokens)
-        .unwrap_or(0);
-    let mut remaining = budget.saturating_sub(summary_tokens);
-    let mut turns = Vec::new();
-
-    for item in shared.feed.iter().rev() {
-        if item.id < shared.context_cutoff_id {
-            continue;
-        }
-        if !matches!(item.state, FeedState::Ready) {
-            continue;
-        }
-        let Some(cypher) = &item.cypher else {
-            continue;
-        };
-        let turn = ConversationTurn {
-            question: item.user_text.clone(),
-            cypher: cypher.clone(),
-            result_summary: item.context_summary.clone(),
-            bindings: item.context_bindings.clone(),
-        };
-        let turn_tokens = estimate_turn_tokens(&turn);
-        if turn_tokens > remaining && !turns.is_empty() {
-            break;
-        }
-        if turn_tokens <= remaining || turns.is_empty() {
-            remaining = remaining.saturating_sub(turn_tokens);
-            turns.push(turn);
-        }
-    }
-    turns.reverse();
-    turns
+    select_context_with_budget(
+        &shared.feed,
+        shared.context_cutoff_id,
+        shared.context_compact_summary.as_deref(),
+        context_window_tokens,
+    )
 }
 
 fn build_context(shared: &SharedState, limit: usize) -> Vec<ConversationTurn> {
-    let mut turns = Vec::new();
-    for item in shared.feed.iter().rev() {
-        if turns.len() >= limit {
-            break;
-        }
-        if item.id < shared.context_cutoff_id {
-            continue;
-        }
-        if !matches!(item.state, FeedState::Ready) {
-            continue;
-        }
-        let Some(cypher) = &item.cypher else {
-            continue;
-        };
-        turns.push(ConversationTurn {
-            question: item.user_text.clone(),
-            cypher: cypher.clone(),
-            result_summary: item.context_summary.clone(),
-            bindings: item.context_bindings.clone(),
-        });
-    }
-    turns.reverse();
-    turns
-}
-
-fn context_budget_tokens(context_window_tokens: Option<usize>) -> Option<usize> {
-    let total = context_window_tokens?;
-    let budget = total.saturating_sub(CONTEXT_RESERVED_TOKENS);
-    Some(budget.max(CONTEXT_MIN_TOKENS).min(total))
+    select_context(&shared.feed, shared.context_cutoff_id, limit)
 }
 
 #[derive(Default, Clone)]
@@ -493,20 +424,6 @@ fn cluster_counts(state: &SharedClusterState) -> ClusterCounts {
         service_count,
         namespace_count,
     }
-}
-
-fn filter_suggestions(input: &str, suggestions: &[String]) -> Vec<String> {
-    let token = current_token(input);
-    if token.is_empty() {
-        return Vec::new();
-    }
-    let token_lower = token.to_lowercase();
-    suggestions
-        .iter()
-        .filter(|suggestion| suggestion.to_lowercase().starts_with(&token_lower))
-        .take(6)
-        .cloned()
-        .collect()
 }
 
 fn table_spec(rows: &[RowCard]) -> TableSpec {
