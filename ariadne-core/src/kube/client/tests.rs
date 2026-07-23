@@ -583,3 +583,48 @@ async fn snapshot_kube_client_from_dir_loads_state_and_has_shared_degraded_handl
             .is_empty()
     );
 }
+
+#[test]
+fn snapshot_kube_client_rejects_resource_without_required_metadata() {
+    let dir = TempDir::new("snapshot_missing_resource_metadata")
+        .expect("temp dir creation should succeed");
+    write_snapshot_fixture(dir.path());
+    let malformed_pods = vec![Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some("missing-uid".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })];
+    write_list_to_dir(dir.path(), SNAPSHOT_PODS_FILE, &malformed_pods)
+        .expect("write malformed pods");
+
+    let err = SnapshotKubeClient::from_dir(dir.path())
+        .err()
+        .expect("missing Pod UID must be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("Pod snapshot entry 0 is missing non-empty metadata.uid")
+    );
+}
+
+#[test]
+fn snapshot_kube_client_rejects_cluster_without_required_metadata() {
+    let dir = TempDir::new("snapshot_missing_cluster_metadata")
+        .expect("temp dir creation should succeed");
+    write_snapshot_fixture(dir.path());
+    let mut malformed_cluster = test_cluster("test-cluster");
+    malformed_cluster.metadata.name = None;
+    write_json_to_dir(dir.path(), SNAPSHOT_CLUSTER_FILE, &malformed_cluster)
+        .expect("write malformed cluster");
+
+    let err = SnapshotKubeClient::from_dir(dir.path())
+        .err()
+        .expect("missing Cluster name must be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("Cluster snapshot is missing non-empty metadata.name")
+    );
+}

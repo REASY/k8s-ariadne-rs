@@ -16,6 +16,7 @@ use super::{
     ServiceAccount, StatefulSet, StorageClass, read_json_from_dir, read_list_from_dir,
 };
 use async_trait::async_trait;
+use kube::Resource;
 use std::path::Path;
 
 pub struct SnapshotKubeClient {
@@ -45,32 +46,112 @@ impl SnapshotKubeClient {
     pub fn from_dir(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         let cluster: Cluster = read_json_from_dir(dir, SNAPSHOT_CLUSTER_FILE)?;
+        validate_cluster_metadata(&cluster)?;
+        let namespaces = read_list_from_dir(dir, SNAPSHOT_NAMESPACES_FILE)?;
+        let pods = read_list_from_dir(dir, SNAPSHOT_PODS_FILE)?;
+        let deployments = read_list_from_dir(dir, SNAPSHOT_DEPLOYMENTS_FILE)?;
+        let stateful_sets = read_list_from_dir(dir, SNAPSHOT_STATEFUL_SETS_FILE)?;
+        let replica_sets = read_list_from_dir(dir, SNAPSHOT_REPLICA_SETS_FILE)?;
+        let daemon_sets = read_list_from_dir(dir, SNAPSHOT_DAEMON_SETS_FILE)?;
+        let jobs = read_list_from_dir(dir, SNAPSHOT_JOBS_FILE)?;
+        let ingresses = read_list_from_dir(dir, SNAPSHOT_INGRESSES_FILE)?;
+        let services = read_list_from_dir(dir, SNAPSHOT_SERVICES_FILE)?;
+        let endpoint_slices = read_list_from_dir(dir, SNAPSHOT_ENDPOINT_SLICES_FILE)?;
+        let network_policies = read_list_from_dir(dir, SNAPSHOT_NETWORK_POLICIES_FILE)?;
+        let config_maps = read_list_from_dir(dir, SNAPSHOT_CONFIG_MAPS_FILE)?;
+        let storage_classes = read_list_from_dir(dir, SNAPSHOT_STORAGE_CLASSES_FILE)?;
+        let persistent_volumes = read_list_from_dir(dir, SNAPSHOT_PERSISTENT_VOLUMES_FILE)?;
+        let persistent_volume_claims =
+            read_list_from_dir(dir, SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE)?;
+        let nodes = read_list_from_dir(dir, SNAPSHOT_NODES_FILE)?;
+        let service_accounts = read_list_from_dir(dir, SNAPSHOT_SERVICE_ACCOUNTS_FILE)?;
+        let events = read_list_from_dir(dir, SNAPSHOT_EVENTS_FILE)?;
+
+        validate_resource_metadata("Namespace", &namespaces)?;
+        validate_resource_metadata("Pod", &pods)?;
+        validate_resource_metadata("Deployment", &deployments)?;
+        validate_resource_metadata("StatefulSet", &stateful_sets)?;
+        validate_resource_metadata("ReplicaSet", &replica_sets)?;
+        validate_resource_metadata("DaemonSet", &daemon_sets)?;
+        validate_resource_metadata("Job", &jobs)?;
+        validate_resource_metadata("Ingress", &ingresses)?;
+        validate_resource_metadata("Service", &services)?;
+        validate_resource_metadata("EndpointSlice", &endpoint_slices)?;
+        validate_resource_metadata("NetworkPolicy", &network_policies)?;
+        validate_resource_metadata("ConfigMap", &config_maps)?;
+        validate_resource_metadata("StorageClass", &storage_classes)?;
+        validate_resource_metadata("PersistentVolume", &persistent_volumes)?;
+        validate_resource_metadata("PersistentVolumeClaim", &persistent_volume_claims)?;
+        validate_resource_metadata("Node", &nodes)?;
+        validate_resource_metadata("ServiceAccount", &service_accounts)?;
+        validate_resource_metadata("Event", &events)?;
+
         Ok(SnapshotKubeClient {
             cluster,
             degraded_resource_kinds: Arc::new(Mutex::new(BTreeSet::new())),
-            namespaces: read_list_from_dir(dir, SNAPSHOT_NAMESPACES_FILE)?,
-            pods: read_list_from_dir(dir, SNAPSHOT_PODS_FILE)?,
-            deployments: read_list_from_dir(dir, SNAPSHOT_DEPLOYMENTS_FILE)?,
-            stateful_sets: read_list_from_dir(dir, SNAPSHOT_STATEFUL_SETS_FILE)?,
-            replica_sets: read_list_from_dir(dir, SNAPSHOT_REPLICA_SETS_FILE)?,
-            daemon_sets: read_list_from_dir(dir, SNAPSHOT_DAEMON_SETS_FILE)?,
-            jobs: read_list_from_dir(dir, SNAPSHOT_JOBS_FILE)?,
-            ingresses: read_list_from_dir(dir, SNAPSHOT_INGRESSES_FILE)?,
-            services: read_list_from_dir(dir, SNAPSHOT_SERVICES_FILE)?,
-            endpoint_slices: read_list_from_dir(dir, SNAPSHOT_ENDPOINT_SLICES_FILE)?,
-            network_policies: read_list_from_dir(dir, SNAPSHOT_NETWORK_POLICIES_FILE)?,
-            config_maps: read_list_from_dir(dir, SNAPSHOT_CONFIG_MAPS_FILE)?,
-            storage_classes: read_list_from_dir(dir, SNAPSHOT_STORAGE_CLASSES_FILE)?,
-            persistent_volumes: read_list_from_dir(dir, SNAPSHOT_PERSISTENT_VOLUMES_FILE)?,
-            persistent_volume_claims: read_list_from_dir(
-                dir,
-                SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE,
-            )?,
-            nodes: read_list_from_dir(dir, SNAPSHOT_NODES_FILE)?,
-            service_accounts: read_list_from_dir(dir, SNAPSHOT_SERVICE_ACCOUNTS_FILE)?,
-            events: read_list_from_dir(dir, SNAPSHOT_EVENTS_FILE)?,
+            namespaces,
+            pods,
+            deployments,
+            stateful_sets,
+            replica_sets,
+            daemon_sets,
+            jobs,
+            ingresses,
+            services,
+            endpoint_slices,
+            network_policies,
+            config_maps,
+            storage_classes,
+            persistent_volumes,
+            persistent_volume_claims,
+            nodes,
+            service_accounts,
+            events,
         })
     }
+}
+
+fn validate_cluster_metadata(cluster: &Cluster) -> Result<()> {
+    validate_metadata_values(
+        "Cluster",
+        None,
+        cluster.metadata.name.as_deref(),
+        cluster.metadata.uid.as_deref(),
+    )
+}
+
+fn validate_resource_metadata<T: Resource>(kind: &str, resources: &[Arc<T>]) -> Result<()> {
+    for (index, resource) in resources.iter().enumerate() {
+        let metadata = resource.meta();
+        validate_metadata_values(
+            kind,
+            Some(index),
+            metadata.name.as_deref(),
+            metadata.uid.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_metadata_values(
+    kind: &str,
+    index: Option<usize>,
+    name: Option<&str>,
+    uid: Option<&str>,
+) -> Result<()> {
+    let location = index
+        .map(|index| format!(" entry {index}"))
+        .unwrap_or_default();
+    for (field, value) in [("name", name), ("uid", uid)] {
+        if value.is_none_or(str::is_empty) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{kind} snapshot{location} is missing non-empty metadata.{field}"),
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 #[async_trait]
