@@ -1,3 +1,4 @@
+use futures::{StreamExt, stream};
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
@@ -142,6 +143,18 @@ impl AccessChecker {
         AccessDecision::Denied
     }
 
+    pub(crate) async fn can_read_all(
+        &self,
+        descriptors: &[ResourceDescriptor],
+        max_concurrent: usize,
+    ) -> Vec<(AccessDecision, &'static str)> {
+        stream::iter(descriptors.iter().copied())
+            .map(|descriptor| async move { (self.can_read(descriptor).await, descriptor.kind) })
+            .buffered(max_concurrent.max(1))
+            .collect()
+            .await
+    }
+
     async fn check(
         &self,
         descriptor: ResourceDescriptor,
@@ -228,7 +241,9 @@ mod tests {
     use kube::client::Body;
     use serde_json::json;
     use std::convert::Infallible;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
     use tower::service_fn;
 
     fn ssar_response(allowed: bool) -> Response<Body> {
@@ -305,6 +320,51 @@ mod tests {
             assert_eq!(attrs["group"], "storage.k8s.io");
             assert!(attrs["namespace"].is_null());
         }
+    }
+
+    #[tokio::test]
+    async fn can_read_all_limits_concurrency_and_preserves_descriptor_order() {
+        struct ActiveRequest(Arc<AtomicUsize>);
+
+        impl Drop for ActiveRequest {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let service = service_fn({
+            let active = active.clone();
+            let max_active = max_active.clone();
+            move |_request: Request<Body>| {
+                let active = active.clone();
+                let max_active = max_active.clone();
+                async move {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(current, Ordering::SeqCst);
+                    let _active_request = ActiveRequest(active);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Ok::<_, Infallible>(ssar_response(true))
+                }
+            }
+        });
+        let checker = AccessChecker::new(Client::new(service, "default"), Some("team-a"));
+
+        let decisions = checker
+            .can_read_all(&[RESOURCE_POD, RESOURCE_SERVICE, RESOURCE_NODE], 2)
+            .await;
+
+        assert_eq!(
+            decisions,
+            vec![
+                (AccessDecision::Allowed, "Pod"),
+                (AccessDecision::Allowed, "Service"),
+                (AccessDecision::Allowed, "Node"),
+            ]
+        );
+        assert_eq!(max_active.load(Ordering::SeqCst), 2);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

@@ -14,9 +14,9 @@ use super::{
     RESOURCE_NETWORK_POLICY, RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME,
     RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
     RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS, ReplicaSet, Resource,
-    Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet, StorageClass, Store,
-    WatchHealth, event_api, install_rustls_provider, load_kube_config, make_store_and_watch,
-    watcher,
+    ResourceDescriptor, Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet,
+    StorageClass, Store, WatchHealth, event_api, install_rustls_provider, load_kube_config,
+    make_store_and_watch, watcher,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -25,6 +25,28 @@ use std::future::Future;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::warn;
+
+const ACCESS_CHECK_CONCURRENCY: usize = 6;
+const WATCHED_RESOURCE_DESCRIPTORS: [ResourceDescriptor; 18] = [
+    RESOURCE_NAMESPACE,
+    RESOURCE_POD,
+    RESOURCE_DEPLOYMENT,
+    RESOURCE_STATEFUL_SET,
+    RESOURCE_REPLICA_SET,
+    RESOURCE_DAEMON_SET,
+    RESOURCE_JOB,
+    RESOURCE_INGRESS,
+    RESOURCE_SERVICE,
+    RESOURCE_ENDPOINT_SLICE,
+    RESOURCE_NETWORK_POLICY,
+    RESOURCE_CONFIG_MAP,
+    RESOURCE_STORAGE_CLASS,
+    RESOURCE_PERSISTENT_VOLUME,
+    RESOURCE_PERSISTENT_VOLUME_CLAIM,
+    RESOURCE_NODE,
+    RESOURCE_SERVICE_ACCOUNT,
+    RESOURCE_EVENT,
+];
 
 pub struct CachedKubeClient {
     config: Config,
@@ -413,49 +435,10 @@ impl CachedKubeClient {
         let access = AccessChecker::new(client.clone(), maybe_ns);
         let watch_health = WatchHealth::new();
 
-        let namespace_allowed = access.can_read(RESOURCE_NAMESPACE).await;
-        let pod_allowed = access.can_read(RESOURCE_POD).await;
-        let deployment_allowed = access.can_read(RESOURCE_DEPLOYMENT).await;
-        let stateful_set_allowed = access.can_read(RESOURCE_STATEFUL_SET).await;
-        let replica_set_allowed = access.can_read(RESOURCE_REPLICA_SET).await;
-        let daemon_set_allowed = access.can_read(RESOURCE_DAEMON_SET).await;
-        let job_allowed = access.can_read(RESOURCE_JOB).await;
-        let ingress_allowed = access.can_read(RESOURCE_INGRESS).await;
-        let service_allowed = access.can_read(RESOURCE_SERVICE).await;
-        let endpoint_slice_allowed = access.can_read(RESOURCE_ENDPOINT_SLICE).await;
-        let network_policy_allowed = access.can_read(RESOURCE_NETWORK_POLICY).await;
-        let config_map_allowed = access.can_read(RESOURCE_CONFIG_MAP).await;
-        let storage_class_allowed = access.can_read(RESOURCE_STORAGE_CLASS).await;
-        let persistent_volume_allowed = access.can_read(RESOURCE_PERSISTENT_VOLUME).await;
-        let persistent_volume_claim_allowed =
-            access.can_read(RESOURCE_PERSISTENT_VOLUME_CLAIM).await;
-        let node_allowed = access.can_read(RESOURCE_NODE).await;
-        let service_account_allowed = access.can_read(RESOURCE_SERVICE_ACCOUNT).await;
-        let event_allowed = access.can_read(RESOURCE_EVENT).await;
-
-        update_degraded_resource_kinds(
-            &watch_health,
-            &[
-                (namespace_allowed, "Namespace"),
-                (pod_allowed, "Pod"),
-                (deployment_allowed, "Deployment"),
-                (stateful_set_allowed, "StatefulSet"),
-                (replica_set_allowed, "ReplicaSet"),
-                (daemon_set_allowed, "DaemonSet"),
-                (job_allowed, "Job"),
-                (ingress_allowed, "Ingress"),
-                (service_allowed, "Service"),
-                (endpoint_slice_allowed, "EndpointSlice"),
-                (network_policy_allowed, "NetworkPolicy"),
-                (config_map_allowed, "ConfigMap"),
-                (storage_class_allowed, "StorageClass"),
-                (persistent_volume_allowed, "PersistentVolume"),
-                (persistent_volume_claim_allowed, "PersistentVolumeClaim"),
-                (node_allowed, "Node"),
-                (service_account_allowed, "ServiceAccount"),
-                (event_allowed, "Event"),
-            ],
-        );
+        let access_decisions = access
+            .can_read_all(&WATCHED_RESOURCE_DESCRIPTORS, ACCESS_CHECK_CONCURRENCY)
+            .await;
+        update_degraded_resource_kinds(&watch_health, &access_decisions);
 
         let stores = StoreStarter {
             watch_health: watch_health.clone(),
