@@ -312,14 +312,7 @@ impl ClusterStateResolver {
         let fetch_started = Instant::now();
         let namespaces = client.get_namespaces().await?;
         let events: Vec<Arc<Event>> = client.get_events().await?;
-        let nodes = client.get_nodes().await.or_else(|_err| {
-            client
-                .degraded_resource_kinds_handle()
-                .lock()
-                .expect("degraded_resource_kinds lock poisoned")
-                .insert("Node".to_string());
-            Result::Ok(vec![])
-        })?;
+        let nodes = client.get_nodes().await?;
         let pods = client.get_pods().await?;
         let deployments = client.get_deployments().await?;
         let stateful_sets = client.get_stateful_sets().await?;
@@ -334,26 +327,9 @@ impl ClusterStateResolver {
 
         let config_maps = client.get_config_maps().await?;
 
-        let storage_classes = client.get_storage_classes().await.or_else(|_err| {
-            client
-                .degraded_resource_kinds_handle()
-                .lock()
-                .expect("degraded_resource_kinds lock poisoned")
-                .insert("StorageClass".to_string());
-            Result::Ok(vec![])
-        })?;
-        let persistent_volumes = client.get_persistent_volumes().await.or_else(|_err| {
-            client
-                .degraded_resource_kinds_handle()
-                .lock()
-                .expect("degraded_resource_kinds lock poisoned")
-                .insert("PersistentVolume".to_string());
-            Result::Ok(vec![])
-        })?;
-        let persistent_volume_claims = client
-            .get_persistent_volume_claims()
-            .await
-            .or_else(|_err| Result::Ok(vec![]))?;
+        let storage_classes = client.get_storage_classes().await?;
+        let persistent_volumes = client.get_persistent_volumes().await?;
+        let persistent_volume_claims = client.get_persistent_volume_claims().await?;
 
         let service_accounts = client.get_service_accounts().await?;
 

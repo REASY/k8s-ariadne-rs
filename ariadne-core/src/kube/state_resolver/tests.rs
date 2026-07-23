@@ -32,10 +32,10 @@ struct SnapshotFrame {
 struct FailureConfig {
     namespaces: bool,
     namespaces_after_first_round: bool,
-    nodes: bool,
     nodes_after_first_round: bool,
-    storage_classes: bool,
-    persistent_volumes: bool,
+    storage_classes_after_first_round: bool,
+    persistent_volumes_after_first_round: bool,
+    persistent_volume_claims_after_first_round: bool,
 }
 
 #[derive(Debug)]
@@ -141,26 +141,32 @@ impl KubeClient for MockKubeClient {
     }
 
     async fn get_storage_classes(&self) -> Result<Vec<Arc<StorageClass>>> {
-        if self.failures.storage_classes {
+        let round = *self.round_index.lock().expect("round_index lock poisoned");
+        if self.failures.storage_classes_after_first_round && round > 1 {
             return Err(std::io::Error::other("mock storage class failure").into());
         }
         Ok(self.current_round_snapshot().storage_classes)
     }
 
     async fn get_persistent_volumes(&self) -> Result<Vec<Arc<PersistentVolume>>> {
-        if self.failures.persistent_volumes {
+        let round = *self.round_index.lock().expect("round_index lock poisoned");
+        if self.failures.persistent_volumes_after_first_round && round > 1 {
             return Err(std::io::Error::other("mock persistent volume failure").into());
         }
         Ok(self.current_round_snapshot().persistent_volumes)
     }
 
     async fn get_persistent_volume_claims(&self) -> Result<Vec<Arc<PersistentVolumeClaim>>> {
+        let round = *self.round_index.lock().expect("round_index lock poisoned");
+        if self.failures.persistent_volume_claims_after_first_round && round > 1 {
+            return Err(std::io::Error::other("mock persistent volume claim failure").into());
+        }
         Ok(self.current_round_snapshot().persistent_volume_claims)
     }
 
     async fn get_nodes(&self) -> Result<Vec<Arc<Node>>> {
         let round = *self.round_index.lock().expect("round_index lock poisoned");
-        if self.failures.nodes || (self.failures.nodes_after_first_round && round > 1) {
+        if self.failures.nodes_after_first_round && round > 1 {
             return Err(std::io::Error::other("mock node failure").into());
         }
         Ok(self.current_round_snapshot().nodes)
@@ -466,17 +472,16 @@ async fn resolver_sync_and_rebuild_cover_live_sync_paths() {
 
 #[tokio::test]
 async fn degraded_resource_kinds_propagate_from_kube_client_handle() {
-    let degraded = Arc::new(Mutex::new(BTreeSet::new()));
+    let degraded = Arc::new(Mutex::new(BTreeSet::from([
+        "Node".to_string(),
+        "PersistentVolume".to_string(),
+        "StorageClass".to_string(),
+    ])));
     let resolver = ClusterStateResolver::new_with_kube_client(
         "test-cluster".to_string(),
         Box::new(MockKubeClient::new(
             vec![SnapshotFrame::default()],
-            FailureConfig {
-                nodes: true,
-                storage_classes: true,
-                persistent_volumes: true,
-                ..Default::default()
-            },
+            FailureConfig::default(),
             degraded.clone(),
         )),
     )
@@ -574,6 +579,103 @@ async fn sync_from_source_reports_kube_fetch_failure_with_metadata() {
     let state = state_handle.lock().expect("state lock poisoned");
     assert!(state.node_by_uid("pod-managed").is_some());
     assert!(state.node_by_uid("namespace-team-b").is_none());
+}
+
+#[tokio::test]
+async fn cluster_resource_read_failures_preserve_last_known_good_state() {
+    let mut initial = base_snapshot();
+    initial.nodes.push(Arc::new(Node {
+        metadata: ObjectMeta {
+            name: Some("worker-1".to_string()),
+            uid: Some("node-1".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }));
+    initial.storage_classes.push(Arc::new(StorageClass {
+        metadata: ObjectMeta {
+            name: Some("standard".to_string()),
+            uid: Some("storage-class-1".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }));
+    initial.persistent_volumes.push(Arc::new(PersistentVolume {
+        metadata: ObjectMeta {
+            name: Some("pv-1".to_string()),
+            uid: Some("persistent-volume-1".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }));
+    initial
+        .persistent_volume_claims
+        .push(Arc::new(PersistentVolumeClaim {
+            metadata: ObjectMeta {
+                name: Some("data".to_string()),
+                namespace: Some("team-a".to_string()),
+                uid: Some("persistent-volume-claim-1".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+
+    let failure_cases = [
+        FailureConfig {
+            nodes_after_first_round: true,
+            ..Default::default()
+        },
+        FailureConfig {
+            storage_classes_after_first_round: true,
+            ..Default::default()
+        },
+        FailureConfig {
+            persistent_volumes_after_first_round: true,
+            ..Default::default()
+        },
+        FailureConfig {
+            persistent_volume_claims_after_first_round: true,
+            ..Default::default()
+        },
+    ];
+
+    for failures in failure_cases {
+        let resolver = ClusterStateResolver::new_with_kube_client(
+            "test-cluster".to_string(),
+            Box::new(MockKubeClient::new(
+                vec![initial.clone()],
+                failures,
+                Arc::new(Mutex::new(BTreeSet::new())),
+            )),
+        )
+        .await
+        .expect("resolver should initialize from the complete first snapshot");
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let backend = Arc::new(MockGraphBackend::default());
+
+        let err = resolver
+            .sync_from_source(backend.clone())
+            .await
+            .expect_err("partial Kubernetes read failure must abort the snapshot refresh");
+
+        assert_eq!(err.stage, SourceSyncStage::KubeFetch);
+        assert!(
+            backend.update_summaries().is_empty(),
+            "an incomplete snapshot must not be written"
+        );
+        let state = state_handle.lock().expect("state lock poisoned");
+        for uid in [
+            "node-1",
+            "storage-class-1",
+            "persistent-volume-1",
+            "persistent-volume-claim-1",
+        ] {
+            assert!(
+                state.node_by_uid(uid).is_some(),
+                "last-known-good resource {uid} must be preserved"
+            );
+        }
+    }
 }
 
 #[tokio::test]
