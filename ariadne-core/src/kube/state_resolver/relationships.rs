@@ -139,7 +139,18 @@ impl ClusterStateResolver {
         ingress_service_backends: &[Arc<IngressServiceBackend>],
         state: &mut ClusterState,
     ) {
-        let service_name_to_id = Self::name_to_uid(services.iter().map(|s| &s.metadata));
+        let service_namespace_name_to_uid: HashMap<(&str, &str), &str> = services
+            .iter()
+            .filter_map(|service| {
+                Some((
+                    (
+                        service.metadata.namespace.as_deref()?,
+                        service.metadata.name.as_deref()?,
+                    ),
+                    service.metadata.uid.as_deref()?,
+                ))
+            })
+            .collect();
         for ingress_service_backend in ingress_service_backends {
             // Prepare for the edges:
             // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
@@ -171,17 +182,29 @@ impl ClusterStateResolver {
                 Edge::DefinesBackend,
             );
 
-            service_name_to_id
-                .get(ingress_service_backend.name.as_str())
-                .inspect(|svc_id| {
+            let backend_namespace = ingress_service_backend.metadata.namespace.as_deref();
+            match backend_namespace.and_then(|namespace| {
+                service_namespace_name_to_uid
+                    .get(&(namespace, ingress_service_backend.name.as_str()))
+            }) {
+                Some(service_uid) => {
                     state.add_edge(
                         &obj_id.uid,
                         ResourceType::IngressServiceBackend,
-                        svc_id,
+                        service_uid,
                         ResourceType::Service,
                         Edge::TargetsService,
                     );
-                });
+                }
+                None => {
+                    warn!(
+                        ingress_namespace = backend_namespace.unwrap_or(""),
+                        ingress_uid = ingress_service_backend.ingress_uid,
+                        service_name = ingress_service_backend.name,
+                        "Skipping unresolved Ingress backend to Service relationship"
+                    );
+                }
+            }
         }
     }
 

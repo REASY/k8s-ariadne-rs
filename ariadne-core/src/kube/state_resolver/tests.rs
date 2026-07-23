@@ -1,6 +1,10 @@
 use super::*;
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::{PersistentVolumeClaimVolumeSource, PodSpec, Volume};
+use k8s_openapi::api::networking::v1::{
+    HTTPIngressPath, HTTPIngressRuleValue, IngressBackend, IngressRule,
+    IngressServiceBackend as KubeIngressServiceBackend, IngressSpec, ServiceBackendPort,
+};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use k8s_openapi::apimachinery::pkg::version::Info;
 use serde_json::Value;
@@ -369,6 +373,57 @@ fn persistent_volume_claim(name: &str, namespace: &str, uid: &str) -> Arc<Persis
     })
 }
 
+fn service(name: &str, namespace: &str, uid: &str) -> Arc<Service> {
+    Arc::new(Service {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
+fn ingress_with_service(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    service_name: &str,
+) -> Arc<Ingress> {
+    Arc::new(Ingress {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        spec: Some(IngressSpec {
+            rules: Some(vec![IngressRule {
+                http: Some(HTTPIngressRuleValue {
+                    paths: vec![HTTPIngressPath {
+                        backend: IngressBackend {
+                            service: Some(KubeIngressServiceBackend {
+                                name: service_name.to_string(),
+                                port: Some(ServiceBackendPort {
+                                    number: Some(80),
+                                    ..Default::default()
+                                }),
+                            }),
+                            ..Default::default()
+                        },
+                        path_type: "Prefix".to_string(),
+                        ..Default::default()
+                    }],
+                }),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
 fn base_snapshot() -> SnapshotFrame {
     SnapshotFrame {
         namespaces: vec![namespace("team-a", "namespace-team-a")],
@@ -496,6 +551,98 @@ async fn missing_pvc_reference_does_not_abort_graph_build() {
         state
             .get_edges_by_type(&Edge::ClaimsVolume)
             .all(|edge| edge.source != "pod-missing-pvc")
+    );
+}
+
+#[tokio::test]
+async fn ingress_service_edges_are_resolved_within_the_ingress_namespace() {
+    let snapshot = SnapshotFrame {
+        namespaces: vec![
+            namespace("team-a", "namespace-team-a"),
+            namespace("team-b", "namespace-team-b"),
+        ],
+        ingresses: vec![
+            ingress_with_service("web", "team-a", "ingress-team-a", "api"),
+            ingress_with_service("web", "team-b", "ingress-team-b", "api"),
+        ],
+        services: vec![
+            service("api", "team-a", "service-team-a"),
+            service("api", "team-b", "service-team-b"),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should build namespace-qualified Service relationships");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    let backend_team_a = "IngressServiceBackend:ingress-team-a:api";
+    let backend_team_b = "IngressServiceBackend:ingress-team-b:api";
+
+    assert!(has_edge(
+        &state,
+        Edge::TargetsService,
+        backend_team_a,
+        "service-team-a"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::TargetsService,
+        backend_team_b,
+        "service-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::TargetsService,
+        backend_team_a,
+        "service-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::TargetsService,
+        backend_team_b,
+        "service-team-a"
+    ));
+}
+
+#[tokio::test]
+async fn missing_ingress_service_does_not_abort_graph_build() {
+    let snapshot = SnapshotFrame {
+        namespaces: vec![namespace("team-a", "namespace-team-a")],
+        ingresses: vec![ingress_with_service(
+            "web",
+            "team-a",
+            "ingress-missing-service",
+            "missing",
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("an unresolved Service must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    let backend_uid = "IngressServiceBackend:ingress-missing-service:missing";
+
+    assert!(state.node_by_uid(backend_uid).is_some());
+    assert!(
+        state
+            .get_edges_by_type(&Edge::TargetsService)
+            .all(|edge| edge.source != backend_uid)
     );
 }
 
