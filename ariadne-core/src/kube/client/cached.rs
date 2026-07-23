@@ -186,15 +186,21 @@ impl KubeClient for CachedKubeClient {
     }
 }
 
-fn start_store_if_allowed<T>(
-    api: Api<T>,
-    allowed: bool,
-) -> (Option<Store<T>>, Option<JoinHandle<()>>)
-where
-    T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
-    T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
-{
-    start_store_with_factory(allowed, || make_store_and_watch(api))
+struct StoreStarter {
+    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+}
+
+impl StoreStarter {
+    fn start<T>(&self, api: Api<T>, allowed: bool) -> (Option<Store<T>>, Option<JoinHandle<()>>)
+    where
+        T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
+        T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+    {
+        let degraded_resource_kinds = self.degraded_resource_kinds.clone();
+        start_store_with_factory(allowed, || {
+            make_store_and_watch(api, degraded_resource_kinds)
+        })
+    }
 }
 
 pub(super) fn start_store_with_factory<T, F, Fut>(
@@ -404,37 +410,35 @@ impl CachedKubeClient {
             ],
         );
 
-        let (pod_store, pod_watch) = start_store_if_allowed(pod_api, pod_allowed);
-        let (deployment_store, deployment_watch) =
-            start_store_if_allowed(deployment_api, deployment_allowed);
+        let stores = StoreStarter {
+            degraded_resource_kinds: degraded_resource_kinds.clone(),
+        };
+        let (pod_store, pod_watch) = stores.start(pod_api, pod_allowed);
+        let (deployment_store, deployment_watch) = stores.start(deployment_api, deployment_allowed);
         let (stateful_set_store, stateful_set_watch) =
-            start_store_if_allowed(stateful_set_api, stateful_set_allowed);
+            stores.start(stateful_set_api, stateful_set_allowed);
         let (replica_set_store, replica_set_watch) =
-            start_store_if_allowed(replica_set_api, replica_set_allowed);
-        let (daemon_set_store, daemon_set_watch) =
-            start_store_if_allowed(daemon_set_api, daemon_set_allowed);
-        let (job_store, job_watch) = start_store_if_allowed(job_api, job_allowed);
-        let (ingress_store, ingress_watch) = start_store_if_allowed(ingress_api, ingress_allowed);
-        let (service_store, service_watch) = start_store_if_allowed(service_api, service_allowed);
+            stores.start(replica_set_api, replica_set_allowed);
+        let (daemon_set_store, daemon_set_watch) = stores.start(daemon_set_api, daemon_set_allowed);
+        let (job_store, job_watch) = stores.start(job_api, job_allowed);
+        let (ingress_store, ingress_watch) = stores.start(ingress_api, ingress_allowed);
+        let (service_store, service_watch) = stores.start(service_api, service_allowed);
         let (endpoint_slice_store, endpoint_slice_watch) =
-            start_store_if_allowed(endpoint_slices_api, endpoint_slice_allowed);
+            stores.start(endpoint_slices_api, endpoint_slice_allowed);
         let (network_policy_store, network_policy_watch) =
-            start_store_if_allowed(network_policy_api, network_policy_allowed);
-        let (config_map_store, config_map_watch) =
-            start_store_if_allowed(config_map_api, config_map_allowed);
+            stores.start(network_policy_api, network_policy_allowed);
+        let (config_map_store, config_map_watch) = stores.start(config_map_api, config_map_allowed);
         let (storage_class_store, storage_class_watch) =
-            start_store_if_allowed(storage_class_api, storage_class_allowed);
+            stores.start(storage_class_api, storage_class_allowed);
         let (persistent_volume_store, persistent_volume_watch) =
-            start_store_if_allowed(persistent_volume_api, persistent_volume_allowed);
+            stores.start(persistent_volume_api, persistent_volume_allowed);
         let (persistent_volume_claim_store, persistent_volume_claim_watch) =
-            start_store_if_allowed(persistent_volume_claim_api, persistent_volume_claim_allowed);
-        let (node_store, node_watch) = start_store_if_allowed(node_api, node_allowed);
+            stores.start(persistent_volume_claim_api, persistent_volume_claim_allowed);
+        let (node_store, node_watch) = stores.start(node_api, node_allowed);
         let (service_account_store, service_account_watch) =
-            start_store_if_allowed(service_account_api, service_account_allowed);
-        let (namespace_store, namespace_watch) =
-            start_store_if_allowed(namespace_api, namespace_allowed);
-
-        let (event_store, event_store_watch) = start_store_if_allowed(event_api, event_allowed);
+            stores.start(service_account_api, service_account_allowed);
+        let (namespace_store, namespace_watch) = stores.start(namespace_api, namespace_allowed);
+        let (event_store, event_store_watch) = stores.start(event_api, event_allowed);
 
         Ok(Self {
             config: cfg.clone(),

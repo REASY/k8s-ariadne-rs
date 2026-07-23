@@ -10,8 +10,6 @@ use crate::snapshot::{
 };
 use crate::tls::install_rustls_provider;
 use crate::types::Cluster;
-use std::any::type_name;
-
 use async_trait::async_trait;
 use futures::{StreamExt, future};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -296,25 +294,44 @@ impl KubeClient for KubeClientImpl {
 
 fn make_store_and_watch<T>(
     api: Api<T>,
+    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
 ) -> (Store<T>, impl future::Future<Output = ()> + Send + 'static)
 where
     T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
     T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
 {
     let (reader, writer) = reflector::store();
-    let fut = reflector(writer, watcher(api, Default::default()))
+    let resource_kind = T::kind(&T::DynamicType::default()).into_owned();
+    let fut = reflector(writer, watcher(api, Default::default()).default_backoff())
         .modify(|item| {
             item.managed_fields_mut().clear();
         })
-        .for_each(|x| {
-            let _ = x.inspect_err(|err| {
-                let resource_type = type_name::<T>();
-                let dynamic_type = type_name::<T::DynamicType>();
-                warn!("Error in watch loop for the type [{resource_type}:{dynamic_type}] {err:?}");
-            });
+        .for_each(move |result| {
+            match &result {
+                Ok(_) => update_watch_health(&degraded_resource_kinds, &resource_kind, true),
+                Err(err) => {
+                    update_watch_health(&degraded_resource_kinds, &resource_kind, false);
+                    warn!("Error in watch loop for {resource_kind}: {err:?}");
+                }
+            }
             future::ready(())
         });
     (reader, fut)
+}
+
+fn update_watch_health(
+    degraded_resource_kinds: &Arc<Mutex<BTreeSet<String>>>,
+    resource_kind: &str,
+    healthy: bool,
+) {
+    let mut degraded = degraded_resource_kinds
+        .lock()
+        .expect("degraded_resource_kinds lock poisoned");
+    if healthy {
+        degraded.remove(resource_kind);
+    } else {
+        degraded.insert(resource_kind.to_string());
+    }
 }
 
 async fn get_object<T: Clone + DeserializeOwned + Debug>(api: &Api<T>) -> Result<Vec<Arc<T>>> {

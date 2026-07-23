@@ -188,6 +188,33 @@ fn update_degraded_resource_kinds_marks_denied_resources_only() {
     assert_eq!(values, vec!["Node".to_string(), "Service".to_string()]);
 }
 
+#[test]
+fn watch_health_marks_errors_and_clears_recovered_kinds() {
+    let degraded = Arc::new(Mutex::new(BTreeSet::from(["Node".to_string()])));
+
+    update_watch_health(&degraded, "Pod", false);
+    assert_eq!(
+        degraded
+            .lock()
+            .expect("degraded lock poisoned")
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["Node".to_string(), "Pod".to_string()]
+    );
+
+    update_watch_health(&degraded, "Pod", true);
+    assert_eq!(
+        degraded
+            .lock()
+            .expect("degraded lock poisoned")
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["Node".to_string()]
+    );
+}
+
 #[tokio::test]
 async fn start_store_with_factory_respects_allowed_flag() {
     let calls = Arc::new(AtomicUsize::new(0));
