@@ -391,6 +391,33 @@ fn pod_with_labels(
     })
 }
 
+fn pod_with_containers(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    resource_version: &str,
+    containers: Vec<KubernetesContainer>,
+    init_containers: Option<Vec<KubernetesContainer>>,
+    ephemeral_containers: Option<Vec<EphemeralContainer>>,
+) -> Arc<Pod> {
+    Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            resource_version: Some(resource_version.to_string()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers,
+            init_containers,
+            ephemeral_containers,
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
 fn network_policy(
     name: &str,
     namespace: &str,
@@ -717,6 +744,161 @@ fn applies_to_targets(state: &ClusterState, network_policy_uid: &str) -> BTreeSe
         .filter(|edge| edge.source == network_policy_uid)
         .map(|edge| edge.target.clone())
         .collect()
+}
+
+#[tokio::test]
+async fn pod_container_inventory_includes_standard_init_and_ephemeral_containers() {
+    let snapshot = SnapshotFrame {
+        pods: vec![pod_with_containers(
+            "workload",
+            "default",
+            "pod-containers",
+            "1",
+            vec![KubernetesContainer {
+                name: "app".to_string(),
+                image: Some("example/app:1".to_string()),
+                ..Default::default()
+            }],
+            Some(vec![KubernetesContainer {
+                name: "setup".to_string(),
+                image: Some("example/setup:1".to_string()),
+                ..Default::default()
+            }]),
+            Some(vec![EphemeralContainer {
+                name: "debugger".to_string(),
+                image: Some("example/debugger:1".to_string()),
+                target_container_name: Some("app".to_string()),
+                command: Some(vec!["sh".to_string()]),
+                ..Default::default()
+            }]),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("all Pod container types should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    let containers: HashMap<_, _> = state
+        .get_nodes_by_type(&ResourceType::Container)
+        .map(|node| (node.id.name.as_str(), node))
+        .collect();
+    assert_eq!(containers.len(), 3);
+
+    for (name, container_type) in [
+        ("app", ContainerType::Standard),
+        ("setup", ContainerType::Init),
+        ("debugger", ContainerType::Ephemeral),
+    ] {
+        let node = containers.get(name).expect("container should exist");
+        let Some(ResourceAttributes::Container { container }) = node.attributes.as_deref() else {
+            panic!("container node should retain its attributes");
+        };
+        assert_eq!(container.container_type, container_type);
+        assert!(has_edge(
+            &state,
+            Edge::Runs,
+            node.id.uid.as_str(),
+            "pod-containers"
+        ));
+    }
+
+    let debugger = containers
+        .get("debugger")
+        .expect("ephemeral container should exist");
+    assert_eq!(
+        debugger.id.uid,
+        "Container:pod-containers:ephemeral:debugger"
+    );
+    let Some(ResourceAttributes::Container { container }) = debugger.attributes.as_deref() else {
+        panic!("ephemeral container should retain its attributes");
+    };
+    assert_eq!(container.target_container_name.as_deref(), Some("app"));
+    assert_eq!(container.spec.image.as_deref(), Some("example/debugger:1"));
+    assert_eq!(
+        container.spec.command.as_deref(),
+        Some(["sh".to_string()].as_slice())
+    );
+    let serialized = serde_json::to_value(container.as_ref())
+        .expect("ephemeral container attributes should serialize");
+    assert_eq!(serialized["target_container_name"], "app");
+}
+
+#[tokio::test]
+async fn adding_ephemeral_container_produces_container_node_and_edges() {
+    let regular_container = KubernetesContainer {
+        name: "app".to_string(),
+        image: Some("example/app:1".to_string()),
+        ..Default::default()
+    };
+    let initial = SnapshotFrame {
+        pods: vec![pod_with_containers(
+            "workload",
+            "default",
+            "pod-ephemeral-update",
+            "1",
+            vec![regular_container.clone()],
+            None,
+            None,
+        )],
+        ..Default::default()
+    };
+    let changed = SnapshotFrame {
+        pods: vec![pod_with_containers(
+            "workload",
+            "default",
+            "pod-ephemeral-update",
+            "2",
+            vec![regular_container],
+            None,
+            Some(vec![EphemeralContainer {
+                name: "debugger".to_string(),
+                image: Some("example/debugger:1".to_string()),
+                target_container_name: Some("app".to_string()),
+                ..Default::default()
+            }]),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize without an ephemeral container");
+    let backend = Arc::new(MockGraphBackend::default());
+
+    let outcome = resolver
+        .sync_from_source(backend)
+        .await
+        .expect("ephemeral container addition should sync");
+
+    assert_eq!(outcome.diff.added_nodes, 1);
+    assert_eq!(outcome.diff.removed_nodes, 0);
+    assert_eq!(outcome.diff.modified_nodes, 1);
+    assert_eq!(outcome.diff.added_edges, 2);
+    assert_eq!(outcome.diff.removed_edges, 0);
+
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    assert!(has_edge(
+        &state,
+        Edge::Runs,
+        "Container:pod-ephemeral-update:ephemeral:debugger",
+        "pod-ephemeral-update"
+    ));
 }
 
 #[tokio::test]

@@ -721,6 +721,9 @@ impl ClusterStateResolver {
                         Container::new(ns, name, uid, c.clone(), ContainerType::Standard);
                     containers.push(Arc::new(container));
                 }
+                for c in spec.ephemeral_containers.as_deref().into_iter().flatten() {
+                    containers.push(Arc::new(Container::new_ephemeral(ns, name, uid, c.clone())));
+                }
             }
         }
         Ok(containers)

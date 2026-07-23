@@ -3,8 +3,8 @@ use crate::prelude::*;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
-    ServiceAccount,
+    ConfigMap, Container as KubernetesContainer, EphemeralContainer, Namespace, Node,
+    PersistentVolume, PersistentVolumeClaim, Pod, Service, ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::events::v1::Event;
@@ -503,8 +503,9 @@ pub struct Container {
     pub pod_name: String,
     pub pod_uid: String,
     pub container_type: ContainerType,
+    pub target_container_name: Option<String>,
     pub metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-    pub spec: k8s_openapi::api::core::v1::Container,
+    pub spec: KubernetesContainer,
 }
 
 impl Container {
@@ -512,14 +513,70 @@ impl Container {
         namespace: &str,
         pod_name: &str,
         pod_uid: &str,
-        spec: k8s_openapi::api::core::v1::Container,
+        spec: KubernetesContainer,
         container_type: ContainerType,
+    ) -> Self {
+        Self::new_with_target(namespace, pod_name, pod_uid, spec, container_type, None)
+    }
+
+    pub fn new_ephemeral(
+        namespace: &str,
+        pod_name: &str,
+        pod_uid: &str,
+        spec: EphemeralContainer,
+    ) -> Self {
+        let target_container_name = spec.target_container_name;
+        let spec = KubernetesContainer {
+            args: spec.args,
+            command: spec.command,
+            env: spec.env,
+            env_from: spec.env_from,
+            image: spec.image,
+            image_pull_policy: spec.image_pull_policy,
+            lifecycle: spec.lifecycle,
+            liveness_probe: spec.liveness_probe,
+            name: spec.name,
+            ports: spec.ports,
+            readiness_probe: spec.readiness_probe,
+            resize_policy: spec.resize_policy,
+            resources: spec.resources,
+            restart_policy: spec.restart_policy,
+            security_context: spec.security_context,
+            startup_probe: spec.startup_probe,
+            stdin: spec.stdin,
+            stdin_once: spec.stdin_once,
+            termination_message_path: spec.termination_message_path,
+            termination_message_policy: spec.termination_message_policy,
+            tty: spec.tty,
+            volume_devices: spec.volume_devices,
+            volume_mounts: spec.volume_mounts,
+            working_dir: spec.working_dir,
+        };
+
+        Self::new_with_target(
+            namespace,
+            pod_name,
+            pod_uid,
+            spec,
+            ContainerType::Ephemeral,
+            target_container_name,
+        )
+    }
+
+    fn new_with_target(
+        namespace: &str,
+        pod_name: &str,
+        pod_uid: &str,
+        spec: KubernetesContainer,
+        container_type: ContainerType,
+        target_container_name: Option<String>,
     ) -> Self {
         let uid = format!("Container:{}:{}:{}", pod_uid, container_type, spec.name);
         Self {
             pod_name: pod_name.to_string(),
             pod_uid: pod_uid.to_string(),
             container_type,
+            target_container_name,
             metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
                 uid: Some(uid),
                 name: Some(spec.name.clone()),

@@ -56,7 +56,7 @@ mod tests {
         let schema = schema_prompt();
 
         assert!(schema.starts_with("Node properties:\n"));
-        assert!(schema.contains("Container: 5 properties (container_type: string"));
+        assert!(schema.contains("Container: 6 properties (container_type: string"));
         assert!(schema.contains(
             "PersistentVolumeClaim: 5 properties (apiVersion: string, kind: string, metadata:"
         ));
