@@ -1,7 +1,9 @@
 //! Reflector-backed Kubernetes client for continuously refreshed live state.
 //!
-//! Denied resource kinds remain absent and are recorded as degraded coverage;
-//! allowed stores must become ready before their contents are returned.
+//! Denied resource kinds start absent and are recorded as degraded coverage,
+//! while their reflectors keep retrying so later RBAC grants take effect.
+//! Stores that have ever initialized must remain ready before their contents
+//! are returned.
 
 use super::{
     AccessChecker, AccessDecision, Api, Arc, BTreeSet, Client, Config, ConfigMap, DaemonSet,
@@ -13,7 +15,7 @@ use super::{
     RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
     RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS, ReplicaSet, Resource,
     Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet, StorageClass, Store,
-    install_rustls_provider, load_kube_config, make_store_and_watch,
+    WatchHealth, install_rustls_provider, load_kube_config, make_store_and_watch,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -26,7 +28,7 @@ use tracing::warn;
 pub struct CachedKubeClient {
     config: Config,
     client: Client,
-    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+    watch_health: WatchHealth,
     namespace_store: Option<Store<Namespace>>,
     #[allow(unused)]
     namespace_watch: Option<JoinHandle<()>>,
@@ -86,71 +88,101 @@ pub struct CachedKubeClient {
 #[async_trait]
 impl KubeClient for CachedKubeClient {
     async fn get_namespaces(&self) -> Result<Vec<Arc<Namespace>>> {
-        store_state_or_empty(&self.namespace_store, "Namespace").await
+        store_state_or_empty(&self.namespace_store, "Namespace", &self.watch_health).await
     }
 
     async fn get_pods(&self) -> Result<Vec<Arc<Pod>>> {
-        store_state_or_empty(&self.pod_store, "Pod").await
+        store_state_or_empty(&self.pod_store, "Pod", &self.watch_health).await
     }
 
     async fn get_deployments(&self) -> Result<Vec<Arc<Deployment>>> {
-        store_state_or_empty(&self.deployment_store, "Deployment").await
+        store_state_or_empty(&self.deployment_store, "Deployment", &self.watch_health).await
     }
 
     async fn get_stateful_sets(&self) -> Result<Vec<Arc<StatefulSet>>> {
-        store_state_or_empty(&self.stateful_set_store, "StatefulSet").await
+        store_state_or_empty(&self.stateful_set_store, "StatefulSet", &self.watch_health).await
     }
 
     async fn get_replica_sets(&self) -> Result<Vec<Arc<ReplicaSet>>> {
-        store_state_or_empty(&self.replica_set_store, "ReplicaSet").await
+        store_state_or_empty(&self.replica_set_store, "ReplicaSet", &self.watch_health).await
     }
 
     async fn get_daemon_sets(&self) -> Result<Vec<Arc<DaemonSet>>> {
-        store_state_or_empty(&self.daemon_set_store, "DaemonSet").await
+        store_state_or_empty(&self.daemon_set_store, "DaemonSet", &self.watch_health).await
     }
 
     async fn get_jobs(&self) -> Result<Vec<Arc<Job>>> {
-        store_state_or_empty(&self.job_store, "Job").await
+        store_state_or_empty(&self.job_store, "Job", &self.watch_health).await
     }
 
     async fn get_ingresses(&self) -> Result<Vec<Arc<Ingress>>> {
-        store_state_or_empty(&self.ingress_store, "Ingress").await
+        store_state_or_empty(&self.ingress_store, "Ingress", &self.watch_health).await
     }
 
     async fn get_services(&self) -> Result<Vec<Arc<Service>>> {
-        store_state_or_empty(&self.service_store, "Service").await
+        store_state_or_empty(&self.service_store, "Service", &self.watch_health).await
     }
 
     async fn get_endpoint_slices(&self) -> Result<Vec<Arc<EndpointSlice>>> {
-        store_state_or_empty(&self.endpoint_slice_store, "EndpointSlice").await
+        store_state_or_empty(
+            &self.endpoint_slice_store,
+            "EndpointSlice",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn get_network_policies(&self) -> Result<Vec<Arc<NetworkPolicy>>> {
-        store_state_or_empty(&self.network_policy_store, "NetworkPolicy").await
+        store_state_or_empty(
+            &self.network_policy_store,
+            "NetworkPolicy",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn get_config_maps(&self) -> Result<Vec<Arc<ConfigMap>>> {
-        store_state_or_empty(&self.config_map_store, "ConfigMap").await
+        store_state_or_empty(&self.config_map_store, "ConfigMap", &self.watch_health).await
     }
 
     async fn get_storage_classes(&self) -> Result<Vec<Arc<StorageClass>>> {
-        store_state_or_empty(&self.storage_class_store, "StorageClass").await
+        store_state_or_empty(
+            &self.storage_class_store,
+            "StorageClass",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn get_persistent_volumes(&self) -> Result<Vec<Arc<PersistentVolume>>> {
-        store_state_or_empty(&self.persistent_volume_store, "PersistentVolume").await
+        store_state_or_empty(
+            &self.persistent_volume_store,
+            "PersistentVolume",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn get_persistent_volume_claims(&self) -> Result<Vec<Arc<PersistentVolumeClaim>>> {
-        store_state_or_empty(&self.persistent_volume_claim_store, "PersistentVolumeClaim").await
+        store_state_or_empty(
+            &self.persistent_volume_claim_store,
+            "PersistentVolumeClaim",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn get_nodes(&self) -> Result<Vec<Arc<Node>>> {
-        store_state_or_empty(&self.node_store, "Node").await
+        store_state_or_empty(&self.node_store, "Node", &self.watch_health).await
     }
 
     async fn get_service_accounts(&self) -> Result<Vec<Arc<ServiceAccount>>> {
-        store_state_or_empty(&self.service_account_store, "ServiceAccount").await
+        store_state_or_empty(
+            &self.service_account_store,
+            "ServiceAccount",
+            &self.watch_health,
+        )
+        .await
     }
 
     async fn apiserver_version(&self) -> Result<Info> {
@@ -163,33 +195,32 @@ impl KubeClient for CachedKubeClient {
     }
 
     async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
-        store_state_or_empty_with_timeout(&self.event_store, "Event", event_store_ready_timeout())
-            .await
+        store_state_or_empty_with_timeout(
+            &self.event_store,
+            "Event",
+            event_store_ready_timeout(),
+            &self.watch_health,
+        )
+        .await
     }
 
     fn degraded_resource_kinds_handle(&self) -> Arc<Mutex<BTreeSet<String>>> {
-        self.degraded_resource_kinds.clone()
+        self.watch_health.degraded_handle()
     }
 }
 
 struct StoreStarter {
-    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+    watch_health: WatchHealth,
 }
 
 impl StoreStarter {
-    fn start<T>(
-        &self,
-        api: Api<T>,
-        access: AccessDecision,
-    ) -> (Option<Store<T>>, Option<JoinHandle<()>>)
+    fn start<T>(&self, api: Api<T>) -> (Option<Store<T>>, Option<JoinHandle<()>>)
     where
         T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
         T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
     {
-        let degraded_resource_kinds = self.degraded_resource_kinds.clone();
-        start_store_with_factory(access.should_start_watch(), || {
-            make_store_and_watch(api, degraded_resource_kinds)
-        })
+        let watch_health = self.watch_health.clone();
+        start_store_with_factory(true, || make_store_and_watch(api, watch_health))
     }
 }
 
@@ -214,23 +245,28 @@ where
 pub(super) async fn store_state_or_empty<T>(
     store: &Option<Store<T>>,
     kind: &'static str,
+    watch_health: &WatchHealth,
 ) -> Result<Vec<Arc<T>>>
 where
     T: Resource + Clone + Debug + Send + Sync + 'static,
     T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
 {
-    store_state_or_empty_with_timeout(store, kind, store_ready_timeout()).await
+    store_state_or_empty_with_timeout(store, kind, store_ready_timeout(), watch_health).await
 }
 
 pub(super) async fn store_state_or_empty_with_timeout<T>(
     store: &Option<Store<T>>,
     kind: &'static str,
     timeout_duration: Duration,
+    watch_health: &WatchHealth,
 ) -> Result<Vec<Arc<T>>>
 where
     T: Resource + Clone + Debug + Send + Sync + 'static,
     T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
 {
+    if watch_health.is_awaiting_initial_access(kind) {
+        return Ok(Vec::new());
+    }
     match store {
         Some(store) => {
             wait_for_store_readiness(
@@ -293,15 +329,21 @@ pub(super) fn event_store_ready_timeout() -> Duration {
 }
 
 pub(super) fn update_degraded_resource_kinds(
-    degraded_resource_kinds: &Arc<Mutex<BTreeSet<String>>>,
+    watch_health: &WatchHealth,
     access: &[(AccessDecision, &'static str)],
 ) {
-    let mut kinds = degraded_resource_kinds
+    let mut kinds = watch_health
+        .degraded_resource_kinds
         .lock()
         .expect("degraded_resource_kinds lock poisoned");
+    let mut awaiting = watch_health
+        .awaiting_initial_access
+        .lock()
+        .expect("awaiting_initial_access lock poisoned");
     for (decision, kind) in access {
         if decision.is_denied() {
             kinds.insert((*kind).to_string());
+            awaiting.insert((*kind).to_string());
         }
     }
 }
@@ -365,7 +407,7 @@ impl CachedKubeClient {
             .unwrap_or_else(|| Api::all(client.clone()));
 
         let access = AccessChecker::new(client.clone(), maybe_ns);
-        let degraded_resource_kinds = Arc::new(Mutex::new(BTreeSet::new()));
+        let watch_health = WatchHealth::new();
 
         let namespace_allowed = access.can_read(RESOURCE_NAMESPACE).await;
         let pod_allowed = access.can_read(RESOURCE_POD).await;
@@ -388,7 +430,7 @@ impl CachedKubeClient {
         let event_allowed = access.can_read(RESOURCE_EVENT).await;
 
         update_degraded_resource_kinds(
-            &degraded_resource_kinds,
+            &watch_health,
             &[
                 (namespace_allowed, "Namespace"),
                 (pod_allowed, "Pod"),
@@ -412,39 +454,33 @@ impl CachedKubeClient {
         );
 
         let stores = StoreStarter {
-            degraded_resource_kinds: degraded_resource_kinds.clone(),
+            watch_health: watch_health.clone(),
         };
-        let (pod_store, pod_watch) = stores.start(pod_api, pod_allowed);
-        let (deployment_store, deployment_watch) = stores.start(deployment_api, deployment_allowed);
-        let (stateful_set_store, stateful_set_watch) =
-            stores.start(stateful_set_api, stateful_set_allowed);
-        let (replica_set_store, replica_set_watch) =
-            stores.start(replica_set_api, replica_set_allowed);
-        let (daemon_set_store, daemon_set_watch) = stores.start(daemon_set_api, daemon_set_allowed);
-        let (job_store, job_watch) = stores.start(job_api, job_allowed);
-        let (ingress_store, ingress_watch) = stores.start(ingress_api, ingress_allowed);
-        let (service_store, service_watch) = stores.start(service_api, service_allowed);
-        let (endpoint_slice_store, endpoint_slice_watch) =
-            stores.start(endpoint_slices_api, endpoint_slice_allowed);
-        let (network_policy_store, network_policy_watch) =
-            stores.start(network_policy_api, network_policy_allowed);
-        let (config_map_store, config_map_watch) = stores.start(config_map_api, config_map_allowed);
-        let (storage_class_store, storage_class_watch) =
-            stores.start(storage_class_api, storage_class_allowed);
+        let (pod_store, pod_watch) = stores.start(pod_api);
+        let (deployment_store, deployment_watch) = stores.start(deployment_api);
+        let (stateful_set_store, stateful_set_watch) = stores.start(stateful_set_api);
+        let (replica_set_store, replica_set_watch) = stores.start(replica_set_api);
+        let (daemon_set_store, daemon_set_watch) = stores.start(daemon_set_api);
+        let (job_store, job_watch) = stores.start(job_api);
+        let (ingress_store, ingress_watch) = stores.start(ingress_api);
+        let (service_store, service_watch) = stores.start(service_api);
+        let (endpoint_slice_store, endpoint_slice_watch) = stores.start(endpoint_slices_api);
+        let (network_policy_store, network_policy_watch) = stores.start(network_policy_api);
+        let (config_map_store, config_map_watch) = stores.start(config_map_api);
+        let (storage_class_store, storage_class_watch) = stores.start(storage_class_api);
         let (persistent_volume_store, persistent_volume_watch) =
-            stores.start(persistent_volume_api, persistent_volume_allowed);
+            stores.start(persistent_volume_api);
         let (persistent_volume_claim_store, persistent_volume_claim_watch) =
-            stores.start(persistent_volume_claim_api, persistent_volume_claim_allowed);
-        let (node_store, node_watch) = stores.start(node_api, node_allowed);
-        let (service_account_store, service_account_watch) =
-            stores.start(service_account_api, service_account_allowed);
-        let (namespace_store, namespace_watch) = stores.start(namespace_api, namespace_allowed);
-        let (event_store, event_store_watch) = stores.start(event_api, event_allowed);
+            stores.start(persistent_volume_claim_api);
+        let (node_store, node_watch) = stores.start(node_api);
+        let (service_account_store, service_account_watch) = stores.start(service_account_api);
+        let (namespace_store, namespace_watch) = stores.start(namespace_api);
+        let (event_store, event_store_watch) = stores.start(event_api);
 
         Ok(Self {
             config: cfg.clone(),
             client: client.clone(),
-            degraded_resource_kinds,
+            watch_health,
             namespace_store,
             namespace_watch,
             pod_store,

@@ -57,6 +57,32 @@ use cached::{
 };
 pub use snapshot::SnapshotKubeClient;
 
+#[derive(Clone)]
+struct WatchHealth {
+    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+    awaiting_initial_access: Arc<Mutex<BTreeSet<String>>>,
+}
+
+impl WatchHealth {
+    fn new() -> Self {
+        Self {
+            degraded_resource_kinds: Arc::new(Mutex::new(BTreeSet::new())),
+            awaiting_initial_access: Arc::new(Mutex::new(BTreeSet::new())),
+        }
+    }
+
+    fn degraded_handle(&self) -> Arc<Mutex<BTreeSet<String>>> {
+        self.degraded_resource_kinds.clone()
+    }
+
+    fn is_awaiting_initial_access(&self, resource_kind: &str) -> bool {
+        self.awaiting_initial_access
+            .lock()
+            .expect("awaiting_initial_access lock poisoned")
+            .contains(resource_kind)
+    }
+}
+
 #[async_trait]
 pub trait KubeClient: Sync + Send {
     async fn get_namespaces(&self) -> Result<Vec<Arc<Namespace>>>;
@@ -294,7 +320,7 @@ impl KubeClient for KubeClientImpl {
 
 fn make_store_and_watch<T>(
     api: Api<T>,
-    degraded_resource_kinds: Arc<Mutex<BTreeSet<String>>>,
+    watch_health: WatchHealth,
 ) -> (Store<T>, impl future::Future<Output = ()> + Send + 'static)
 where
     T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
@@ -308,9 +334,9 @@ where
         })
         .for_each(move |result| {
             match &result {
-                Ok(_) => update_watch_health(&degraded_resource_kinds, &resource_kind, true),
+                Ok(_) => update_watch_health(&watch_health, &resource_kind, true),
                 Err(err) => {
-                    update_watch_health(&degraded_resource_kinds, &resource_kind, false);
+                    update_watch_health(&watch_health, &resource_kind, false);
                     warn!("Error in watch loop for {resource_kind}: {err:?}");
                 }
             }
@@ -319,16 +345,18 @@ where
     (reader, fut)
 }
 
-fn update_watch_health(
-    degraded_resource_kinds: &Arc<Mutex<BTreeSet<String>>>,
-    resource_kind: &str,
-    healthy: bool,
-) {
-    let mut degraded = degraded_resource_kinds
+fn update_watch_health(watch_health: &WatchHealth, resource_kind: &str, healthy: bool) {
+    let mut degraded = watch_health
+        .degraded_resource_kinds
         .lock()
         .expect("degraded_resource_kinds lock poisoned");
     if healthy {
         degraded.remove(resource_kind);
+        watch_health
+            .awaiting_initial_access
+            .lock()
+            .expect("awaiting_initial_access lock poisoned")
+            .remove(resource_kind);
     } else {
         degraded.insert(resource_kind.to_string());
     }

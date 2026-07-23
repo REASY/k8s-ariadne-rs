@@ -169,9 +169,9 @@ fn write_snapshot_fixture(dir: &Path) {
 
 #[test]
 fn update_degraded_resource_kinds_marks_denied_resources_only() {
-    let degraded = Arc::new(Mutex::new(BTreeSet::new()));
+    let watch_health = WatchHealth::new();
     update_degraded_resource_kinds(
-        &degraded,
+        &watch_health,
         &[
             (AccessDecision::Allowed, "Pod"),
             (AccessDecision::Denied, "Node"),
@@ -179,22 +179,39 @@ fn update_degraded_resource_kinds_marks_denied_resources_only() {
             (AccessDecision::Indeterminate, "Deployment"),
         ],
     );
-    let values = degraded
+    let values = watch_health
+        .degraded_resource_kinds
         .lock()
         .expect("degraded lock poisoned")
         .iter()
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(values, vec!["Node".to_string(), "Service".to_string()]);
+    assert_eq!(
+        watch_health
+            .awaiting_initial_access
+            .lock()
+            .expect("awaiting lock poisoned")
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["Node".to_string(), "Service".to_string()]
+    );
 }
 
 #[test]
 fn watch_health_marks_errors_and_clears_recovered_kinds() {
-    let degraded = Arc::new(Mutex::new(BTreeSet::from(["Node".to_string()])));
+    let watch_health = WatchHealth::new();
+    watch_health
+        .degraded_resource_kinds
+        .lock()
+        .expect("degraded lock poisoned")
+        .insert("Node".to_string());
 
-    update_watch_health(&degraded, "Pod", false);
+    update_watch_health(&watch_health, "Pod", false);
     assert_eq!(
-        degraded
+        watch_health
+            .degraded_resource_kinds
             .lock()
             .expect("degraded lock poisoned")
             .iter()
@@ -203,9 +220,10 @@ fn watch_health_marks_errors_and_clears_recovered_kinds() {
         vec!["Node".to_string(), "Pod".to_string()]
     );
 
-    update_watch_health(&degraded, "Pod", true);
+    update_watch_health(&watch_health, "Pod", true);
     assert_eq!(
-        degraded
+        watch_health
+            .degraded_resource_kinds
             .lock()
             .expect("degraded lock poisoned")
             .iter()
@@ -245,7 +263,7 @@ async fn start_store_with_factory_respects_allowed_flag() {
 
 #[tokio::test]
 async fn store_state_or_empty_returns_empty_when_store_absent() {
-    let state = store_state_or_empty::<Namespace>(&None, "Namespace")
+    let state = store_state_or_empty::<Namespace>(&None, "Namespace", &WatchHealth::new())
         .await
         .expect("state fetch should succeed");
     assert!(state.is_empty());
@@ -253,11 +271,16 @@ async fn store_state_or_empty_returns_empty_when_store_absent() {
 
 #[tokio::test]
 async fn event_store_timeout_and_failure_are_errors_not_empty_state() {
+    let watch_health = WatchHealth::new();
     let (pending_store, _writer) = reflector::store::<Event>();
-    let timeout_err =
-        store_state_or_empty_with_timeout(&Some(pending_store), "Event", Duration::from_millis(1))
-            .await
-            .expect_err("an unready Event store must fail");
+    let timeout_err = store_state_or_empty_with_timeout(
+        &Some(pending_store),
+        "Event",
+        Duration::from_millis(1),
+        &watch_health,
+    )
+    .await
+    .expect_err("an unready Event store must fail");
     assert!(
         timeout_err
             .to_string()
@@ -266,15 +289,58 @@ async fn event_store_timeout_and_failure_are_errors_not_empty_state() {
 
     let (failed_store, writer) = reflector::store::<Event>();
     drop(writer);
-    let readiness_err =
-        store_state_or_empty_with_timeout(&Some(failed_store), "Event", Duration::from_millis(20))
-            .await
-            .expect_err("a failed Event store must fail without panicking");
+    let readiness_err = store_state_or_empty_with_timeout(
+        &Some(failed_store),
+        "Event",
+        Duration::from_millis(20),
+        &watch_health,
+    )
+    .await
+    .expect_err("a failed Event store must fail without panicking");
     assert!(
         readiness_err
             .to_string()
             .contains("Event store is not ready")
     );
+}
+
+#[tokio::test]
+async fn startup_denied_store_becomes_available_after_watch_recovery() {
+    let watch_health = WatchHealth::new();
+    update_degraded_resource_kinds(&watch_health, &[(AccessDecision::Denied, "Namespace")]);
+    let (store, mut writer) = reflector::store::<Namespace>();
+
+    let initially_empty = store_state_or_empty(&Some(store.clone()), "Namespace", &watch_health)
+        .await
+        .expect("startup-denied store should be intentionally empty");
+    assert!(initially_empty.is_empty());
+
+    writer.apply_watcher_event(&watcher::Event::Init);
+    writer.apply_watcher_event(&watcher::Event::InitApply(
+        test_namespace("team-a").as_ref().clone(),
+    ));
+    writer.apply_watcher_event(&watcher::Event::InitDone);
+    update_watch_health(&watch_health, "Namespace", true);
+
+    let recovered = store_state_or_empty(&Some(store.clone()), "Namespace", &watch_health)
+        .await
+        .expect("recovered store should return its initialized state");
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].metadata.name.as_deref(), Some("team-a"));
+    assert!(
+        watch_health
+            .degraded_resource_kinds
+            .lock()
+            .expect("degraded lock poisoned")
+            .is_empty()
+    );
+    assert!(!watch_health.is_awaiting_initial_access("Namespace"));
+
+    update_watch_health(&watch_health, "Namespace", false);
+    let stale_but_preserved = store_state_or_empty(&Some(store), "Namespace", &watch_health)
+        .await
+        .expect("a later watch failure must not revert a recovered kind to startup-empty");
+    assert_eq!(stale_but_preserved.len(), 1);
 }
 
 #[tokio::test]

@@ -13,10 +13,6 @@ pub(crate) enum AccessDecision {
 }
 
 impl AccessDecision {
-    pub(crate) fn should_start_watch(self) -> bool {
-        !matches!(self, Self::Denied)
-    }
-
     pub(crate) fn is_denied(self) -> bool {
         matches!(self, Self::Denied)
     }
@@ -298,7 +294,6 @@ mod tests {
 
         let allowed = access.can_read(RESOURCE_STORAGE_CLASS).await;
         assert_eq!(allowed, AccessDecision::Allowed);
-        assert!(allowed.should_start_watch());
         assert!(!allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
@@ -321,7 +316,6 @@ mod tests {
 
         let allowed = access.can_read(RESOURCE_POD).await;
         assert_eq!(allowed, AccessDecision::Denied);
-        assert!(!allowed.should_start_watch());
         assert!(allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
@@ -344,7 +338,6 @@ mod tests {
 
         let allowed = access.can_read(RESOURCE_POD).await;
         assert_eq!(allowed, AccessDecision::Indeterminate);
-        assert!(allowed.should_start_watch());
         assert!(!allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
