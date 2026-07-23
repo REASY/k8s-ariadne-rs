@@ -173,10 +173,10 @@ fn update_degraded_resource_kinds_marks_denied_resources_only() {
     update_degraded_resource_kinds(
         &degraded,
         &[
-            (true, "Pod"),
-            (false, "Node"),
-            (false, "Service"),
-            (true, "Deployment"),
+            (AccessDecision::Allowed, "Pod"),
+            (AccessDecision::Denied, "Node"),
+            (AccessDecision::Denied, "Service"),
+            (AccessDecision::Indeterminate, "Deployment"),
         ],
     );
     let values = degraded

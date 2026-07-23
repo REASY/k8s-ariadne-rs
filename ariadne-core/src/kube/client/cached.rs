@@ -4,16 +4,16 @@
 //! allowed stores must become ready before their contents are returned.
 
 use super::{
-    AccessChecker, Api, Arc, BTreeSet, Client, Config, ConfigMap, DaemonSet, Deployment,
-    EndpointSlice, Event, Info, Ingress, Job, JoinHandle, KubeClient, KubeConfigOptions, Mutex,
-    Namespace, NetworkPolicy, Node, PersistentVolume, PersistentVolumeClaim, Pod,
-    RESOURCE_CONFIG_MAP, RESOURCE_DAEMON_SET, RESOURCE_DEPLOYMENT, RESOURCE_ENDPOINT_SLICE,
-    RESOURCE_EVENT, RESOURCE_INGRESS, RESOURCE_JOB, RESOURCE_NAMESPACE, RESOURCE_NETWORK_POLICY,
-    RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME, RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD,
-    RESOURCE_REPLICA_SET, RESOURCE_SERVICE, RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET,
-    RESOURCE_STORAGE_CLASS, ReplicaSet, Resource, Result, STORE_READY_TIMEOUT_SECONDS, Service,
-    ServiceAccount, StatefulSet, StorageClass, Store, install_rustls_provider, load_kube_config,
-    make_store_and_watch,
+    AccessChecker, AccessDecision, Api, Arc, BTreeSet, Client, Config, ConfigMap, DaemonSet,
+    Deployment, EndpointSlice, Event, Info, Ingress, Job, JoinHandle, KubeClient,
+    KubeConfigOptions, Mutex, Namespace, NetworkPolicy, Node, PersistentVolume,
+    PersistentVolumeClaim, Pod, RESOURCE_CONFIG_MAP, RESOURCE_DAEMON_SET, RESOURCE_DEPLOYMENT,
+    RESOURCE_ENDPOINT_SLICE, RESOURCE_EVENT, RESOURCE_INGRESS, RESOURCE_JOB, RESOURCE_NAMESPACE,
+    RESOURCE_NETWORK_POLICY, RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME,
+    RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
+    RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS, ReplicaSet, Resource,
+    Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet, StorageClass, Store,
+    install_rustls_provider, load_kube_config, make_store_and_watch,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -177,13 +177,17 @@ struct StoreStarter {
 }
 
 impl StoreStarter {
-    fn start<T>(&self, api: Api<T>, allowed: bool) -> (Option<Store<T>>, Option<JoinHandle<()>>)
+    fn start<T>(
+        &self,
+        api: Api<T>,
+        access: AccessDecision,
+    ) -> (Option<Store<T>>, Option<JoinHandle<()>>)
     where
         T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
         T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
     {
         let degraded_resource_kinds = self.degraded_resource_kinds.clone();
-        start_store_with_factory(allowed, || {
+        start_store_with_factory(access.should_start_watch(), || {
             make_store_and_watch(api, degraded_resource_kinds)
         })
     }
@@ -290,13 +294,13 @@ pub(super) fn event_store_ready_timeout() -> Duration {
 
 pub(super) fn update_degraded_resource_kinds(
     degraded_resource_kinds: &Arc<Mutex<BTreeSet<String>>>,
-    access: &[(bool, &'static str)],
+    access: &[(AccessDecision, &'static str)],
 ) {
     let mut kinds = degraded_resource_kinds
         .lock()
         .expect("degraded_resource_kinds lock poisoned");
-    for (allowed, kind) in access {
-        if !allowed {
+    for (decision, kind) in access {
+        if decision.is_denied() {
             kinds.insert((*kind).to_string());
         }
     }

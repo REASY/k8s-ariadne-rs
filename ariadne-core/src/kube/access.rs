@@ -5,6 +5,23 @@ use kube::api::PostParams;
 use kube::{Api, Client};
 use tracing::warn;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccessDecision {
+    Allowed,
+    Denied,
+    Indeterminate,
+}
+
+impl AccessDecision {
+    pub(crate) fn should_start_watch(self) -> bool {
+        !matches!(self, Self::Denied)
+    }
+
+    pub(crate) fn is_denied(self) -> bool {
+        matches!(self, Self::Denied)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ResourceScope {
     Namespaced,
@@ -107,26 +124,26 @@ impl AccessChecker {
         }
     }
 
-    pub(crate) async fn can_read(&self, descriptor: ResourceDescriptor) -> bool {
+    pub(crate) async fn can_read(&self, descriptor: ResourceDescriptor) -> AccessDecision {
         let list_ok = match self.check(descriptor, "list").await {
             Ok(allowed) => allowed,
             Err(err) => {
                 self.log_check_error(descriptor, "list", &err);
-                return false;
+                return AccessDecision::Indeterminate;
             }
         };
         let watch_ok = match self.check(descriptor, "watch").await {
             Ok(allowed) => allowed,
             Err(err) => {
                 self.log_check_error(descriptor, "watch", &err);
-                return false;
+                return AccessDecision::Indeterminate;
             }
         };
         if list_ok && watch_ok {
-            return true;
+            return AccessDecision::Allowed;
         }
         self.log_denied(descriptor, list_ok, watch_ok);
-        false
+        AccessDecision::Denied
     }
 
     async fn check(
@@ -187,7 +204,7 @@ impl AccessChecker {
     ) {
         let scope = self.scope_label(descriptor);
         warn!(
-            "RBAC: failed to check {} permission for {} on {} at {}: {:?}. Skipping.",
+            "RBAC: failed to check {} permission for {} on {} at {}: {:?}. Permission is indeterminate; attempting the actual list/watch.",
             verb,
             descriptor.kind,
             descriptor.fq_resource(),
@@ -273,14 +290,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_read_returns_true_when_list_and_watch_allowed() {
+    async fn can_read_returns_allowed_when_list_and_watch_are_allowed() {
         let responses = Arc::new(Mutex::new(vec![ssar_response(true), ssar_response(true)]));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = test_client(responses, requests.clone());
         let access = AccessChecker::new(client, None);
 
         let allowed = access.can_read(RESOURCE_STORAGE_CLASS).await;
-        assert!(allowed);
+        assert_eq!(allowed, AccessDecision::Allowed);
+        assert!(allowed.should_start_watch());
+        assert!(!allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
         assert_eq!(captured.len(), 2);
@@ -294,14 +313,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_read_returns_false_when_watch_denied() {
+    async fn can_read_returns_denied_when_watch_is_denied() {
         let responses = Arc::new(Mutex::new(vec![ssar_response(true), ssar_response(false)]));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = test_client(responses, requests.clone());
         let access = AccessChecker::new(client, Some("team-a"));
 
         let allowed = access.can_read(RESOURCE_POD).await;
-        assert!(!allowed);
+        assert_eq!(allowed, AccessDecision::Denied);
+        assert!(!allowed.should_start_watch());
+        assert!(allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
         assert_eq!(captured.len(), 2);
@@ -315,14 +336,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_read_returns_false_when_list_errors() {
+    async fn can_read_returns_indeterminate_when_list_check_errors() {
         let responses = Arc::new(Mutex::new(vec![error_response(StatusCode::FORBIDDEN)]));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = test_client(responses, requests.clone());
         let access = AccessChecker::new(client, Some("team-a"));
 
         let allowed = access.can_read(RESOURCE_POD).await;
-        assert!(!allowed);
+        assert_eq!(allowed, AccessDecision::Indeterminate);
+        assert!(allowed.should_start_watch());
+        assert!(!allowed.is_denied());
 
         let captured = requests.lock().expect("lock requests");
         assert_eq!(captured.len(), 1);
@@ -330,5 +353,24 @@ mod tests {
         assert_eq!(attrs["verb"], "list");
         assert_eq!(attrs["resource"], "pods");
         assert_eq!(attrs["namespace"], "team-a");
+    }
+
+    #[tokio::test]
+    async fn can_read_returns_indeterminate_when_watch_check_errors() {
+        let responses = Arc::new(Mutex::new(vec![
+            ssar_response(true),
+            error_response(StatusCode::SERVICE_UNAVAILABLE),
+        ]));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let client = test_client(responses, requests.clone());
+        let access = AccessChecker::new(client, Some("team-a"));
+
+        let decision = access.can_read(RESOURCE_POD).await;
+
+        assert_eq!(decision, AccessDecision::Indeterminate);
+        let captured = requests.lock().expect("lock requests");
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0]["spec"]["resourceAttributes"]["verb"], "list");
+        assert_eq!(captured[1]["spec"]["resourceAttributes"]["verb"], "watch");
     }
 }
