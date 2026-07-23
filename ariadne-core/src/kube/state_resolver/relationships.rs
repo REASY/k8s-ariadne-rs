@@ -3,9 +3,9 @@
 //! Every relationship is emitted only after both endpoint identifiers are known.
 
 use crate::state_resolver::{
-    Arc, ClusterState, ClusterStateResolver, EndpointSlice, EndpointSliceDerived, HashMap, Ingress,
-    IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot, PersistentVolume, Pod, Resource,
-    ResourceExt, Result, Service,
+    Arc, ClusterState, ClusterStateResolver, EndpointSlice, EndpointSliceDerived, HashMap, HashSet,
+    Ingress, IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot, PersistentVolume, Pod,
+    Resource, ResourceExt, Result, Service,
 };
 use crate::types::{
     Container, ContainerType, Edge, Endpoint, EndpointAddress, GenericObject, Host,
@@ -394,6 +394,7 @@ impl ClusterStateResolver {
     pub(super) fn get_derived_from_ingress(ingresses: &[Arc<Ingress>]) -> Result<IngressDerived> {
         let mut hosts: Vec<Arc<Host>> = Vec::new();
         let mut ingress_service_backends: Vec<Arc<IngressServiceBackend>> = Vec::new();
+        let mut seen_backend_uids = HashSet::new();
 
         // TODO: Derive a backend from `spec.default_backend` as well as rule paths.
         for ingress in ingresses {
@@ -416,9 +417,24 @@ impl ClusterStateResolver {
                                 http.paths.iter().for_each(|p| {
                                     p.backend.service.as_ref().inspect(|s| {
                                         let service_name = s.name.as_str();
-                                        let ingress_svc_backend_uid = format!(
-                                            "IngressServiceBackend:{ingress_id}:{service_name}"
-                                        );
+                                        let port_identity = match s.port.as_ref() {
+                                            Some(port) => match (port.name.as_deref(), port.number) {
+                                                (Some(name), None) => format!("name:{name}"),
+                                                (None, Some(number)) => format!("number:{number}"),
+                                                (Some(name), Some(number)) => {
+                                                    format!("invalid:name:{name}:number:{number}")
+                                                }
+                                                (None, None) => "unspecified".to_string(),
+                                            },
+                                            None => "unspecified".to_string(),
+                                        };
+                                        let ingress_svc_backend_uid =
+                                            format!("IngressServiceBackend:{ingress_id}:{service_name}:{port_identity}");
+                                        if !seen_backend_uids
+                                            .insert(ingress_svc_backend_uid.clone())
+                                        {
+                                            return;
+                                        }
                                         // Prepare for the edges:
                                         // 1. (Ingress) -[:DefinesBackend]-> (IngressBackend)
                                         // 2. (IngressBackend) [:TargetsService]-> Service

@@ -391,6 +391,25 @@ fn ingress_with_service(
     uid: &str,
     service_name: &str,
 ) -> Arc<Ingress> {
+    ingress_with_service_ports(
+        name,
+        namespace,
+        uid,
+        service_name,
+        vec![ServiceBackendPort {
+            number: Some(80),
+            ..Default::default()
+        }],
+    )
+}
+
+fn ingress_with_service_ports(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    service_name: &str,
+    ports: Vec<ServiceBackendPort>,
+) -> Arc<Ingress> {
     Arc::new(Ingress {
         metadata: ObjectMeta {
             name: Some(name.to_string()),
@@ -401,20 +420,20 @@ fn ingress_with_service(
         spec: Some(IngressSpec {
             rules: Some(vec![IngressRule {
                 http: Some(HTTPIngressRuleValue {
-                    paths: vec![HTTPIngressPath {
-                        backend: IngressBackend {
-                            service: Some(KubeIngressServiceBackend {
-                                name: service_name.to_string(),
-                                port: Some(ServiceBackendPort {
-                                    number: Some(80),
-                                    ..Default::default()
+                    paths: ports
+                        .into_iter()
+                        .map(|port| HTTPIngressPath {
+                            backend: IngressBackend {
+                                service: Some(KubeIngressServiceBackend {
+                                    name: service_name.to_string(),
+                                    port: Some(port),
                                 }),
-                            }),
+                                ..Default::default()
+                            },
+                            path_type: "Prefix".to_string(),
                             ..Default::default()
-                        },
-                        path_type: "Prefix".to_string(),
-                        ..Default::default()
-                    }],
+                        })
+                        .collect(),
                 }),
                 ..Default::default()
             }]),
@@ -583,8 +602,8 @@ async fn ingress_service_edges_are_resolved_within_the_ingress_namespace() {
     .expect("resolver should build namespace-qualified Service relationships");
     let state_handle = resolver.resolve().await.expect("state should resolve");
     let state = state_handle.lock().expect("state lock poisoned");
-    let backend_team_a = "IngressServiceBackend:ingress-team-a:api";
-    let backend_team_b = "IngressServiceBackend:ingress-team-b:api";
+    let backend_team_a = "IngressServiceBackend:ingress-team-a:api:number:80";
+    let backend_team_b = "IngressServiceBackend:ingress-team-b:api:number:80";
 
     assert!(has_edge(
         &state,
@@ -636,13 +655,80 @@ async fn missing_ingress_service_does_not_abort_graph_build() {
     .expect("an unresolved Service must not abort graph construction");
     let state_handle = resolver.resolve().await.expect("state should resolve");
     let state = state_handle.lock().expect("state lock poisoned");
-    let backend_uid = "IngressServiceBackend:ingress-missing-service:missing";
+    let backend_uid = "IngressServiceBackend:ingress-missing-service:missing:number:80";
 
     assert!(state.node_by_uid(backend_uid).is_some());
     assert!(
         state
             .get_edges_by_type(&Edge::TargetsService)
             .all(|edge| edge.source != backend_uid)
+    );
+}
+
+#[tokio::test]
+async fn ingress_backend_identity_includes_port_and_deduplicates_repeated_paths() {
+    let snapshot = SnapshotFrame {
+        namespaces: vec![namespace("team-a", "namespace-team-a")],
+        ingresses: vec![ingress_with_service_ports(
+            "web",
+            "team-a",
+            "ingress-multi-port",
+            "api",
+            vec![
+                ServiceBackendPort {
+                    number: Some(80),
+                    ..Default::default()
+                },
+                ServiceBackendPort {
+                    number: Some(8080),
+                    ..Default::default()
+                },
+                ServiceBackendPort {
+                    name: Some("http".to_string()),
+                    ..Default::default()
+                },
+                ServiceBackendPort {
+                    name: Some("http".to_string()),
+                    ..Default::default()
+                },
+            ],
+        )],
+        services: vec![service("api", "team-a", "service-api")],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should preserve distinct Ingress backend ports");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    let backend_uids = [
+        "IngressServiceBackend:ingress-multi-port:api:number:80",
+        "IngressServiceBackend:ingress-multi-port:api:number:8080",
+        "IngressServiceBackend:ingress-multi-port:api:name:http",
+    ];
+
+    for backend_uid in backend_uids {
+        assert!(state.node_by_uid(backend_uid).is_some());
+        assert!(has_edge(
+            &state,
+            Edge::TargetsService,
+            backend_uid,
+            "service-api"
+        ));
+    }
+    assert_eq!(
+        state
+            .get_nodes_by_type(&ResourceType::IngressServiceBackend)
+            .count(),
+        3,
+        "duplicate paths to the same Service and port must share one backend node"
     );
 }
 
