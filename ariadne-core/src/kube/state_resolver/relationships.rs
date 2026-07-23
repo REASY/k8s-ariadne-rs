@@ -8,8 +8,8 @@ use crate::state_resolver::{
     Resource, ResourceExt, Result, Service,
 };
 use crate::types::{
-    Container, ContainerType, Edge, Endpoint, EndpointAddress, GenericObject, Host,
-    IngressServiceBackend, ObjectHasher, ObjectIdentifier, ResourceAttributes, ResourceType,
+    Container, ContainerType, Edge, Endpoint, EndpointAddress, EndpointIdentity, GenericObject,
+    Host, IngressServiceBackend, ObjectIdentifier, ResourceAttributes, ResourceType,
 };
 use tracing::{trace, warn};
 
@@ -473,10 +473,10 @@ impl ClusterStateResolver {
         for slice in endpoints_slices {
             if let Some(endpoint_slice_id) = slice.metadata.uid.as_ref() {
                 slice.endpoints.iter().for_each(|endpoint| {
-                    let obj_hash = endpoint.get_hash();
+                    let identity_digest = endpoint.identity_digest();
                     let endpoint_uid = format!(
                         "Endpoint:{}:{}:{}",
-                        endpoint_slice_id, slice.address_type, obj_hash
+                        endpoint_slice_id, slice.address_type, identity_digest
                     );
                     let endpoint_id = ObjectIdentifier {
                         uid: endpoint_uid.clone(),

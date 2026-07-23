@@ -12,7 +12,7 @@ use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use schemars;
 use serde::{Deserialize, Serialize};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
@@ -91,6 +91,10 @@ impl ResourceType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k8s_openapi::api::core::v1::ObjectReference;
+    use k8s_openapi::api::discovery::v1::{
+        Endpoint as KubernetesEndpoint, EndpointConditions, EndpointHints, ForZone,
+    };
 
     #[test]
     fn resource_type_try_new_accepts_all_variants() {
@@ -98,6 +102,76 @@ mod tests {
             let parsed = ResourceType::try_new(&resource.to_string());
             assert!(parsed.is_ok(), "missing ResourceType mapping: {resource}");
         }
+    }
+
+    #[test]
+    fn endpoint_identity_is_stable_across_mutable_state_changes() {
+        let original = KubernetesEndpoint {
+            addresses: vec!["10.0.0.1".to_string()],
+            conditions: Some(EndpointConditions {
+                ready: Some(true),
+                serving: Some(true),
+                terminating: Some(false),
+            }),
+            target_ref: Some(ObjectReference {
+                kind: Some("Pod".to_string()),
+                name: Some("api".to_string()),
+                namespace: Some("default".to_string()),
+                resource_version: Some("1".to_string()),
+                uid: Some("pod-api".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let changed = KubernetesEndpoint {
+            conditions: Some(EndpointConditions {
+                ready: Some(false),
+                serving: Some(false),
+                terminating: Some(true),
+            }),
+            hints: Some(EndpointHints {
+                for_zones: Some(vec![ForZone {
+                    name: "zone-b".to_string(),
+                }]),
+            }),
+            hostname: Some("api-0".to_string()),
+            node_name: Some("node-b".to_string()),
+            target_ref: original.target_ref.clone().map(|mut target_ref| {
+                target_ref.resource_version = Some("2".to_string());
+                target_ref
+            }),
+            zone: Some("zone-b".to_string()),
+            ..original.clone()
+        };
+
+        assert_ne!(original, changed);
+        assert_eq!(original.identity_digest(), changed.identity_digest());
+    }
+
+    #[test]
+    fn endpoint_identity_canonicalizes_and_structurally_encodes_addresses() {
+        let ordered = KubernetesEndpoint {
+            addresses: vec!["10.0.0.1".to_string(), "10.0.0.22".to_string()],
+            ..Default::default()
+        };
+        let reversed = KubernetesEndpoint {
+            addresses: vec!["10.0.0.22".to_string(), "10.0.0.1".to_string()],
+            ..Default::default()
+        };
+        let ambiguous_without_lengths_a = KubernetesEndpoint {
+            addresses: vec!["a".to_string(), "bc".to_string()],
+            ..Default::default()
+        };
+        let ambiguous_without_lengths_b = KubernetesEndpoint {
+            addresses: vec!["ab".to_string(), "c".to_string()],
+            ..Default::default()
+        };
+
+        assert_eq!(ordered.identity_digest(), reversed.identity_digest());
+        assert_ne!(
+            ambiguous_without_lengths_a.identity_digest(),
+            ambiguous_without_lengths_b.identity_digest()
+        );
     }
 }
 
@@ -514,49 +588,45 @@ fn as_object_meta(
     }
 }
 
+pub(crate) trait EndpointIdentity {
+    fn identity_digest(&self) -> String;
+}
+
+impl EndpointIdentity for k8s_openapi::api::discovery::v1::Endpoint {
+    fn identity_digest(&self) -> String {
+        endpoint_identity_digest(self)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
+#[doc(hidden)]
 pub trait ObjectHasher {
     fn get_hash(&self) -> u64;
 }
 
 impl ObjectHasher for k8s_openapi::api::discovery::v1::Endpoint {
     fn get_hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-
-        let mut addresses = self.addresses.clone();
-        addresses.sort();
-        addresses
-            .iter()
-            .for_each(|addr| hasher.write(addr.as_bytes()));
-        self.conditions.as_ref().inspect(|c| {
-            c.ready.inspect(|b| hasher.write_i8(*b as i8));
-            c.serving.inspect(|b| hasher.write_i8(*b as i8));
-            c.terminating.inspect(|b| hasher.write_i8(*b as i8));
-        });
-
-        self.hints.as_ref().inspect(|h| {
-            h.for_zones.as_ref().inspect(|zones| {
-                zones.iter().for_each(|zone| {
-                    hasher.write(zone.name.as_bytes());
-                })
-            });
-        });
-        self.hostname
-            .as_ref()
-            .inspect(|h| hasher.write(h.as_bytes()));
-        self.node_name
-            .as_ref()
-            .inspect(|n| hasher.write(n.as_bytes()));
-        self.target_ref.as_ref().inspect(|t| {
-            t.kind.as_ref().inspect(|k| hasher.write(k.as_bytes()));
-            t.name.as_ref().inspect(|n| hasher.write(n.as_bytes()));
-            t.namespace.as_ref().inspect(|n| hasher.write(n.as_bytes()));
-            t.resource_version
-                .as_ref()
-                .inspect(|n| hasher.write(n.as_bytes()));
-            t.uid.as_ref().inspect(|u| hasher.write(u.as_bytes()));
-        });
-        self.zone.as_ref().inspect(|z| hasher.write(z.as_bytes()));
-
-        hasher.finish()
+        let digest = endpoint_identity_digest(self);
+        u64::from_be_bytes(
+            digest[..size_of::<u64>()]
+                .try_into()
+                .expect("SHA-256 digest contains eight bytes"),
+        )
     }
+}
+
+fn endpoint_identity_digest(endpoint: &k8s_openapi::api::discovery::v1::Endpoint) -> [u8; 32] {
+    let mut addresses = endpoint.addresses.clone();
+    addresses.sort();
+    let mut hasher = Sha256::new();
+    hasher.update(b"ariadne:endpoint-identity:v1");
+    hasher.update((addresses.len() as u64).to_be_bytes());
+    for address in addresses {
+        let bytes = address.as_bytes();
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
+    }
+    hasher.finalize().into()
 }

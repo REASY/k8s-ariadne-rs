@@ -1,6 +1,7 @@
 use super::*;
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::{PersistentVolumeClaimVolumeSource, PodSpec, Volume};
+use k8s_openapi::api::discovery::v1::{Endpoint as KubernetesEndpoint, EndpointConditions};
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IngressBackend, IngressRule,
     IngressServiceBackend as KubeIngressServiceBackend, IngressSpec, ServiceBackendPort,
@@ -406,6 +407,36 @@ fn service(name: &str, namespace: &str, uid: &str) -> Arc<Service> {
     })
 }
 
+fn endpoint_slice(
+    uid: &str,
+    resource_version: &str,
+    addresses: &[&str],
+    ready: bool,
+) -> Arc<EndpointSlice> {
+    Arc::new(EndpointSlice {
+        metadata: ObjectMeta {
+            name: Some("api-endpoints".to_string()),
+            namespace: Some("default".to_string()),
+            uid: Some(uid.to_string()),
+            resource_version: Some(resource_version.to_string()),
+            ..Default::default()
+        },
+        address_type: "IPv4".to_string(),
+        endpoints: vec![KubernetesEndpoint {
+            addresses: addresses
+                .iter()
+                .map(|address| (*address).to_string())
+                .collect(),
+            conditions: Some(EndpointConditions {
+                ready: Some(ready),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+}
+
 fn ingress_with_service(
     name: &str,
     namespace: &str,
@@ -508,6 +539,126 @@ fn has_edge(state: &ClusterState, edge_type: Edge, source: &str, target: &str) -
     state
         .get_edges_by_type(&edge_type)
         .any(|edge| edge.source == source && edge.target == target)
+}
+
+#[tokio::test]
+async fn endpoint_state_change_modifies_stable_derived_node() {
+    let initial = SnapshotFrame {
+        endpoint_slices: vec![endpoint_slice(
+            "endpoint-slice-api",
+            "1",
+            &["10.0.0.1"],
+            true,
+        )],
+        ..Default::default()
+    };
+    let changed = SnapshotFrame {
+        endpoint_slices: vec![endpoint_slice(
+            "endpoint-slice-api",
+            "2",
+            &["10.0.0.1"],
+            false,
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize from first EndpointSlice snapshot");
+    let initial_endpoint_uid = {
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let state = state_handle.lock().expect("state lock poisoned");
+        state
+            .get_nodes_by_type(&ResourceType::Endpoint)
+            .next()
+            .expect("derived Endpoint should exist")
+            .id
+            .uid
+            .clone()
+    };
+    let backend = Arc::new(MockGraphBackend::default());
+
+    let outcome = resolver
+        .sync_from_source(backend.clone())
+        .await
+        .expect("Endpoint readiness change should sync");
+
+    assert_eq!(outcome.diff.added_nodes, 0);
+    assert_eq!(outcome.diff.removed_nodes, 0);
+    assert_eq!(
+        outcome.diff.modified_nodes, 2,
+        "the EndpointSlice and stable derived Endpoint should be modified"
+    );
+    assert_eq!(outcome.diff.added_edges, 0);
+    assert_eq!(outcome.diff.removed_edges, 0);
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    let current_endpoint = state
+        .get_nodes_by_type(&ResourceType::Endpoint)
+        .next()
+        .expect("derived Endpoint should remain");
+    assert_eq!(current_endpoint.id.uid, initial_endpoint_uid);
+    let Some(ResourceAttributes::Endpoint { endpoint }) = current_endpoint.attributes.as_deref()
+    else {
+        panic!("derived node should contain Endpoint attributes");
+    };
+    assert_eq!(
+        endpoint
+            .conditions
+            .as_ref()
+            .and_then(|conditions| conditions.ready),
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn endpoint_address_change_replaces_derived_endpoint_identity() {
+    let initial = SnapshotFrame {
+        endpoint_slices: vec![endpoint_slice(
+            "endpoint-slice-api",
+            "1",
+            &["10.0.0.1"],
+            true,
+        )],
+        ..Default::default()
+    };
+    let changed = SnapshotFrame {
+        endpoint_slices: vec![endpoint_slice(
+            "endpoint-slice-api",
+            "2",
+            &["10.0.0.2"],
+            true,
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize from first EndpointSlice snapshot");
+    let backend = Arc::new(MockGraphBackend::default());
+
+    let outcome = resolver
+        .sync_from_source(backend)
+        .await
+        .expect("Endpoint address change should sync");
+
+    assert_eq!(outcome.diff.added_nodes, 2);
+    assert_eq!(outcome.diff.removed_nodes, 2);
+    assert_eq!(outcome.diff.modified_nodes, 1);
+    assert_eq!(outcome.diff.added_edges, 3);
+    assert_eq!(outcome.diff.removed_edges, 3);
 }
 
 #[tokio::test]
