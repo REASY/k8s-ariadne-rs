@@ -28,6 +28,8 @@ pub enum GraphScopeKind {
 pub struct GraphScope {
     pub kind: GraphScopeKind,
     pub namespace: Option<String>,
+    #[serde(default)]
+    pub included_cluster_resource_kinds: Vec<String>,
 }
 
 impl GraphScope {
@@ -35,6 +37,7 @@ impl GraphScope {
         Self {
             kind: GraphScopeKind::Cluster,
             namespace: None,
+            included_cluster_resource_kinds: Vec::new(),
         }
     }
 
@@ -42,6 +45,12 @@ impl GraphScope {
         Self {
             kind: GraphScopeKind::Namespace,
             namespace: Some(namespace.into()),
+            included_cluster_resource_kinds: vec![
+                "Namespace".to_string(),
+                "Node".to_string(),
+                "PersistentVolume".to_string(),
+                "StorageClass".to_string(),
+            ],
         }
     }
 }
@@ -308,6 +317,23 @@ pub fn rebuild_response(rebuild: &RebuildHealth) -> RebuildHealthResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn namespace_scope_reports_included_cluster_context() {
+        let scope = GraphScope::namespace("team-a");
+
+        assert_eq!(scope.kind, GraphScopeKind::Namespace);
+        assert_eq!(scope.namespace.as_deref(), Some("team-a"));
+        assert_eq!(
+            scope.included_cluster_resource_kinds,
+            vec!["Namespace", "Node", "PersistentVolume", "StorageClass"]
+        );
+        assert!(
+            GraphScope::cluster()
+                .included_cluster_resource_kinds
+                .is_empty()
+        );
+    }
 
     #[test]
     fn coverage_response_returns_sorted_kinds() {

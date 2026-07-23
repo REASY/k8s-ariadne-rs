@@ -129,6 +129,12 @@ cargo run --release -p ariadne-mcp
 Environment-variable names and `valueFrom` references remain queryable in both modes. Other
 sensitive-field redaction is unaffected by this setting.
 
+When `KUBE_NAMESPACE` is set, Ariadne watches namespaced resources only in that namespace and
+restricts the Namespace watch to that Namespace. It still reads cluster-scoped Nodes,
+PersistentVolumes, and StorageClasses so relationships such as `Pod → Node` and
+`PVC → PV → StorageClass` remain complete. The Kubernetes identity therefore needs `list` and
+`watch` permission for those cluster-scoped resources.
+
 By default this starts an HTTP MCP server on:
 
 ```text

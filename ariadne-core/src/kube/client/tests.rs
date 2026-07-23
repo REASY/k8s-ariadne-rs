@@ -56,6 +56,15 @@ fn unspecified_kubeconfig_allows_incluster_fallback() {
     ));
 }
 
+#[test]
+fn namespace_watcher_is_restricted_to_selected_namespace() {
+    assert_eq!(
+        namespace_watcher_config(Some("team-a")).field_selector,
+        Some("metadata.name=team-a".to_string())
+    );
+    assert!(namespace_watcher_config(None).field_selector.is_none());
+}
+
 struct TempDir {
     path: PathBuf,
 }

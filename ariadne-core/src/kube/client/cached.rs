@@ -15,7 +15,7 @@ use super::{
     RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
     RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS, ReplicaSet, Resource,
     Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet, StorageClass, Store,
-    WatchHealth, install_rustls_provider, load_kube_config, make_store_and_watch,
+    WatchHealth, install_rustls_provider, load_kube_config, make_store_and_watch, watcher,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -219,8 +219,22 @@ impl StoreStarter {
         T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
         T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
     {
+        self.start_with_config(api, watcher::Config::default())
+    }
+
+    fn start_with_config<T>(
+        &self,
+        api: Api<T>,
+        watcher_config: watcher::Config,
+    ) -> (Option<Store<T>>, Option<JoinHandle<()>>)
+    where
+        T: Resource + Clone + DeserializeOwned + Debug + Send + Sync + 'static,
+        T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+    {
         let watch_health = self.watch_health.clone();
-        start_store_with_factory(true, || make_store_and_watch(api, watch_health))
+        start_store_with_factory(true, || {
+            make_store_and_watch(api, watcher_config, watch_health)
+        })
     }
 }
 
@@ -326,6 +340,12 @@ pub(super) fn event_store_ready_timeout() -> Duration {
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(4))
+}
+
+pub(super) fn namespace_watcher_config(maybe_ns: Option<&str>) -> watcher::Config {
+    maybe_ns
+        .map(|namespace| watcher::Config::default().fields(&format!("metadata.name={namespace}")))
+        .unwrap_or_default()
 }
 
 pub(super) fn update_degraded_resource_kinds(
@@ -474,7 +494,9 @@ impl CachedKubeClient {
             stores.start(persistent_volume_claim_api);
         let (node_store, node_watch) = stores.start(node_api);
         let (service_account_store, service_account_watch) = stores.start(service_account_api);
-        let (namespace_store, namespace_watch) = stores.start(namespace_api);
+        let namespace_watcher_config = namespace_watcher_config(maybe_ns);
+        let (namespace_store, namespace_watch) =
+            stores.start_with_config(namespace_api, namespace_watcher_config);
         let (event_store, event_store_watch) = stores.start(event_api);
 
         Ok(Self {

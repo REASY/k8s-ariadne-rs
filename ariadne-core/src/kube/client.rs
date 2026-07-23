@@ -52,8 +52,9 @@ mod snapshot;
 pub use cached::CachedKubeClient;
 #[cfg(test)]
 use cached::{
-    event_store_ready_timeout, start_store_with_factory, store_ready_timeout, store_state_or_empty,
-    store_state_or_empty_with_timeout, update_degraded_resource_kinds, wait_for_store_readiness,
+    event_store_ready_timeout, namespace_watcher_config, start_store_with_factory,
+    store_ready_timeout, store_state_or_empty, store_state_or_empty_with_timeout,
+    update_degraded_resource_kinds, wait_for_store_readiness,
 };
 pub use snapshot::SnapshotKubeClient;
 
@@ -320,6 +321,7 @@ impl KubeClient for KubeClientImpl {
 
 fn make_store_and_watch<T>(
     api: Api<T>,
+    watcher_config: watcher::Config,
     watch_health: WatchHealth,
 ) -> (Store<T>, impl future::Future<Output = ()> + Send + 'static)
 where
@@ -328,7 +330,7 @@ where
 {
     let (reader, writer) = reflector::store();
     let resource_kind = T::kind(&T::DynamicType::default()).into_owned();
-    let fut = reflector(writer, watcher(api, Default::default()).default_backoff())
+    let fut = reflector(writer, watcher(api, watcher_config).default_backoff())
         .modify(|item| {
             item.managed_fields_mut().clear();
         })
