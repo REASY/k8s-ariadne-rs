@@ -2,6 +2,8 @@ mod agent;
 mod error;
 mod gui;
 mod gui_dioxus;
+mod gui_results;
+mod gui_shared;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
