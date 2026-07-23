@@ -3,7 +3,7 @@ use crate::state::ClusterState;
 use crate::types::{Cluster, Edge, ObjectIdentifier};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    ContainerState, ContainerStateTerminated, ContainerStatus, Pod, PodStatus,
+    ConfigMap, ContainerState, ContainerStateTerminated, ContainerStatus, Pod, PodStatus,
 };
 use k8s_openapi::apimachinery::pkg::version::Info;
 use std::sync::{Arc, Mutex};
@@ -38,6 +38,47 @@ fn pod(uid: &str, name: &str, namespace: &str) -> GenericObject {
         resource_type: ResourceType::Pod,
         attributes: Some(Box::new(ResourceAttributes::Pod { pod: Arc::new(pod) })),
     }
+}
+
+#[test]
+fn node_serialization_redacts_config_map_payloads() {
+    let config_map = ConfigMap {
+        metadata: ObjectMeta {
+            name: Some("settings".to_string()),
+            namespace: Some("team-a".to_string()),
+            uid: Some("config-map-1".to_string()),
+            annotations: Some(std::collections::BTreeMap::from([(
+                "credential".to_string(),
+                "secret".to_string(),
+            )])),
+            ..Default::default()
+        },
+        data: Some(std::collections::BTreeMap::from([(
+            "password".to_string(),
+            "secret".to_string(),
+        )])),
+        ..Default::default()
+    };
+    let object = GenericObject {
+        id: ObjectIdentifier {
+            uid: "config-map-1".to_string(),
+            name: "settings".to_string(),
+            namespace: Some("team-a".to_string()),
+            resource_version: None,
+        },
+        resource_type: ResourceType::ConfigMap,
+        attributes: Some(Box::new(ResourceAttributes::ConfigMap {
+            config_map: Arc::new(config_map),
+        })),
+    };
+
+    let value = node_to_value(&object).expect("ConfigMap should serialize");
+    assert!(value.get("data").is_none());
+    assert!(value.pointer("/metadata/annotations").is_none());
+    assert_eq!(
+        value.get("metadata_name"),
+        Some(&Value::String("settings".to_string()))
+    );
 }
 
 fn pod_with_container_status(

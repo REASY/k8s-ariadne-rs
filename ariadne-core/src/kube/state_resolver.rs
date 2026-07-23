@@ -9,7 +9,7 @@ use crate::snapshot::{
     SNAPSHOT_NETWORK_POLICIES_FILE, SNAPSHOT_NODES_FILE, SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE,
     SNAPSHOT_PERSISTENT_VOLUMES_FILE, SNAPSHOT_PODS_FILE, SNAPSHOT_REPLICA_SETS_FILE,
     SNAPSHOT_SERVICE_ACCOUNTS_FILE, SNAPSHOT_SERVICES_FILE, SNAPSHOT_STATEFUL_SETS_FILE,
-    SNAPSHOT_STORAGE_CLASSES_FILE, write_json_to_dir, write_list_to_dir,
+    SNAPSHOT_STORAGE_CLASSES_FILE, write_json_to_dir, write_redacted_list_to_dir,
 };
 use crate::state::{ClusterState, ClusterStateDiff};
 use crate::types::*;
@@ -639,48 +639,104 @@ impl ClusterStateResolver {
         };
 
         write_json_to_dir(dir, SNAPSHOT_CLUSTER_FILE, &snapshot.cluster)?;
-        write_list_to_dir(dir, SNAPSHOT_NAMESPACES_FILE, &snapshot.namespaces)?;
-        write_list_to_dir(dir, SNAPSHOT_PODS_FILE, &snapshot.pods)?;
-        write_list_to_dir(dir, SNAPSHOT_DEPLOYMENTS_FILE, &snapshot.deployments)?;
-        write_list_to_dir(dir, SNAPSHOT_STATEFUL_SETS_FILE, &snapshot.stateful_sets)?;
-        write_list_to_dir(dir, SNAPSHOT_REPLICA_SETS_FILE, &snapshot.replica_sets)?;
-        write_list_to_dir(dir, SNAPSHOT_DAEMON_SETS_FILE, &snapshot.daemon_sets)?;
-        write_list_to_dir(dir, SNAPSHOT_JOBS_FILE, &snapshot.jobs)?;
-        write_list_to_dir(dir, SNAPSHOT_INGRESSES_FILE, &snapshot.ingresses)?;
-        write_list_to_dir(dir, SNAPSHOT_SERVICES_FILE, &snapshot.services)?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_NAMESPACES_FILE,
+            &snapshot.namespaces,
+            ResourceType::Namespace,
+        )?;
+        write_redacted_list_to_dir(dir, SNAPSHOT_PODS_FILE, &snapshot.pods, ResourceType::Pod)?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_DEPLOYMENTS_FILE,
+            &snapshot.deployments,
+            ResourceType::Deployment,
+        )?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_STATEFUL_SETS_FILE,
+            &snapshot.stateful_sets,
+            ResourceType::StatefulSet,
+        )?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_REPLICA_SETS_FILE,
+            &snapshot.replica_sets,
+            ResourceType::ReplicaSet,
+        )?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_DAEMON_SETS_FILE,
+            &snapshot.daemon_sets,
+            ResourceType::DaemonSet,
+        )?;
+        write_redacted_list_to_dir(dir, SNAPSHOT_JOBS_FILE, &snapshot.jobs, ResourceType::Job)?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_INGRESSES_FILE,
+            &snapshot.ingresses,
+            ResourceType::Ingress,
+        )?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_SERVICES_FILE,
+            &snapshot.services,
+            ResourceType::Service,
+        )?;
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_ENDPOINT_SLICES_FILE,
             &snapshot.endpoint_slices,
+            ResourceType::EndpointSlice,
         )?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_NETWORK_POLICIES_FILE,
             &snapshot.network_policies,
+            ResourceType::NetworkPolicy,
         )?;
-        write_list_to_dir(dir, SNAPSHOT_CONFIG_MAPS_FILE, &snapshot.config_maps)?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_CONFIG_MAPS_FILE,
+            &snapshot.config_maps,
+            ResourceType::ConfigMap,
+        )?;
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_STORAGE_CLASSES_FILE,
             &snapshot.storage_classes,
+            ResourceType::StorageClass,
         )?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_PERSISTENT_VOLUMES_FILE,
             &snapshot.persistent_volumes,
+            ResourceType::PersistentVolume,
         )?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_PERSISTENT_VOLUME_CLAIMS_FILE,
             &snapshot.persistent_volume_claims,
+            ResourceType::PersistentVolumeClaim,
         )?;
-        write_list_to_dir(dir, SNAPSHOT_NODES_FILE, &snapshot.nodes)?;
-        write_list_to_dir(
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_NODES_FILE,
+            &snapshot.nodes,
+            ResourceType::Node,
+        )?;
+        write_redacted_list_to_dir(
             dir,
             SNAPSHOT_SERVICE_ACCOUNTS_FILE,
             &snapshot.service_accounts,
+            ResourceType::ServiceAccount,
         )?;
-        write_list_to_dir(dir, SNAPSHOT_EVENTS_FILE, &snapshot.events)?;
+        write_redacted_list_to_dir(
+            dir,
+            SNAPSHOT_EVENTS_FILE,
+            &snapshot.events,
+            ResourceType::Event,
+        )?;
         Ok(())
     }
 }

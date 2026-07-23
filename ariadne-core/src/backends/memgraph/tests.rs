@@ -1,6 +1,70 @@
 use super::{Memgraph, decode};
+use crate::types::{GenericObject, ObjectIdentifier, ResourceAttributes, ResourceType};
+use k8s_openapi::api::core::v1::{ConfigMap, Pod};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use rsmgclient::Record;
 use serde_json::json;
+use std::sync::Arc;
+
+#[test]
+fn graph_serialization_redacts_sensitive_kubernetes_fields() {
+    let config_map = GenericObject {
+        id: ObjectIdentifier {
+            uid: "config-map-1".to_string(),
+            name: "settings".to_string(),
+            namespace: Some("team-a".to_string()),
+            resource_version: None,
+        },
+        resource_type: ResourceType::ConfigMap,
+        attributes: Some(Box::new(ResourceAttributes::ConfigMap {
+            config_map: Arc::new(ConfigMap {
+                metadata: ObjectMeta {
+                    name: Some("settings".to_string()),
+                    annotations: Some(std::collections::BTreeMap::from([(
+                        "credential".to_string(),
+                        "secret".to_string(),
+                    )])),
+                    ..Default::default()
+                },
+                data: Some(std::collections::BTreeMap::from([(
+                    "password".to_string(),
+                    "secret".to_string(),
+                )])),
+                ..Default::default()
+            }),
+        })),
+    };
+    let value = Memgraph::get_as_json(&config_map).expect("ConfigMap should serialize");
+    assert!(value.get("data").is_none());
+    assert!(value.pointer("/metadata/annotations").is_none());
+
+    let pod = GenericObject {
+        id: ObjectIdentifier {
+            uid: "pod-1".to_string(),
+            name: "api".to_string(),
+            namespace: Some("team-a".to_string()),
+            resource_version: None,
+        },
+        resource_type: ResourceType::Pod,
+        attributes: Some(Box::new(ResourceAttributes::Pod {
+            pod: Arc::new(
+                serde_json::from_value::<Pod>(json!({
+                    "metadata": {"name": "api"},
+                    "spec": {
+                        "containers": [{
+                            "name": "api",
+                            "image": "api:latest",
+                            "env": [{"name": "PASSWORD", "value": "secret"}]
+                        }]
+                    }
+                }))
+                .expect("valid Pod"),
+            ),
+        })),
+    };
+    let value = Memgraph::get_as_json(&pod).expect("Pod should serialize");
+    assert!(value.pointer("/spec/containers/0/env/0/value").is_none());
+}
 
 #[test]
 fn converts_memgraph_temporal_values_to_json_strings() {

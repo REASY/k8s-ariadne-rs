@@ -8,6 +8,8 @@ pub mod graph_backend;
 pub mod graph_schema;
 #[path = "kube/access.rs"]
 mod kube_access;
+#[path = "kube/redaction.rs"]
+mod kube_redaction;
 pub mod query_issue;
 pub(crate) mod tls;
 

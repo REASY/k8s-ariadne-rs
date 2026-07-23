@@ -1,4 +1,5 @@
 use crate::graph_backend::GraphBackend;
+use crate::kube_redaction::redact_kubernetes_value;
 use crate::prelude::Result;
 use crate::state::{ClusterState, ClusterStateDiff, SharedClusterState};
 use crate::types::{Edge, GenericObject, ResourceAttributes, ResourceType};
@@ -440,6 +441,8 @@ fn node_to_value(obj: &GenericObject) -> Result<Value> {
         ResourceAttributes::Cluster { cluster } => serde_json::to_value(cluster.as_ref())?,
         ResourceAttributes::Container { container } => serde_json::to_value(container.as_ref())?,
     };
+
+    redact_kubernetes_value(&obj.resource_type, &mut value);
 
     if let Value::Object(map) = &mut value {
         let (uid, name, ns) = if let Some(Value::Object(metadata)) = map.get("metadata") {

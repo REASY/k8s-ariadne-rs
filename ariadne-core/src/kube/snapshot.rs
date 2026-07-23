@@ -1,6 +1,9 @@
+use crate::kube_redaction::redact_kubernetes_value;
 use crate::prelude::*;
+use crate::types::ResourceType;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,6 +61,24 @@ where
 {
     let view: Vec<&T> = items.iter().map(|item| item.as_ref()).collect();
     write_json_to_dir(dir, filename, &view)
+}
+
+pub(crate) fn write_redacted_list_to_dir<T>(
+    dir: &Path,
+    filename: &str,
+    items: &[Arc<T>],
+    resource_type: ResourceType,
+) -> Result<PathBuf>
+where
+    T: Serialize,
+{
+    let mut value = serde_json::to_value(items)?;
+    if let Value::Array(items) = &mut value {
+        for item in items {
+            redact_kubernetes_value(&resource_type, item);
+        }
+    }
+    write_json_to_dir(dir, filename, &value)
 }
 
 #[cfg(test)]
@@ -168,6 +189,41 @@ mod tests {
         assert_eq!(namespaces[0].metadata.name.as_deref(), Some("default"));
         assert_eq!(client.get_cluster_url().await?, "https://example.invalid");
 
+        Ok(())
+    }
+
+    #[test]
+    fn redacted_snapshot_writer_removes_sensitive_payloads() -> Result<()> {
+        let temp = TempDir::new("ariadne_redacted_snapshot");
+        let config_map = Arc::new(ConfigMap {
+            metadata: ObjectMeta {
+                name: Some("settings".to_string()),
+                annotations: Some(std::collections::BTreeMap::from([(
+                    "credential".to_string(),
+                    "secret".to_string(),
+                )])),
+                ..Default::default()
+            },
+            data: Some(std::collections::BTreeMap::from([(
+                "password".to_string(),
+                "secret".to_string(),
+            )])),
+            ..Default::default()
+        });
+
+        write_redacted_list_to_dir(
+            &temp.path,
+            SNAPSHOT_CONFIG_MAPS_FILE,
+            &[config_map],
+            ResourceType::ConfigMap,
+        )?;
+
+        let exported: Vec<ConfigMap> = read_json_from_dir(&temp.path, SNAPSHOT_CONFIG_MAPS_FILE)?;
+        assert_eq!(exported.len(), 1);
+        assert!(exported[0].data.is_none());
+        assert!(exported[0].binary_data.is_none());
+        assert!(exported[0].metadata.annotations.is_none());
+        assert_eq!(exported[0].metadata.name.as_deref(), Some("settings"));
         Ok(())
     }
 

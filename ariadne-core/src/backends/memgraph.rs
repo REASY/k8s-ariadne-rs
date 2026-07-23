@@ -1,3 +1,4 @@
+use crate::kube_redaction::redact_kubernetes_value;
 use crate::prelude::*;
 use crate::state::{ClusterState, ClusterStateDiff, GraphEdge};
 use crate::types::{Edge, GenericObject, LOGICAL_RESOURCE_TYPES, ResourceAttributes, ResourceType};
@@ -472,7 +473,7 @@ impl Memgraph {
         let Some(attributes) = &obj.attributes else {
             return Ok(Value::Null);
         };
-        let v = match attributes.as_ref() {
+        let mut v = match attributes.as_ref() {
             ResourceAttributes::Node { node: value } => {
                 let mut fixed = value.as_ref().clone();
                 Self::cleanup_metadata(&mut fixed);
@@ -588,6 +589,7 @@ impl Memgraph {
             ResourceAttributes::Endpoint { endpoint: context } => serde_json::to_value(context)?,
         };
 
+        redact_kubernetes_value(&obj.resource_type, &mut v);
         Ok(v)
     }
 
