@@ -10,6 +10,7 @@ use k8s_openapi::apimachinery::pkg::version::Info;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone, Default)]
 struct SnapshotFrame {
@@ -232,6 +233,8 @@ impl From<&ClusterStateDiff> for CapturedDiffSummary {
 struct MockGraphBackend {
     fail_create: bool,
     fail_update: bool,
+    fail_updates_remaining: AtomicUsize,
+    update_attempts: AtomicUsize,
     create_counts: Mutex<Vec<(usize, usize)>>,
     update_summaries: Mutex<Vec<CapturedDiffSummary>>,
 }
@@ -249,6 +252,17 @@ impl MockGraphBackend {
             fail_create: true,
             ..Default::default()
         }
+    }
+
+    fn fail_update_once() -> Self {
+        Self {
+            fail_updates_remaining: AtomicUsize::new(1),
+            ..Default::default()
+        }
+    }
+
+    fn update_attempts(&self) -> usize {
+        self.update_attempts.load(Ordering::SeqCst)
     }
 
     fn create_counts(&self) -> Vec<(usize, usize)> {
@@ -281,7 +295,14 @@ impl GraphBackend for MockGraphBackend {
     }
 
     async fn update(&self, diff: ClusterStateDiff) -> Result<()> {
-        if self.fail_update {
+        self.update_attempts.fetch_add(1, Ordering::SeqCst);
+        let injected_failure = self
+            .fail_updates_remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok();
+        if self.fail_update || injected_failure {
             return Err(std::io::Error::other("mock update failure").into());
         }
         self.update_summaries
@@ -827,6 +848,55 @@ async fn resolver_sync_and_rebuild_cover_live_sync_paths() {
     assert_eq!(create_counts.len(), 1);
     assert!(create_counts[0].0 > 0);
     assert!(create_counts[0].1 > 0);
+}
+
+#[tokio::test]
+async fn diff_loop_recovers_after_transient_update_failure_and_stops_on_cancellation() {
+    let initial = base_snapshot();
+    let changed = changed_snapshot();
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, changed.clone(), changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize from first snapshot");
+    let backend = Arc::new(MockGraphBackend::fail_update_once());
+    let token = CancellationToken::new();
+    let handle = resolver.start_diff_loop_with_interval(
+        backend.clone(),
+        token.clone(),
+        Duration::from_millis(5),
+    );
+
+    tokio::time::timeout(Duration::from_millis(500), async {
+        while backend.update_summaries().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("diff loop should retry and recover after the injected failure");
+
+    token.cancel();
+    tokio::time::timeout(Duration::from_millis(100), handle)
+        .await
+        .expect("diff loop should respond to cancellation")
+        .expect("diff loop task should not panic");
+
+    assert!(backend.update_attempts() >= 2);
+    assert_eq!(backend.update_summaries().len(), 1);
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    assert!(
+        state_handle
+            .lock()
+            .expect("state lock poisoned")
+            .node_by_uid("pod-new")
+            .is_some(),
+        "the recovered sync must publish the changed snapshot"
+    );
 }
 
 #[tokio::test]

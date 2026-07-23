@@ -154,6 +154,16 @@ pub struct ClusterStateResolver {
     should_export_snapshot: bool,
 }
 
+struct DiffLoopContext {
+    cluster: Cluster,
+    kube_client: Arc<Box<dyn KubeClient>>,
+    last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
+    last_state: Arc<Mutex<ClusterState>>,
+    refresh_lock: Arc<AsyncMutex<()>>,
+    backend: Arc<dyn GraphBackend>,
+    poll_interval: Duration,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ObservedClusterSnapshot {
     pub cluster: Cluster,
@@ -401,60 +411,26 @@ impl ClusterStateResolver {
         backend: Arc<dyn GraphBackend>,
         token: CancellationToken,
     ) -> JoinHandle<()> {
-        let cluster = self.cluster.clone();
-        let kube_client = self.kube_client.clone();
-        let last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>> = self.last_snapshot.clone();
-        let last_state: Arc<Mutex<ClusterState>> = self.last_state.clone();
-        let refresh_lock = self.refresh_lock.clone();
-
-        tokio::spawn(async move {
-            Self::diff_loop(
-                cluster,
-                kube_client,
-                last_snapshot,
-                last_state,
-                refresh_lock,
-                backend,
-                token,
-            )
-            .await
-            .expect("Diff loop failed");
-        })
+        self.start_diff_loop_with_interval(backend, token, configured_source_sync_poll_interval())
     }
 
-    async fn diff_loop(
-        cluster: Cluster,
-        kube_client: Arc<Box<dyn KubeClient>>,
-        last_snapshot: Arc<Mutex<AugmentedClusterSnapshot>>,
-        last_state: Arc<Mutex<ClusterState>>,
-        refresh_lock: Arc<AsyncMutex<()>>,
+    fn start_diff_loop_with_interval(
+        &self,
         backend: Arc<dyn GraphBackend>,
         token: CancellationToken,
-    ) -> Result<()> {
-        let poll_interval = configured_source_sync_poll_interval();
-        let mut id: usize = 0;
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    break;
-                },
-                _ = sleep(poll_interval) => {
-                    Self::sync_from_source_impl(
-                        cluster.clone(),
-                        kube_client.clone(),
-                        last_snapshot.clone(),
-                        last_state.clone(),
-                        refresh_lock.clone(),
-                        backend.clone(),
-                    )
-                    .await
-                    .map_err(|err| std::io::Error::other(err.message))?;
-                    id += 1;
-                },
-            }
-        }
-        info!("Stopped diff_loop, number of loops {id}");
-        Ok(())
+        poll_interval: Duration,
+    ) -> JoinHandle<()> {
+        let context = DiffLoopContext {
+            cluster: self.cluster.clone(),
+            kube_client: self.kube_client.clone(),
+            last_snapshot: self.last_snapshot.clone(),
+            last_state: self.last_state.clone(),
+            refresh_lock: self.refresh_lock.clone(),
+            backend,
+            poll_interval,
+        };
+
+        tokio::spawn(async move { context.run(token).await })
     }
 
     pub async fn sync_from_source(
@@ -564,7 +540,46 @@ impl ClusterStateResolver {
             diff: diff_summary,
         })
     }
+}
 
+impl DiffLoopContext {
+    async fn run(self, token: CancellationToken) {
+        let mut attempts: usize = 0;
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    break;
+                },
+                _ = sleep(self.poll_interval) => {
+                    let sync = ClusterStateResolver::sync_from_source_impl(
+                        self.cluster.clone(),
+                        self.kube_client.clone(),
+                        self.last_snapshot.clone(),
+                        self.last_state.clone(),
+                        self.refresh_lock.clone(),
+                        self.backend.clone(),
+                    );
+                    let outcome = tokio::select! {
+                        _ = token.cancelled() => break,
+                        outcome = sync => outcome,
+                    };
+                    attempts += 1;
+                    if let Err(err) = outcome {
+                        warn!(
+                            attempt = attempts,
+                            stage = ?err.stage,
+                            error = %err.message,
+                            "Source sync attempt failed; retaining the last-known-good graph and retrying"
+                        );
+                    }
+                },
+            }
+        }
+        info!("Stopped diff_loop after {attempts} attempts");
+    }
+}
+
+impl ClusterStateResolver {
     pub async fn rebuild_from_source(
         &self,
         backend: Arc<dyn GraphBackend>,
