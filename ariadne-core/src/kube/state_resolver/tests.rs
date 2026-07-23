@@ -1,6 +1,10 @@
 use super::*;
 use async_trait::async_trait;
-use k8s_openapi::api::core::v1::{PersistentVolumeClaimVolumeSource, PodSpec, Volume};
+use k8s_openapi::api::core::v1::{
+    ConfigMapEnvSource, ConfigMapKeySelector, ConfigMapProjection, ConfigMapVolumeSource,
+    Container as KubernetesContainer, EnvFromSource, EnvVar, EnvVarSource, EphemeralContainer,
+    PersistentVolumeClaimVolumeSource, PodSpec, ProjectedVolumeSource, Volume, VolumeProjection,
+};
 use k8s_openapi::api::discovery::v1::{Endpoint as KubernetesEndpoint, EndpointConditions};
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IngressBackend, IngressRule,
@@ -417,6 +421,43 @@ fn service_account(name: &str, namespace: &str, uid: &str) -> Arc<ServiceAccount
         },
         ..Default::default()
     })
+}
+
+fn config_map(name: &str, namespace: &str, uid: &str) -> Arc<ConfigMap> {
+    Arc::new(ConfigMap {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
+fn config_map_env_from(name: &str, optional: bool) -> EnvFromSource {
+    EnvFromSource {
+        config_map_ref: Some(ConfigMapEnvSource {
+            name: name.to_string(),
+            optional: Some(optional),
+        }),
+        ..Default::default()
+    }
+}
+
+fn config_map_env_var(name: &str, optional: bool) -> EnvVar {
+    EnvVar {
+        name: format!("FROM_{}", name.replace('-', "_").to_uppercase()),
+        value_from: Some(EnvVarSource {
+            config_map_key_ref: Some(ConfigMapKeySelector {
+                key: "value".to_string(),
+                name: name.to_string(),
+                optional: Some(optional),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
 }
 
 fn persistent_volume_claim(name: &str, namespace: &str, uid: &str) -> Arc<PersistentVolumeClaim> {
@@ -938,6 +979,232 @@ async fn missing_pod_service_account_does_not_abort_graph_build() {
         !state
             .get_edges_by_type(&Edge::UsesIdentity)
             .any(|edge| edge.source == "pod-orphan-identity")
+    );
+}
+
+#[tokio::test]
+async fn pod_config_map_edges_cover_volume_and_all_container_reference_forms() {
+    let pod = Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some("configured".to_string()),
+            namespace: Some("team-a".to_string()),
+            uid: Some("pod-configured".to_string()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: vec![KubernetesContainer {
+                name: "main".to_string(),
+                env_from: Some(vec![
+                    config_map_env_from("regular-env-from", false),
+                    config_map_env_from("shared", false),
+                ]),
+                env: Some(vec![
+                    config_map_env_var("regular-key", false),
+                    config_map_env_var("shared", false),
+                    config_map_env_var("shared", false),
+                ]),
+                ..Default::default()
+            }],
+            init_containers: Some(vec![KubernetesContainer {
+                name: "init".to_string(),
+                env_from: Some(vec![config_map_env_from("init-env-from", false)]),
+                env: Some(vec![config_map_env_var("init-key", false)]),
+                ..Default::default()
+            }]),
+            ephemeral_containers: Some(vec![EphemeralContainer {
+                name: "debug".to_string(),
+                env_from: Some(vec![config_map_env_from("ephemeral-env-from", false)]),
+                env: Some(vec![config_map_env_var("ephemeral-key", false)]),
+                ..Default::default()
+            }]),
+            volumes: Some(vec![
+                Volume {
+                    name: "direct".to_string(),
+                    config_map: Some(ConfigMapVolumeSource {
+                        name: "mount-direct".to_string(),
+                        optional: Some(false),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                Volume {
+                    name: "projected".to_string(),
+                    projected: Some(ProjectedVolumeSource {
+                        sources: Some(vec![VolumeProjection {
+                            config_map: Some(ConfigMapProjection {
+                                name: "mount-projected".to_string(),
+                                optional: Some(false),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                Volume {
+                    name: "shared".to_string(),
+                    config_map: Some(ConfigMapVolumeSource {
+                        name: "shared".to_string(),
+                        optional: Some(false),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                Volume {
+                    name: "shared-duplicate".to_string(),
+                    config_map: Some(ConfigMapVolumeSource {
+                        name: "shared".to_string(),
+                        optional: Some(false),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let config_map_names = [
+        "mount-direct",
+        "mount-projected",
+        "shared",
+        "regular-env-from",
+        "regular-key",
+        "init-env-from",
+        "init-key",
+        "ephemeral-env-from",
+        "ephemeral-key",
+    ];
+    let mut config_maps: Vec<Arc<ConfigMap>> = config_map_names
+        .into_iter()
+        .map(|name| config_map(name, "team-a", &format!("config-map-{name}")))
+        .collect();
+    config_maps.push(config_map("shared", "team-b", "config-map-shared-team-b"));
+    let snapshot = SnapshotFrame {
+        pods: vec![pod],
+        config_maps,
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("Pod ConfigMap references should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    for name in ["mount-direct", "mount-projected", "shared"] {
+        assert!(has_edge(
+            &state,
+            Edge::MountsConfig,
+            "pod-configured",
+            &format!("config-map-{name}")
+        ));
+    }
+    for name in [
+        "shared",
+        "regular-env-from",
+        "regular-key",
+        "init-env-from",
+        "init-key",
+        "ephemeral-env-from",
+        "ephemeral-key",
+    ] {
+        assert!(has_edge(
+            &state,
+            Edge::InjectsConfig,
+            "pod-configured",
+            &format!("config-map-{name}")
+        ));
+    }
+    assert!(!has_edge(
+        &state,
+        Edge::MountsConfig,
+        "pod-configured",
+        "config-map-shared-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::InjectsConfig,
+        "pod-configured",
+        "config-map-shared-team-b"
+    ));
+    assert_eq!(
+        state
+            .get_edges()
+            .filter(|edge| {
+                edge.source == "pod-configured"
+                    && edge.target == "config-map-shared"
+                    && matches!(edge.edge_type, Edge::MountsConfig | Edge::InjectsConfig)
+            })
+            .count(),
+        2,
+        "mounting and injecting the same ConfigMap must preserve both edge types"
+    );
+}
+
+#[tokio::test]
+async fn missing_optional_config_maps_do_not_abort_graph_build() {
+    let pod = Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some("optional-config".to_string()),
+            namespace: Some("default".to_string()),
+            uid: Some("pod-optional-config".to_string()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: vec![KubernetesContainer {
+                name: "main".to_string(),
+                env_from: Some(vec![config_map_env_from("missing-env", true)]),
+                env: Some(vec![config_map_env_var("missing-key", true)]),
+                ..Default::default()
+            }],
+            volumes: Some(vec![Volume {
+                name: "optional".to_string(),
+                config_map: Some(ConfigMapVolumeSource {
+                    name: "missing-volume".to_string(),
+                    optional: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let snapshot = SnapshotFrame {
+        pods: vec![pod],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("missing optional ConfigMaps must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(state.node_by_uid("pod-optional-config").is_some());
+    assert!(
+        !state
+            .get_edges_by_type(&Edge::MountsConfig)
+            .any(|edge| edge.source == "pod-optional-config")
+    );
+    assert!(
+        !state
+            .get_edges_by_type(&Edge::InjectsConfig)
+            .any(|edge| edge.source == "pod-optional-config")
     );
 }
 

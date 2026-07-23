@@ -3,14 +3,15 @@
 //! Every relationship is emitted only after both endpoint identifiers are known.
 
 use crate::state_resolver::{
-    Arc, ClusterState, ClusterStateResolver, EndpointSlice, EndpointSliceDerived, HashMap, HashSet,
-    Ingress, IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot, PersistentVolume, Pod,
-    Resource, ResourceExt, Result, Service, ServiceAccount,
+    Arc, ClusterState, ClusterStateResolver, ConfigMap, EndpointSlice, EndpointSliceDerived,
+    HashMap, HashSet, Ingress, IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot,
+    PersistentVolume, Pod, Resource, ResourceExt, Result, Service, ServiceAccount,
 };
 use crate::types::{
     Container, ContainerType, Edge, Endpoint, EndpointAddress, EndpointIdentity, GenericObject,
     Host, IngressServiceBackend, ObjectIdentifier, ResourceAttributes, ResourceType,
 };
+use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar};
 use tracing::{trace, warn};
 
 const ENDPOINT_SLICE_SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
@@ -210,6 +211,157 @@ impl ClusterStateResolver {
                 ),
             }
         }
+    }
+
+    pub(super) fn pod_to_config_maps(
+        pods: &[Arc<Pod>],
+        config_maps: &[Arc<ConfigMap>],
+        state: &mut ClusterState,
+    ) {
+        let config_map_namespace_name_to_uid: HashMap<(&str, &str), &str> = config_maps
+            .iter()
+            .filter_map(|config_map| {
+                Some((
+                    (
+                        config_map.metadata.namespace.as_deref()?,
+                        config_map.metadata.name.as_deref()?,
+                    ),
+                    config_map.metadata.uid.as_deref()?,
+                ))
+            })
+            .collect();
+
+        for pod in pods {
+            let Some(pod_uid) = pod.metadata.uid.as_deref() else {
+                continue;
+            };
+            let Some(namespace) = pod.metadata.namespace.as_deref() else {
+                continue;
+            };
+            let Some(spec) = pod.spec.as_ref() else {
+                continue;
+            };
+
+            let mut mounted_names = HashMap::new();
+            for volume in spec.volumes.as_deref().into_iter().flatten() {
+                if let Some(config_map) = volume.config_map.as_ref() {
+                    Self::record_config_map_reference(
+                        &mut mounted_names,
+                        &config_map.name,
+                        config_map.optional,
+                    );
+                }
+                for source in volume
+                    .projected
+                    .as_ref()
+                    .and_then(|projected| projected.sources.as_deref())
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(config_map) = source.config_map.as_ref() {
+                        Self::record_config_map_reference(
+                            &mut mounted_names,
+                            &config_map.name,
+                            config_map.optional,
+                        );
+                    }
+                }
+            }
+
+            let mut injected_names = HashMap::new();
+            for container in &spec.containers {
+                Self::collect_injected_config_map_names(
+                    container.env_from.as_deref(),
+                    container.env.as_deref(),
+                    &mut injected_names,
+                );
+            }
+            for container in spec.init_containers.as_deref().into_iter().flatten() {
+                Self::collect_injected_config_map_names(
+                    container.env_from.as_deref(),
+                    container.env.as_deref(),
+                    &mut injected_names,
+                );
+            }
+            for container in spec.ephemeral_containers.as_deref().into_iter().flatten() {
+                Self::collect_injected_config_map_names(
+                    container.env_from.as_deref(),
+                    container.env.as_deref(),
+                    &mut injected_names,
+                );
+            }
+
+            for (edge, config_map_names) in [
+                (Edge::MountsConfig, mounted_names),
+                (Edge::InjectsConfig, injected_names),
+            ] {
+                for (config_map_name, required) in config_map_names {
+                    match config_map_namespace_name_to_uid.get(&(namespace, config_map_name)) {
+                        Some(config_map_uid) => state.add_edge(
+                            pod_uid,
+                            ResourceType::Pod,
+                            config_map_uid,
+                            ResourceType::ConfigMap,
+                            edge.clone(),
+                        ),
+                        None if required => {
+                            warn!(
+                                pod_uid,
+                                pod_namespace = namespace,
+                                config_map_name,
+                                relationship = %edge,
+                                "Skipping unresolved required Pod to ConfigMap relationship"
+                            );
+                        }
+                        None => {
+                            trace!(
+                                pod_uid,
+                                pod_namespace = namespace,
+                                config_map_name,
+                                relationship = %edge,
+                                "Skipping unresolved optional Pod to ConfigMap relationship"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_injected_config_map_names<'a>(
+        env_from: Option<&'a [EnvFromSource]>,
+        env: Option<&'a [EnvVar]>,
+        names: &mut HashMap<&'a str, bool>,
+    ) {
+        for source in env_from.into_iter().flatten() {
+            if let Some(config_map) = source.config_map_ref.as_ref() {
+                Self::record_config_map_reference(names, &config_map.name, config_map.optional);
+            }
+        }
+        for variable in env.into_iter().flatten() {
+            if let Some(config_map) = variable
+                .value_from
+                .as_ref()
+                .and_then(|source| source.config_map_key_ref.as_ref())
+            {
+                Self::record_config_map_reference(names, &config_map.name, config_map.optional);
+            }
+        }
+    }
+
+    fn record_config_map_reference<'a>(
+        references: &mut HashMap<&'a str, bool>,
+        name: &'a str,
+        optional: Option<bool>,
+    ) {
+        if name.is_empty() {
+            return;
+        }
+        let required = optional != Some(true);
+        references
+            .entry(name)
+            .and_modify(|existing| *existing |= required)
+            .or_insert(required);
     }
 
     pub(super) fn pvc_to_pv(

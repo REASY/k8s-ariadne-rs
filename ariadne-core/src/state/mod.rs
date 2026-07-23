@@ -89,7 +89,7 @@ macro_rules! create_generic_object {
 #[derive(Debug)]
 pub struct ClusterState {
     pub cluster: Cluster,
-    graph: DiGraphMap<NodeId, Edge>,
+    graph: DiGraphMap<NodeId, HashSet<Edge>>,
     id_gen: IdGen,
     id_to_node: HashMap<NodeId, GenericObject>,
     nodes_by_type: HashMap<ResourceType, Vec<NodeId>>,
@@ -165,20 +165,17 @@ impl ClusterState {
         let maybe_target = self.get_node(target);
 
         match (maybe_source, maybe_target) {
-            (Some(from), Some(to)) => {
-                let previous = self.graph.add_edge(from, to, edge.clone());
-                match previous {
-                    None => {
+            (Some(from), Some(to)) => match self.graph.edge_weight_mut(from, to) {
+                Some(edges) => {
+                    if edges.insert(edge.clone()) {
                         self.edges_by_type.entry(edge).or_default().push((from, to));
                     }
-                    Some(old_edge) => {
-                        if old_edge != edge {
-                            self.remove_edge_index(&old_edge, from, to);
-                            self.edges_by_type.entry(edge).or_default().push((from, to));
-                        }
-                    }
                 }
-            }
+                None => {
+                    self.graph.add_edge(from, to, HashSet::from([edge.clone()]));
+                    self.edges_by_type.entry(edge).or_default().push((from, to));
+                }
+            },
             (from_id, to_id) => {
                 trace!(
                     "Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}"
@@ -212,18 +209,18 @@ impl ClusterState {
     }
 
     pub fn get_edges(&self) -> impl Iterator<Item = GraphEdge> + use<'_> {
-        self.graph.all_edges().map(|(from, to, t)| {
+        self.graph.all_edges().flat_map(|(from, to, edge_types)| {
             let source = self.id_gen.get_by_id(from).unwrap();
             let source_resource_type = self.id_to_node.get(&from).unwrap().resource_type.clone();
             let target = self.id_gen.get_by_id(to).unwrap();
             let target_resource_type = self.id_to_node.get(&to).unwrap().resource_type.clone();
-            GraphEdge {
-                source,
-                source_type: source_resource_type,
-                target,
-                target_type: target_resource_type,
-                edge_type: t.clone(),
-            }
+            edge_types.iter().cloned().map(move |edge_type| GraphEdge {
+                source: source.clone(),
+                source_type: source_resource_type.clone(),
+                target: target.clone(),
+                target_type: target_resource_type.clone(),
+                edge_type,
+            })
         })
     }
 
@@ -251,7 +248,7 @@ impl ClusterState {
     }
 
     pub fn get_edge_count(&self) -> usize {
-        self.graph.edge_count()
+        self.edges_by_type.values().map(Vec::len).sum()
     }
 
     pub fn node_by_uid(&self, uid: &str) -> Option<&GenericObject> {
@@ -261,6 +258,9 @@ impl ClusterState {
     }
 
     fn graph_edge_from_ids(&self, from: NodeId, to: NodeId, edge: &Edge) -> Option<GraphEdge> {
+        if !self.graph.edge_weight(from, to)?.contains(edge) {
+            return None;
+        }
         let source = self.id_gen.get_by_id(from)?;
         let source_type = self.id_to_node.get(&from)?.resource_type.clone();
         let target = self.id_gen.get_by_id(to)?;
@@ -277,14 +277,6 @@ impl ClusterState {
     fn remove_node_index(&mut self, node_type: &ResourceType, node_id: NodeId) {
         if let Some(list) = self.nodes_by_type.get_mut(node_type)
             && let Some(pos) = list.iter().position(|id| *id == node_id)
-        {
-            list.swap_remove(pos);
-        }
-    }
-
-    fn remove_edge_index(&mut self, edge: &Edge, from: NodeId, to: NodeId) {
-        if let Some(list) = self.edges_by_type.get_mut(edge)
-            && let Some(pos) = list.iter().position(|(s, t)| *s == from && *t == to)
         {
             list.swap_remove(pos);
         }

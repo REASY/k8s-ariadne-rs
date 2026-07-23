@@ -177,8 +177,18 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
     ),
     (
         ResourceType::Pod,
+        Edge::InjectsConfig,
+        ResourceType::ConfigMap,
+    ),
+    (
+        ResourceType::Pod,
         Edge::Manages,
         ResourceType::PersistentVolumeClaim,
+    ),
+    (
+        ResourceType::Pod,
+        Edge::MountsConfig,
+        ResourceType::ConfigMap,
     ),
     (
         ResourceType::Provisioner,
