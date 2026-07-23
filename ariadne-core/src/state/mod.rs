@@ -97,12 +97,32 @@ pub struct ClusterState {
 }
 
 type EdgeKey = (ResourceType, Edge, ResourceType);
+type EdgeTypeMismatchKey = (ResourceType, ResourceType, Edge, ResourceType, ResourceType);
 
 fn should_log_unknown_edge(source: &ResourceType, edge: &Edge, target: &ResourceType) -> bool {
     static UNKNOWN_EDGES: OnceLock<Mutex<HashSet<EdgeKey>>> = OnceLock::new();
     let set = UNKNOWN_EDGES.get_or_init(|| Mutex::new(HashSet::new()));
     let mut guard = set.lock().expect("Unknown edge log guard poisoned");
     guard.insert((source.clone(), edge.clone(), target.clone()))
+}
+
+fn should_log_edge_type_mismatch(
+    declared_source: &ResourceType,
+    actual_source: &ResourceType,
+    edge: &Edge,
+    declared_target: &ResourceType,
+    actual_target: &ResourceType,
+) -> bool {
+    static EDGE_TYPE_MISMATCHES: OnceLock<Mutex<HashSet<EdgeTypeMismatchKey>>> = OnceLock::new();
+    let set = EDGE_TYPE_MISMATCHES.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut guard = set.lock().expect("Edge type mismatch log guard poisoned");
+    guard.insert((
+        declared_source.clone(),
+        actual_source.clone(),
+        edge.clone(),
+        declared_target.clone(),
+        actual_target.clone(),
+    ))
 }
 
 impl ClusterState {
@@ -165,17 +185,54 @@ impl ClusterState {
         let maybe_target = self.get_node(target);
 
         match (maybe_source, maybe_target) {
-            (Some(from), Some(to)) => match self.graph.edge_weight_mut(from, to) {
-                Some(edges) => {
-                    if edges.insert(edge.clone()) {
+            (Some(from), Some(to)) => {
+                let Some(actual_source_type) = self
+                    .id_to_node
+                    .get(&from)
+                    .map(|node| node.resource_type.clone())
+                else {
+                    trace!("Resolved source node {source} has no stored object (skipping edge)");
+                    return;
+                };
+                let Some(actual_target_type) = self
+                    .id_to_node
+                    .get(&to)
+                    .map(|node| node.resource_type.clone())
+                else {
+                    trace!("Resolved target node {target} has no stored object (skipping edge)");
+                    return;
+                };
+
+                if actual_source_type != source_type || actual_target_type != target_type {
+                    if should_log_edge_type_mismatch(
+                        &source_type,
+                        &actual_source_type,
+                        &edge,
+                        &target_type,
+                        &actual_target_type,
+                    ) {
+                        warn!(
+                            "Edge endpoint type mismatch: {source} declared as {source_type:?}, \
+                             stored as {actual_source_type:?}; {target} declared as \
+                             {target_type:?}, stored as {actual_target_type:?}; edge: \
+                             {edge:?} (skipping)"
+                        );
+                    }
+                    return;
+                }
+
+                match self.graph.edge_weight_mut(from, to) {
+                    Some(edges) => {
+                        if edges.insert(edge.clone()) {
+                            self.edges_by_type.entry(edge).or_default().push((from, to));
+                        }
+                    }
+                    None => {
+                        self.graph.add_edge(from, to, HashSet::from([edge.clone()]));
                         self.edges_by_type.entry(edge).or_default().push((from, to));
                     }
                 }
-                None => {
-                    self.graph.add_edge(from, to, HashSet::from([edge.clone()]));
-                    self.edges_by_type.entry(edge).or_default().push((from, to));
-                }
-            },
+            }
             (from_id, to_id) => {
                 trace!(
                     "Node(s) do not exist, source: {source} [{source_type}], from_id: {from_id:?}, target: {target} [{target_type}], to_id: {to_id:?}, edge: {edge:?}"
@@ -517,3 +574,7 @@ impl ClusterState {
 }
 
 pub type SharedClusterState = Arc<Mutex<ClusterState>>;
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
