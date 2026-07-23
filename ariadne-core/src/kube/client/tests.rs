@@ -16,7 +16,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -268,6 +268,36 @@ async fn start_store_with_factory_respects_allowed_flag() {
         .expect("missing watch handle")
         .await
         .expect("watch task failed");
+}
+
+#[tokio::test]
+async fn reflector_tasks_are_cancelled_when_owner_is_dropped() {
+    struct DropSignal(Arc<AtomicBool>);
+
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let task_cancelled = cancelled.clone();
+    let handle = tokio::spawn(async move {
+        let _drop_signal = DropSignal(task_cancelled);
+        future::pending::<()>().await;
+    });
+    tokio::task::yield_now().await;
+
+    let tasks = ReflectorTasks::new([Some(handle), None]);
+    drop(tasks);
+
+    tokio::time::timeout(Duration::from_millis(100), async {
+        while !cancelled.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("dropping reflector task ownership must cancel its tasks");
 }
 
 #[tokio::test]

@@ -29,60 +29,45 @@ pub struct CachedKubeClient {
     config: Config,
     client: Client,
     watch_health: WatchHealth,
+    _reflector_tasks: ReflectorTasks,
     namespace_store: Option<Store<Namespace>>,
-    #[allow(unused)]
-    namespace_watch: Option<JoinHandle<()>>,
     pod_store: Option<Store<Pod>>,
-    #[allow(unused)]
-    pod_watch: Option<JoinHandle<()>>,
     deployment_store: Option<Store<Deployment>>,
-    #[allow(unused)]
-    deployment_watch: Option<JoinHandle<()>>,
     stateful_set_store: Option<Store<StatefulSet>>,
-    #[allow(unused)]
-    stateful_set_watch: Option<JoinHandle<()>>,
     replica_set_store: Option<Store<ReplicaSet>>,
-    #[allow(unused)]
-    replica_set_watch: Option<JoinHandle<()>>,
     daemon_set_store: Option<Store<DaemonSet>>,
-    #[allow(unused)]
-    daemon_set_watch: Option<JoinHandle<()>>,
     job_store: Option<Store<Job>>,
-    #[allow(unused)]
-    job_watch: Option<JoinHandle<()>>,
     ingress_store: Option<Store<Ingress>>,
-    #[allow(unused)]
-    ingress_watch: Option<JoinHandle<()>>,
     service_store: Option<Store<Service>>,
-    #[allow(unused)]
-    service_watch: Option<JoinHandle<()>>,
     endpoint_slice_store: Option<Store<EndpointSlice>>,
-    #[allow(unused)]
-    endpoint_slice_watch: Option<JoinHandle<()>>,
     network_policy_store: Option<Store<NetworkPolicy>>,
-    #[allow(unused)]
-    network_policy_watch: Option<JoinHandle<()>>,
     config_map_store: Option<Store<ConfigMap>>,
-    #[allow(unused)]
-    config_map_watch: Option<JoinHandle<()>>,
     storage_class_store: Option<Store<StorageClass>>,
-    #[allow(unused)]
-    storage_class_watch: Option<JoinHandle<()>>,
     persistent_volume_store: Option<Store<PersistentVolume>>,
-    #[allow(unused)]
-    persistent_volume_watch: Option<JoinHandle<()>>,
     persistent_volume_claim_store: Option<Store<PersistentVolumeClaim>>,
-    #[allow(unused)]
-    persistent_volume_claim_watch: Option<JoinHandle<()>>,
     node_store: Option<Store<Node>>,
-    #[allow(unused)]
-    node_watch: Option<JoinHandle<()>>,
     service_account_store: Option<Store<ServiceAccount>>,
-    #[allow(unused)]
-    service_account_watch: Option<JoinHandle<()>>,
     event_store: Option<Store<Event>>,
-    #[allow(unused)]
-    event_store_watch: Option<JoinHandle<()>>,
+}
+
+pub(super) struct ReflectorTasks {
+    handles: Vec<JoinHandle<()>>,
+}
+
+impl ReflectorTasks {
+    pub(super) fn new(handles: impl IntoIterator<Item = Option<JoinHandle<()>>>) -> Self {
+        Self {
+            handles: handles.into_iter().flatten().collect(),
+        }
+    }
+}
+
+impl Drop for ReflectorTasks {
+    fn drop(&mut self) {
+        for handle in &self.handles {
+            handle.abort();
+        }
+    }
 }
 
 #[async_trait]
@@ -498,47 +483,50 @@ impl CachedKubeClient {
         let (namespace_store, namespace_watch) =
             stores.start_with_config(namespace_api, namespace_watcher_config);
         let (event_store, event_store_watch) = stores.start(event_api);
+        let reflector_tasks = ReflectorTasks::new([
+            namespace_watch,
+            pod_watch,
+            deployment_watch,
+            stateful_set_watch,
+            replica_set_watch,
+            daemon_set_watch,
+            job_watch,
+            ingress_watch,
+            service_watch,
+            endpoint_slice_watch,
+            network_policy_watch,
+            config_map_watch,
+            storage_class_watch,
+            persistent_volume_watch,
+            persistent_volume_claim_watch,
+            node_watch,
+            service_account_watch,
+            event_store_watch,
+        ]);
 
         Ok(Self {
             config: cfg.clone(),
             client: client.clone(),
             watch_health,
+            _reflector_tasks: reflector_tasks,
             namespace_store,
-            namespace_watch,
             pod_store,
-            pod_watch,
             deployment_store,
-            deployment_watch,
             stateful_set_store,
-            stateful_set_watch,
             replica_set_store,
-            replica_set_watch,
             daemon_set_store,
-            daemon_set_watch,
             job_store,
-            job_watch,
             ingress_store,
-            ingress_watch,
             service_store,
-            service_watch,
             endpoint_slice_store,
-            endpoint_slice_watch,
             network_policy_store,
-            network_policy_watch,
             config_map_store,
-            config_map_watch,
             storage_class_store,
-            storage_class_watch,
             persistent_volume_store,
-            persistent_volume_watch,
             persistent_volume_claim_store,
-            persistent_volume_claim_watch,
             node_store,
-            node_watch,
             service_account_store,
-            service_account_watch,
             event_store,
-            event_store_watch,
         })
     }
 }
