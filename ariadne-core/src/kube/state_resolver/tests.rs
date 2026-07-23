@@ -1,5 +1,6 @@
 use super::*;
 use async_trait::async_trait;
+use k8s_openapi::api::core::v1::{PersistentVolumeClaimVolumeSource, PodSpec, Volume};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use k8s_openapi::apimachinery::pkg::version::Info;
 use serde_json::Value;
@@ -332,6 +333,42 @@ fn pod(name: &str, namespace: &str, uid: &str, owners: Vec<OwnerReference>) -> A
     })
 }
 
+fn pod_with_pvc(name: &str, namespace: &str, uid: &str, claim_name: &str) -> Arc<Pod> {
+    Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: Vec::new(),
+            volumes: Some(vec![Volume {
+                name: "data".to_string(),
+                persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
+                    claim_name: claim_name.to_string(),
+                    read_only: None,
+                }),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+fn persistent_volume_claim(name: &str, namespace: &str, uid: &str) -> Arc<PersistentVolumeClaim> {
+    Arc::new(PersistentVolumeClaim {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
 fn base_snapshot() -> SnapshotFrame {
     SnapshotFrame {
         namespaces: vec![namespace("team-a", "namespace-team-a")],
@@ -376,6 +413,90 @@ fn has_edge(state: &ClusterState, edge_type: Edge, source: &str, target: &str) -
     state
         .get_edges_by_type(&edge_type)
         .any(|edge| edge.source == source && edge.target == target)
+}
+
+#[tokio::test]
+async fn pod_pvc_edges_are_resolved_within_the_pod_namespace() {
+    let snapshot = SnapshotFrame {
+        namespaces: vec![
+            namespace("team-a", "namespace-team-a"),
+            namespace("team-b", "namespace-team-b"),
+        ],
+        pods: vec![
+            pod_with_pvc("app", "team-a", "pod-team-a", "data"),
+            pod_with_pvc("app", "team-b", "pod-team-b", "data"),
+        ],
+        persistent_volume_claims: vec![
+            persistent_volume_claim("data", "team-a", "pvc-team-a"),
+            persistent_volume_claim("data", "team-b", "pvc-team-b"),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should build namespace-qualified PVC relationships");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(has_edge(
+        &state,
+        Edge::ClaimsVolume,
+        "pod-team-a",
+        "pvc-team-a"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::ClaimsVolume,
+        "pod-team-b",
+        "pvc-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::ClaimsVolume,
+        "pod-team-a",
+        "pvc-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::ClaimsVolume,
+        "pod-team-b",
+        "pvc-team-a"
+    ));
+}
+
+#[tokio::test]
+async fn missing_pvc_reference_does_not_abort_graph_build() {
+    let snapshot = SnapshotFrame {
+        namespaces: vec![namespace("team-a", "namespace-team-a")],
+        pods: vec![pod_with_pvc("app", "team-a", "pod-missing-pvc", "missing")],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("an unresolved PVC must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(state.node_by_uid("pod-missing-pvc").is_some());
+    assert!(
+        state
+            .get_edges_by_type(&Edge::ClaimsVolume)
+            .all(|edge| edge.source != "pod-missing-pvc")
+    );
 }
 
 #[tokio::test]

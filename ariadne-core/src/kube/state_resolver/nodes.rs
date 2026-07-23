@@ -352,12 +352,19 @@ impl ClusterStateResolver {
 
         Self::set_manages_edge_all(snapshot, &mut state);
 
-        let pvc_name_to_uid: HashMap<&str, &str> = Self::name_to_uid(
-            snapshot
-                .persistent_volume_claims
-                .iter()
-                .map(|x| &x.metadata),
-        );
+        let pvc_namespace_name_to_uid: HashMap<(&str, &str), &str> = snapshot
+            .persistent_volume_claims
+            .iter()
+            .filter_map(|claim| {
+                Some((
+                    (
+                        claim.metadata.namespace.as_deref()?,
+                        claim.metadata.name.as_deref()?,
+                    ),
+                    claim.metadata.uid.as_deref()?,
+                ))
+            })
+            .collect();
 
         for pod in &snapshot.pods {
             pod.metadata.uid.as_ref().inspect(|pod_uid| {
@@ -370,16 +377,28 @@ impl ClusterStateResolver {
                         volumes.iter().for_each(|v| {
                             v.persistent_volume_claim.as_ref().inspect(|pvc| {
                                 let claim_name = pvc.claim_name.as_str();
-                                let pvc_uid = pvc_name_to_uid
-                                    .get(claim_name)
-                                    .unwrap_or_else(|| panic!("PVC `{claim_name}` not found"));
-                                state.add_edge(
-                                    pod_uid,
-                                    ResourceType::Pod,
-                                    pvc_uid,
-                                    ResourceType::PersistentVolumeClaim,
-                                    Edge::ClaimsVolume,
-                                );
+                                let pod_namespace = pod.metadata.namespace.as_deref();
+                                match pod_namespace.and_then(|namespace| {
+                                    pvc_namespace_name_to_uid.get(&(namespace, claim_name))
+                                }) {
+                                    Some(pvc_uid) => {
+                                        state.add_edge(
+                                            pod_uid,
+                                            ResourceType::Pod,
+                                            pvc_uid,
+                                            ResourceType::PersistentVolumeClaim,
+                                            Edge::ClaimsVolume,
+                                        );
+                                    }
+                                    None => {
+                                        warn!(
+                                            pod_namespace = pod_namespace.unwrap_or(""),
+                                            pod_name = pod.metadata.name.as_deref().unwrap_or(""),
+                                            claim_name,
+                                            "Skipping unresolved Pod to PersistentVolumeClaim relationship"
+                                        );
+                                    }
+                                }
                             });
                         });
                     });
