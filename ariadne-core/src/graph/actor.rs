@@ -412,15 +412,17 @@ mod tests {
         let shared_state = Arc::new(Mutex::new(cluster_state));
         actor.create(shared_state).await.unwrap();
 
-        let mut diff = ClusterStateDiff::default();
-        diff.added_nodes = vec![build_object("pod-1", "pod", ResourceType::Pod)];
-        diff.removed_edges = vec![GraphEdge {
-            source: "a".to_string(),
-            source_type: ResourceType::Pod,
-            target: "b".to_string(),
-            target_type: ResourceType::Node,
-            edge_type: Edge::RunsOn,
-        }];
+        let diff = ClusterStateDiff {
+            added_nodes: vec![build_object("pod-1", "pod", ResourceType::Pod)],
+            removed_edges: vec![GraphEdge {
+                source: "a".to_string(),
+                source_type: ResourceType::Pod,
+                target: "b".to_string(),
+                target_type: ResourceType::Node,
+                edge_type: Edge::RunsOn,
+            }],
+            ..Default::default()
+        };
         actor.update(diff).await.unwrap();
 
         let results = actor

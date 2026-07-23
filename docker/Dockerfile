@@ -51,6 +51,6 @@ LABEL \
     org.opencontainers.image.version="$VERSION" \
     org.opencontainers.image.licenses="MIT License" \
     org.opencontainers.image.authors="Artavazd Balaian <reasyu@gmail.com>" \
-    org.opencontainers.image.base.name="ubuntu:25.04" \
+    org.opencontainers.image.base.name="ubuntu:26.10" \
     org.opencontainers.image.created="$BUILD_DATE" \
     org.opencontainers.image.revision="${COMMIT_SHA}"

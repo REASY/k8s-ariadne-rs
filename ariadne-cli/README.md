@@ -161,6 +161,17 @@ the `snapshot/` directory in this repo.
 
 ## Development
 
+On Ubuntu 24.04, install the native libraries required by the desktop
+frontends before building or testing:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes \
+  libayatana-appindicator3-dev \
+  libwebkit2gtk-4.1-dev \
+  libxdo-dev
+```
+
 Run tests:
 
 ```bash

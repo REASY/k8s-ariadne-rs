@@ -1966,13 +1966,8 @@ fn eval_function(
             let num = match value {
                 Value::Number(n) => n.as_i64().unwrap_or(0),
                 Value::String(s) => s.parse::<i64>().unwrap_or(0),
-                Value::Bool(b) => {
-                    if b {
-                        1
-                    } else {
-                        0
-                    }
-                }
+                Value::Bool(true) => 1,
+                Value::Bool(false) => 0,
                 _ => 0,
             };
             Ok(Value::from(num))
@@ -1985,13 +1980,8 @@ fn eval_function(
             let num = match value {
                 Value::Number(n) => n.as_f64().unwrap_or(0.0),
                 Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
-                Value::Bool(b) => {
-                    if b {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
+                Value::Bool(true) => 1.0,
+                Value::Bool(false) => 0.0,
                 _ => 0.0,
             };
             Ok(Value::from(num))
@@ -2352,11 +2342,13 @@ mod tests {
     }
 
     fn pod(uid: &str, name: &str, namespace: &str) -> GenericObject {
-        let mut pod = Pod::default();
-        pod.metadata = ObjectMeta {
-            uid: Some(uid.to_string()),
-            name: Some(name.to_string()),
-            namespace: Some(namespace.to_string()),
+        let pod = Pod {
+            metadata: ObjectMeta {
+                uid: Some(uid.to_string()),
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         GenericObject {
@@ -2377,11 +2369,13 @@ mod tests {
         namespace: &str,
         reason: &str,
     ) -> GenericObject {
-        let mut pod = Pod::default();
-        pod.metadata = ObjectMeta {
-            uid: Some(uid.to_string()),
-            name: Some(name.to_string()),
-            namespace: Some(namespace.to_string()),
+        let mut pod = Pod {
+            metadata: ObjectMeta {
+                uid: Some(uid.to_string()),
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let terminated = ContainerStateTerminated {
@@ -2416,11 +2410,13 @@ mod tests {
     }
 
     fn deployment(uid: &str, name: &str, namespace: &str) -> GenericObject {
-        let mut dep = Deployment::default();
-        dep.metadata = ObjectMeta {
-            uid: Some(uid.to_string()),
-            name: Some(name.to_string()),
-            namespace: Some(namespace.to_string()),
+        let dep = Deployment {
+            metadata: ObjectMeta {
+                uid: Some(uid.to_string()),
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         GenericObject {
@@ -2438,11 +2434,13 @@ mod tests {
     }
 
     fn replica_set(uid: &str, name: &str, namespace: &str) -> GenericObject {
-        let mut rs = ReplicaSet::default();
-        rs.metadata = ObjectMeta {
-            uid: Some(uid.to_string()),
-            name: Some(name.to_string()),
-            namespace: Some(namespace.to_string()),
+        let rs = ReplicaSet {
+            metadata: ObjectMeta {
+                uid: Some(uid.to_string()),
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         GenericObject {

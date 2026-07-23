@@ -1317,7 +1317,7 @@ impl eframe::App for GuiApp {
                         color: Color32::from_black_alpha(80),
                     }),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_height(56.0);
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
@@ -1380,7 +1380,7 @@ impl eframe::App for GuiApp {
                         color: Color32::from_black_alpha(80),
                     }),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(10.0);
                 let mut has_focus = false;
                 let mut input_id: Option<egui::Id> = None;
@@ -1505,7 +1505,7 @@ impl eframe::App for GuiApp {
                         .fill(self.palette.bg_panel)
                         .stroke(Stroke::new(1.0, self.palette.border)),
                 )
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     ui.add_space(8.0);
                     Frame::new()
                         .fill(self.palette.bg_panel)
@@ -1636,7 +1636,7 @@ impl eframe::App for GuiApp {
 
         egui::CentralPanel::default()
             .frame(Frame::new().fill(self.palette.bg_primary))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(12.0);
                 let context_turns = self.build_context_with_budget();
                 let context_tokens = estimate_context_tokens(

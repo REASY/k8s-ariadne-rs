@@ -26,10 +26,10 @@ fn docker_available() -> bool {
     {
         return true;
     }
-    if let Ok(host) = std::env::var("DOCKER_HOST") {
-        if !host.trim().is_empty() {
-            return true;
-        }
+    if let Ok(host) = std::env::var("DOCKER_HOST")
+        && !host.trim().is_empty()
+    {
+        return true;
     }
     std::fs::metadata("/var/run/docker.sock").is_ok()
 }
@@ -153,7 +153,7 @@ fn extract_count(results: &[Value], key: &str) -> i64 {
         .unwrap_or_else(|| panic!("missing numeric key {key} in {map:?}"))
 }
 
-fn extract_first_object<'a>(results: &'a [Value]) -> &'a serde_json::Map<String, Value> {
+fn extract_first_object(results: &[Value]) -> &serde_json::Map<String, Value> {
     let Value::Object(map) = &results[0] else {
         panic!("expected object result, got {results:?}");
     };

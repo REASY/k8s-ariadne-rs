@@ -21,15 +21,15 @@ impl SkipList {
     fn load(path: Option<PathBuf>) -> Self {
         let path = path.filter(|p| p.exists());
         let mut tokens = Vec::new();
-        if let Some(path) = path {
-            if let Ok(content) = fs::read_to_string(path) {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() || trimmed.starts_with('#') {
-                        continue;
-                    }
-                    tokens.push(trimmed.to_string());
+        if let Some(path) = path
+            && let Ok(content) = fs::read_to_string(path)
+        {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
                 }
+                tokens.push(trimmed.to_string());
             }
         }
         SkipList { tokens }
@@ -169,7 +169,11 @@ fn parse_feature_file(path: &Path) -> Vec<Case> {
 
         if !in_query && is_scenario_start(trimmed) {
             flush_scenario(path, &mut scenario, &mut cases);
-            let name = trimmed.splitn(2, ':').nth(1).unwrap_or("").trim();
+            let name = trimmed
+                .split_once(':')
+                .map(|(_, name)| name)
+                .unwrap_or("")
+                .trim();
             scenario = Some(Scenario {
                 name: name.to_string(),
                 tags: std::mem::take(&mut pending_tags),
@@ -203,10 +207,8 @@ fn parse_feature_file(path: &Path) -> Vec<Case> {
         }
     }
 
-    if in_query {
-        if let Some(current) = scenario.as_mut() {
-            current.queries.push(query_buf.trim_end().to_string());
-        }
+    if in_query && let Some(current) = scenario.as_mut() {
+        current.queries.push(query_buf.trim_end().to_string());
     }
 
     flush_scenario(path, &mut scenario, &mut cases);

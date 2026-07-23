@@ -160,7 +160,7 @@ mod tests {
             },
             ..Default::default()
         });
-        write_list_to_dir(dir, SNAPSHOT_NAMESPACES_FILE, &vec![namespace])?;
+        write_list_to_dir(dir, SNAPSHOT_NAMESPACES_FILE, &[namespace])?;
 
         let client = SnapshotKubeClient::from_dir(dir)?;
         let namespaces = client.get_namespaces().await?;
@@ -186,7 +186,7 @@ mod tests {
             },
             ..Default::default()
         });
-        write_list_to_dir(seed_dir, SNAPSHOT_NAMESPACES_FILE, &vec![namespace])?;
+        write_list_to_dir(seed_dir, SNAPSHOT_NAMESPACES_FILE, &[namespace])?;
 
         let client = SnapshotKubeClient::from_dir(seed_dir)?;
         let resolver =

@@ -22,6 +22,8 @@ pub enum MemgraphError {
     QueryError(String),
     #[error("CommitError: {0}")]
     CommitError(String),
+    #[error("ValueConversionError: {0}")]
+    ValueConversionError(String),
 }
 
 pub struct Memgraph {
@@ -125,11 +127,19 @@ impl QuerySpec {
 
 impl Memgraph {
     pub fn try_new_from_url(url: &str) -> Result<Self> {
-        let binding = url.replace("bolt://", "");
-        let vec = binding.split(":").collect::<Vec<_>>();
-        assert_eq!(vec.len(), 2);
-        let host = vec[0].to_string();
-        let port: u16 = vec[1].parse().map_err(|err| {
+        let address = url.strip_prefix("bolt://").unwrap_or(url);
+        let (host, port) = address.rsplit_once(':').ok_or_else(|| {
+            MemgraphError::ConnectionError(format!(
+                "Invalid Memgraph URL {url:?}; expected bolt://host:port"
+            ))
+        })?;
+        if host.is_empty() {
+            return Err(MemgraphError::ConnectionError(format!(
+                "Invalid Memgraph URL {url:?}; host is empty"
+            ))
+            .into());
+        }
+        let port: u16 = port.parse().map_err(|err| {
             MemgraphError::ConnectionError(format!("Failed to parse port from url: {err:?}"))
         })?;
 
@@ -137,7 +147,7 @@ impl Memgraph {
 
         let params = ConnectParams {
             port,
-            host: Some(host),
+            host: Some(host.to_string()),
             ..Default::default()
         };
         Self::try_new(params)
@@ -149,9 +159,9 @@ impl Memgraph {
         let status = connection.status();
         if status != ConnectionStatus::Ready {
             println!("Connection failed with status: {status:?}");
-            return Err(MemgraphError::ConnectionError(format!(
-                "Connection status {status:?}"
-            )))?;
+            return Err(
+                MemgraphError::ConnectionError(format!("Connection status {status:?}")).into(),
+            );
         }
 
         Ok(Self {
@@ -719,6 +729,14 @@ impl Memgraph {
     }
 
     fn record_to_json(columns: &[String], value: &Record) -> Result<Value> {
+        if columns.len() != value.values.len() {
+            return Err(MemgraphError::ValueConversionError(format!(
+                "record contains {} values for {} columns",
+                value.values.len(),
+                columns.len()
+            ))
+            .into());
+        }
         let mut map = serde_json::Map::new();
         for (col, value) in columns.iter().zip(value.values.as_slice()) {
             map.insert(col.to_string(), record_to_json0(value)?);
@@ -732,7 +750,7 @@ fn record_to_json0(value: &rsmgclient::Value) -> Result<Value> {
         rsmgclient::Value::Null => Value::Null,
         rsmgclient::Value::Bool(v) => Value::Bool(*v),
         rsmgclient::Value::Int(n) => Value::Number(Number::from(*n)),
-        rsmgclient::Value::Float(n) => Value::Number(Number::from_f64(*n).unwrap()),
+        rsmgclient::Value::Float(n) => Value::Number(json_number(*n, "float")?),
         rsmgclient::Value::String(s) => Value::String(s.clone()),
         rsmgclient::Value::List(xs) => {
             let mut v = Vec::new();
@@ -741,9 +759,12 @@ fn record_to_json0(value: &rsmgclient::Value) -> Result<Value> {
             }
             Value::Array(v)
         }
-        rsmgclient::Value::Date(d) => Value::String(d.format("%Y-%m-%d").to_string()),
-        rsmgclient::Value::LocalTime(lt) => Value::String(lt.format("%H:%M:%S").to_string()),
-        rsmgclient::Value::LocalDateTime(dt) => Value::String(dt.and_utc().to_rfc3339()),
+        rsmgclient::Value::Date(d) => Value::String(d.to_string()),
+        rsmgclient::Value::LocalTime(time) => Value::String(format_local_time(time)),
+        rsmgclient::Value::LocalDateTime(date_time) => {
+            Value::String(format_local_date_time(date_time))
+        }
+        rsmgclient::Value::DateTime(date_time) => date_time_to_json(date_time),
         rsmgclient::Value::Duration(d) => Value::String(d.to_string()),
         rsmgclient::Value::Map(m) => {
             let mut map = serde_json::Map::new();
@@ -758,11 +779,123 @@ fn record_to_json0(value: &rsmgclient::Value) -> Result<Value> {
             serde_json::to_value(UnboundRelationship::try_new(rel)?)?
         }
         rsmgclient::Value::Path(path) => serde_json::to_value(Path::try_new(path)?)?,
-        rsmgclient::Value::DateTime(_) => unimplemented!("Value::DateTime"),
-        rsmgclient::Value::Point2D(_) => unimplemented!("Value::Point2D"),
-        rsmgclient::Value::Point3D(_) => unimplemented!("Value::Point3D"),
+        rsmgclient::Value::Point2D(point) => point_2d_to_json(point)?,
+        rsmgclient::Value::Point3D(point) => point_3d_to_json(point)?,
     };
     Ok(r)
+}
+
+fn json_number(value: f64, field: &str) -> Result<Number> {
+    Number::from_f64(value).ok_or_else(|| {
+        MemgraphError::ValueConversionError(format!("{field} is not a finite JSON number")).into()
+    })
+}
+
+fn push_fraction(value: &mut String, nanosecond: u32) {
+    if nanosecond != 0 {
+        let fraction = format!("{nanosecond:09}");
+        value.push('.');
+        value.push_str(fraction.trim_end_matches('0'));
+    }
+}
+
+fn format_year(year: i32) -> String {
+    if year < 0 {
+        format!("-{:04}", year.unsigned_abs())
+    } else if year <= 9999 {
+        format!("{year:04}")
+    } else {
+        format!("+{year}")
+    }
+}
+
+fn format_local_time(time: &rsmgclient::LocalTime) -> String {
+    let mut value = format!(
+        "{:02}:{:02}:{:02}",
+        time.hour(),
+        time.minute(),
+        time.second()
+    );
+    push_fraction(&mut value, time.nanosecond() as u32);
+    value
+}
+
+fn format_local_date_time(date_time: &rsmgclient::LocalDateTime) -> String {
+    let mut value = format!(
+        "{}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        format_year(i32::from(date_time.year())),
+        date_time.month(),
+        date_time.day(),
+        date_time.hour(),
+        date_time.minute(),
+        date_time.second()
+    );
+    push_fraction(&mut value, date_time.nanosecond() as u32);
+    value
+}
+
+fn format_offset(offset_seconds: i32) -> String {
+    let sign = if offset_seconds < 0 { '-' } else { '+' };
+    let offset = offset_seconds.unsigned_abs();
+    let hours = offset / 3_600;
+    let minutes = (offset % 3_600) / 60;
+    let seconds = offset % 60;
+    if seconds == 0 {
+        format!("{sign}{hours:02}:{minutes:02}")
+    } else {
+        format!("{sign}{hours:02}:{minutes:02}:{seconds:02}")
+    }
+}
+
+fn date_time_to_json(date_time: &rsmgclient::DateTime) -> Value {
+    let mut value = format!(
+        "{}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        format_year(date_time.year),
+        date_time.month,
+        date_time.day,
+        date_time.hour,
+        date_time.minute,
+        date_time.second
+    );
+    push_fraction(&mut value, date_time.nanosecond);
+    value.push_str(&format_offset(date_time.time_zone_offset_seconds));
+
+    let mut result = serde_json::Map::new();
+    result.insert("type".to_string(), Value::String("datetime".to_string()));
+    result.insert("value".to_string(), Value::String(value));
+    if let Some(time_zone_id) = &date_time.time_zone_id {
+        result.insert(
+            "timezone_id".to_string(),
+            Value::String(time_zone_id.clone()),
+        );
+    }
+    Value::Object(result)
+}
+
+fn point_2d_to_json(point: &rsmgclient::Point2D) -> Result<Value> {
+    Ok(Value::Object(point_json_fields(
+        point.srid,
+        point.x_longitude,
+        point.y_latitude,
+    )?))
+}
+
+fn point_3d_to_json(point: &rsmgclient::Point3D) -> Result<Value> {
+    let mut result = point_json_fields(point.srid, point.x_longitude, point.y_latitude)?;
+    result.insert(
+        "z".to_string(),
+        Value::Number(json_number(point.z_height, "point.z")?),
+    );
+    Ok(Value::Object(result))
+}
+
+fn point_json_fields(srid: u16, x: f64, y: f64) -> Result<serde_json::Map<String, Value>> {
+    let mut result = serde_json::Map::new();
+    result.insert("type".to_string(), Value::String("point".to_string()));
+    result.insert("srid".to_string(), Value::Number(srid.into()));
+    result.insert("x".to_string(), Value::Number(json_number(x, "point.x")?));
+    result.insert("y".to_string(), Value::Number(json_number(y, "point.y")?));
+    Ok(result)
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -881,5 +1014,142 @@ impl Path {
             nodes,
             relationships,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Memgraph, record_to_json0};
+    use rsmgclient::Record;
+    use serde_json::json;
+
+    #[test]
+    fn converts_memgraph_temporal_values_to_json_strings() {
+        let date = rsmgclient::Date::new(2026, 7, 23).unwrap();
+        let time = rsmgclient::LocalTime::new(14, 5, 9, 123_000_000).unwrap();
+        let date_time = rsmgclient::LocalDateTime::new(2026, 7, 23, 14, 5, 9, 123_000_000).unwrap();
+        let offset_date_time = rsmgclient::DateTime {
+            year: 2026,
+            month: 7,
+            day: 23,
+            hour: 14,
+            minute: 5,
+            second: 9,
+            nanosecond: 123_000_000,
+            time_zone_offset_seconds: 19_800,
+            time_zone_id: Some("Asia/Kolkata".to_string()),
+        };
+
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::Date(date)).unwrap(),
+            json!("2026-07-23")
+        );
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::LocalTime(time)).unwrap(),
+            json!("14:05:09.123")
+        );
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::LocalDateTime(date_time)).unwrap(),
+            json!("2026-07-23T14:05:09.123")
+        );
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::DateTime(offset_date_time)).unwrap(),
+            json!({
+                "type": "datetime",
+                "value": "2026-07-23T14:05:09.123+05:30",
+                "timezone_id": "Asia/Kolkata"
+            })
+        );
+    }
+
+    #[test]
+    fn converts_memgraph_points_to_json_objects() {
+        let point_2d = rsmgclient::Point2D {
+            srid: 4_326,
+            x_longitude: 103.851_959,
+            y_latitude: 1.290_27,
+        };
+        let point_3d = rsmgclient::Point3D {
+            srid: 4_979,
+            x_longitude: 103.851_959,
+            y_latitude: 1.290_27,
+            z_height: 15.5,
+        };
+
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::Point2D(point_2d)).unwrap(),
+            json!({
+                "type": "point",
+                "srid": 4326,
+                "x": 103.851959,
+                "y": 1.29027
+            })
+        );
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::Point3D(point_3d)).unwrap(),
+            json!({
+                "type": "point",
+                "srid": 4979,
+                "x": 103.851959,
+                "y": 1.29027,
+                "z": 15.5
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_numbers_and_mismatched_records() {
+        assert!(record_to_json0(&rsmgclient::Value::Float(f64::NAN)).is_err());
+        assert!(
+            record_to_json0(&rsmgclient::Value::Point2D(rsmgclient::Point2D {
+                srid: 4_326,
+                x_longitude: f64::INFINITY,
+                y_latitude: 1.0,
+            }))
+            .is_err()
+        );
+
+        let record = Record {
+            values: vec![rsmgclient::Value::Int(1)],
+        };
+        assert!(
+            Memgraph::record_to_json(&["first".to_string(), "second".to_string()], &record)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_memgraph_urls_without_panicking() {
+        assert!(Memgraph::try_new_from_url("not-a-url").is_err());
+        assert!(Memgraph::try_new_from_url("bolt://:7687").is_err());
+        assert!(Memgraph::try_new_from_url("bolt://localhost:not-a-port").is_err());
+    }
+
+    #[test]
+    fn formats_zero_fraction_and_offset_seconds_without_losing_information() {
+        let local_time = rsmgclient::LocalTime::new(0, 0, 0, 0).unwrap();
+        let offset_date_time = rsmgclient::DateTime {
+            year: -1,
+            month: 1,
+            day: 2,
+            hour: 3,
+            minute: 4,
+            second: 5,
+            nanosecond: 1,
+            time_zone_offset_seconds: -3_661,
+            time_zone_id: None,
+        };
+
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::LocalTime(local_time)).unwrap(),
+            json!("00:00:00")
+        );
+        assert_eq!(
+            record_to_json0(&rsmgclient::Value::DateTime(offset_date_time)).unwrap(),
+            json!({
+                "type": "datetime",
+                "value": "-0001-01-02T03:04:05.000000001-01:01:01"
+            })
+        );
     }
 }

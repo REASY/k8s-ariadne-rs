@@ -441,7 +441,7 @@ impl Container {
         spec: k8s_openapi::api::core::v1::Container,
         container_type: ContainerType,
     ) -> Self {
-        let uid = format!("Container:{}:{}:{}", pod_uid, container_type, &spec.name);
+        let uid = format!("Container:{}:{}:{}", pod_uid, container_type, spec.name);
         Self {
             pod_name: pod_name.to_string(),
             pod_uid: pod_uid.to_string(),
