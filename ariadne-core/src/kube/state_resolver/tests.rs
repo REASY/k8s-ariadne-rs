@@ -9,7 +9,7 @@ use k8s_openapi::api::networking::v1::{
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use k8s_openapi::apimachinery::pkg::version::Info;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -437,6 +437,25 @@ fn endpoint_slice(
     })
 }
 
+fn endpoint_slice_for_service(
+    uid: &str,
+    namespace: &str,
+    service_name: &str,
+    owner_references: Vec<OwnerReference>,
+) -> Arc<EndpointSlice> {
+    let mut endpoint_slice = endpoint_slice(uid, "1", &["10.0.0.1"], true)
+        .as_ref()
+        .clone();
+    endpoint_slice.metadata.namespace = Some(namespace.to_string());
+    endpoint_slice.metadata.labels = Some(BTreeMap::from([(
+        "kubernetes.io/service-name".to_string(),
+        service_name.to_string(),
+    )]));
+    endpoint_slice.metadata.owner_references =
+        (!owner_references.is_empty()).then_some(owner_references);
+    Arc::new(endpoint_slice)
+}
+
 fn ingress_with_service(
     name: &str,
     namespace: &str,
@@ -659,6 +678,120 @@ async fn endpoint_address_change_replaces_derived_endpoint_identity() {
     assert_eq!(outcome.diff.modified_nodes, 1);
     assert_eq!(outcome.diff.added_edges, 3);
     assert_eq!(outcome.diff.removed_edges, 3);
+}
+
+#[tokio::test]
+async fn ownerless_endpoint_slice_resolves_service_label_within_namespace() {
+    let snapshot = SnapshotFrame {
+        services: vec![
+            service("api", "team-a", "service-team-a"),
+            service("api", "team-b", "service-team-b"),
+        ],
+        endpoint_slices: vec![endpoint_slice_for_service(
+            "endpoint-slice-api",
+            "team-b",
+            "api",
+            Vec::new(),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("ownerless custom EndpointSlice should resolve its labeled Service");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(has_edge(
+        &state,
+        Edge::Manages,
+        "service-team-b",
+        "endpoint-slice-api"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::Manages,
+        "service-team-a",
+        "endpoint-slice-api"
+    ));
+}
+
+#[tokio::test]
+async fn endpoint_slice_service_label_and_owner_reference_share_one_edge() {
+    let mut service_owner = owner_reference("Service", "api", "service-api");
+    service_owner.api_version = "v1".to_string();
+    let snapshot = SnapshotFrame {
+        services: vec![service("api", "default", "service-api")],
+        endpoint_slices: vec![endpoint_slice_for_service(
+            "endpoint-slice-api",
+            "default",
+            "api",
+            vec![service_owner],
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("EndpointSlice owner and label should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert_eq!(
+        state
+            .get_edges_by_type(&Edge::Manages)
+            .filter(|edge| { edge.source == "service-api" && edge.target == "endpoint-slice-api" })
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn missing_labeled_service_does_not_abort_endpoint_slice_graph_build() {
+    let snapshot = SnapshotFrame {
+        endpoint_slices: vec![endpoint_slice_for_service(
+            "endpoint-slice-orphan",
+            "default",
+            "missing-api",
+            Vec::new(),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("unresolved EndpointSlice Service must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(
+        state
+            .node_by_uid("endpoint-slice-orphan")
+            .is_some_and(|node| node.resource_type == ResourceType::EndpointSlice)
+    );
+    assert!(
+        !state
+            .get_edges_by_type(&Edge::Manages)
+            .any(|edge| edge.target == "endpoint-slice-orphan")
+    );
 }
 
 #[tokio::test]

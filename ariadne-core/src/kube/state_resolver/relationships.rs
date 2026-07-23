@@ -13,6 +13,8 @@ use crate::types::{
 };
 use tracing::{trace, warn};
 
+const ENDPOINT_SLICE_SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
+
 impl ClusterStateResolver {
     pub(super) fn set_manages_edge_all(
         snapshot: &ObservedClusterSnapshot,
@@ -26,6 +28,11 @@ impl ClusterStateResolver {
         Self::set_manages_edge(
             &snapshot.endpoint_slices,
             ResourceType::EndpointSlice,
+            state,
+        );
+        Self::set_service_endpoint_slice_edges(
+            &snapshot.services,
+            &snapshot.endpoint_slices,
             state,
         );
         Self::set_manages_edge(
@@ -92,6 +99,58 @@ impl ClusterStateResolver {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    fn set_service_endpoint_slice_edges(
+        services: &[Arc<Service>],
+        endpoint_slices: &[Arc<EndpointSlice>],
+        state: &mut ClusterState,
+    ) {
+        let service_namespace_name_to_uid: HashMap<(&str, &str), &str> = services
+            .iter()
+            .filter_map(|service| {
+                Some((
+                    (
+                        service.metadata.namespace.as_deref()?,
+                        service.metadata.name.as_deref()?,
+                    ),
+                    service.metadata.uid.as_deref()?,
+                ))
+            })
+            .collect();
+
+        for endpoint_slice in endpoint_slices {
+            let Some(endpoint_slice_uid) = endpoint_slice.metadata.uid.as_deref() else {
+                continue;
+            };
+            let Some(namespace) = endpoint_slice.metadata.namespace.as_deref() else {
+                continue;
+            };
+            let Some(service_name) = endpoint_slice
+                .metadata
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get(ENDPOINT_SLICE_SERVICE_NAME_LABEL))
+            else {
+                continue;
+            };
+
+            match service_namespace_name_to_uid.get(&(namespace, service_name.as_str())) {
+                Some(service_uid) => state.add_edge(
+                    service_uid,
+                    ResourceType::Service,
+                    endpoint_slice_uid,
+                    ResourceType::EndpointSlice,
+                    Edge::Manages,
+                ),
+                None => warn!(
+                    endpoint_slice_uid,
+                    endpoint_slice_namespace = namespace,
+                    service_name,
+                    "Skipping unresolved EndpointSlice to Service relationship"
+                ),
             }
         }
     }
