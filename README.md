@@ -116,6 +116,19 @@ KUBE_CONTEXT=<context> \
 cargo run --release -p ariadne-mcp
 ```
 
+Literal Kubernetes environment-variable values are redacted from graphs and exported snapshots by
+default. To retain them for configuration queries, explicitly opt out:
+
+```bash
+ARIADNE_REDACT_ENV_VALUES=false \
+CLUSTER=<cluster> \
+KUBE_CONTEXT=<context> \
+cargo run --release -p ariadne-mcp
+```
+
+Environment-variable names and `valueFrom` references remain queryable in both modes. Other
+sensitive-field redaction is unaffected by this setting.
+
 By default this starts an HTTP MCP server on:
 
 ```text
