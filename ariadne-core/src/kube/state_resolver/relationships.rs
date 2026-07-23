@@ -395,6 +395,7 @@ impl ClusterStateResolver {
         let mut hosts: Vec<Arc<Host>> = Vec::new();
         let mut ingress_service_backends: Vec<Arc<IngressServiceBackend>> = Vec::new();
 
+        // TODO: Derive a backend from `spec.default_backend` as well as rule paths.
         for ingress in ingresses {
             ingress.metadata.uid.as_ref().inspect(|ingress_id| {
                 ingress.spec.as_ref().inspect(|spec| {
