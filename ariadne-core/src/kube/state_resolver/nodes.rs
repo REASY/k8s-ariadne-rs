@@ -351,6 +351,7 @@ impl ClusterStateResolver {
         }
 
         Self::set_manages_edge_all(snapshot, &mut state);
+        Self::pod_to_service_account(&snapshot.pods, &snapshot.service_accounts, &mut state);
 
         let pvc_namespace_name_to_uid: HashMap<(&str, &str), &str> = snapshot
             .persistent_volume_claims

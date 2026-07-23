@@ -5,7 +5,7 @@
 use crate::state_resolver::{
     Arc, ClusterState, ClusterStateResolver, EndpointSlice, EndpointSliceDerived, HashMap, HashSet,
     Ingress, IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot, PersistentVolume, Pod,
-    Resource, ResourceExt, Result, Service,
+    Resource, ResourceExt, Result, Service, ServiceAccount,
 };
 use crate::types::{
     Container, ContainerType, Edge, Endpoint, EndpointAddress, EndpointIdentity, GenericObject,
@@ -150,6 +150,63 @@ impl ClusterStateResolver {
                     endpoint_slice_namespace = namespace,
                     service_name,
                     "Skipping unresolved EndpointSlice to Service relationship"
+                ),
+            }
+        }
+    }
+
+    pub(super) fn pod_to_service_account(
+        pods: &[Arc<Pod>],
+        service_accounts: &[Arc<ServiceAccount>],
+        state: &mut ClusterState,
+    ) {
+        let service_account_namespace_name_to_uid: HashMap<(&str, &str), &str> = service_accounts
+            .iter()
+            .filter_map(|service_account| {
+                Some((
+                    (
+                        service_account.metadata.namespace.as_deref()?,
+                        service_account.metadata.name.as_deref()?,
+                    ),
+                    service_account.metadata.uid.as_deref()?,
+                ))
+            })
+            .collect();
+
+        for pod in pods {
+            let Some(pod_uid) = pod.metadata.uid.as_deref() else {
+                continue;
+            };
+            let Some(namespace) = pod.metadata.namespace.as_deref() else {
+                continue;
+            };
+            let Some(spec) = pod.spec.as_ref() else {
+                continue;
+            };
+            let service_account_name = spec
+                .service_account_name
+                .as_deref()
+                .filter(|name| !name.is_empty())
+                .or_else(|| {
+                    spec.service_account
+                        .as_deref()
+                        .filter(|name| !name.is_empty())
+                })
+                .unwrap_or("default");
+
+            match service_account_namespace_name_to_uid.get(&(namespace, service_account_name)) {
+                Some(service_account_uid) => state.add_edge(
+                    pod_uid,
+                    ResourceType::Pod,
+                    service_account_uid,
+                    ResourceType::ServiceAccount,
+                    Edge::UsesIdentity,
+                ),
+                None => warn!(
+                    pod_uid,
+                    pod_namespace = namespace,
+                    service_account_name,
+                    "Skipping unresolved Pod to ServiceAccount relationship"
                 ),
             }
         }

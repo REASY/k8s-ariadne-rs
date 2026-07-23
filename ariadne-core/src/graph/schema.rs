@@ -167,6 +167,11 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
     (ResourceType::Pod, Edge::RunsOn, ResourceType::Node),
     (
         ResourceType::Pod,
+        Edge::UsesIdentity,
+        ResourceType::ServiceAccount,
+    ),
+    (
+        ResourceType::Pod,
         Edge::ClaimsVolume,
         ResourceType::PersistentVolumeClaim,
     ),

@@ -383,6 +383,42 @@ fn pod_with_pvc(name: &str, namespace: &str, uid: &str, claim_name: &str) -> Arc
     })
 }
 
+fn pod_with_service_account(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    service_account_name: Option<&str>,
+    deprecated_service_account: Option<&str>,
+) -> Arc<Pod> {
+    Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: Vec::new(),
+            service_account_name: service_account_name.map(str::to_string),
+            service_account: deprecated_service_account.map(str::to_string),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+fn service_account(name: &str, namespace: &str, uid: &str) -> Arc<ServiceAccount> {
+    Arc::new(ServiceAccount {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
 fn persistent_volume_claim(name: &str, namespace: &str, uid: &str) -> Arc<PersistentVolumeClaim> {
     Arc::new(PersistentVolumeClaim {
         metadata: ObjectMeta {
@@ -791,6 +827,117 @@ async fn missing_labeled_service_does_not_abort_endpoint_slice_graph_build() {
         !state
             .get_edges_by_type(&Edge::Manages)
             .any(|edge| edge.target == "endpoint-slice-orphan")
+    );
+}
+
+#[tokio::test]
+async fn pod_service_accounts_resolve_canonical_default_and_deprecated_names_within_namespace() {
+    let snapshot = SnapshotFrame {
+        pods: vec![
+            pod_with_service_account("explicit", "team-b", "pod-explicit", Some("api"), None),
+            pod_with_service_account("defaulted", "team-a", "pod-defaulted", None, None),
+            pod_with_service_account("legacy", "team-a", "pod-legacy", None, Some("legacy")),
+            pod_with_service_account(
+                "canonical-wins",
+                "team-a",
+                "pod-canonical-wins",
+                Some("api"),
+                Some("legacy"),
+            ),
+        ],
+        service_accounts: vec![
+            service_account("api", "team-a", "service-account-api-team-a"),
+            service_account("api", "team-b", "service-account-api-team-b"),
+            service_account("default", "team-a", "service-account-default-team-a"),
+            service_account("legacy", "team-a", "service-account-legacy-team-a"),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("Pod ServiceAccounts should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-explicit",
+        "service-account-api-team-b"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-explicit",
+        "service-account-api-team-a"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-defaulted",
+        "service-account-default-team-a"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-legacy",
+        "service-account-legacy-team-a"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-canonical-wins",
+        "service-account-api-team-a"
+    ));
+    assert!(!has_edge(
+        &state,
+        Edge::UsesIdentity,
+        "pod-canonical-wins",
+        "service-account-legacy-team-a"
+    ));
+}
+
+#[tokio::test]
+async fn missing_pod_service_account_does_not_abort_graph_build() {
+    let snapshot = SnapshotFrame {
+        pods: vec![pod_with_service_account(
+            "orphan",
+            "default",
+            "pod-orphan-identity",
+            Some("missing"),
+            None,
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("unresolved ServiceAccount must not abort graph construction");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(
+        state
+            .node_by_uid("pod-orphan-identity")
+            .is_some_and(|node| node.resource_type == ResourceType::Pod)
+    );
+    assert!(
+        !state
+            .get_edges_by_type(&Edge::UsesIdentity)
+            .any(|edge| edge.source == "pod-orphan-identity")
     );
 }
 
