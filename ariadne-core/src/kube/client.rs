@@ -130,6 +130,7 @@ pub struct KubeClientImpl {
     persistent_volume_claim_api: Api<PersistentVolumeClaim>,
     node_api: Api<Node>,
     service_account_api: Api<ServiceAccount>,
+    event_api: Api<Event>,
 }
 
 impl KubeClientImpl {
@@ -185,8 +186,15 @@ impl KubeClientImpl {
             service_account_api: maybe_ns
                 .map(|ns| Api::namespaced(client.clone(), ns))
                 .unwrap_or_else(|| Api::all(client.clone())),
+            event_api: event_api(client, maybe_ns),
         })
     }
+}
+
+fn event_api(client: Client, maybe_ns: Option<&str>) -> Api<Event> {
+    maybe_ns
+        .map(|namespace| Api::namespaced(client.clone(), namespace))
+        .unwrap_or_else(|| Api::all(client))
 }
 
 pub(super) async fn load_kube_config(options: &KubeConfigOptions) -> Result<Config> {
@@ -310,8 +318,7 @@ impl KubeClient for KubeClientImpl {
     }
 
     async fn get_events(&self) -> Result<Vec<Arc<k8s_openapi::api::events::v1::Event>>> {
-        let api: Api<k8s_openapi::api::events::v1::Event> = Api::all(self.client.clone());
-        get_object(&api).await
+        get_object(&self.event_api).await
     }
 
     fn degraded_resource_kinds_handle(&self) -> Arc<Mutex<BTreeSet<String>>> {

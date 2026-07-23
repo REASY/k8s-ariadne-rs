@@ -15,7 +15,8 @@ use super::{
     RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD, RESOURCE_REPLICA_SET, RESOURCE_SERVICE,
     RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET, RESOURCE_STORAGE_CLASS, ReplicaSet, Resource,
     Result, STORE_READY_TIMEOUT_SECONDS, Service, ServiceAccount, StatefulSet, StorageClass, Store,
-    WatchHealth, install_rustls_provider, load_kube_config, make_store_and_watch, watcher,
+    WatchHealth, event_api, install_rustls_provider, load_kube_config, make_store_and_watch,
+    watcher,
 };
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -407,9 +408,7 @@ impl CachedKubeClient {
             .map(|ns| Api::namespaced(client.clone(), ns))
             .unwrap_or_else(|| Api::all(client.clone()));
 
-        let event_api: Api<Event> = maybe_ns
-            .map(|ns| Api::namespaced(client.clone(), ns))
-            .unwrap_or_else(|| Api::all(client.clone()));
+        let event_api = event_api(client.clone(), maybe_ns);
 
         let access = AccessChecker::new(client.clone(), maybe_ns);
         let watch_health = WatchHealth::new();

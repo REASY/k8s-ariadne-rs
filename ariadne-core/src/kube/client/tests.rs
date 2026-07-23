@@ -2,6 +2,7 @@ use super::*;
 use crate::snapshot::write_json_to_dir;
 use crate::snapshot::write_list_to_dir;
 use crate::types::ObjectIdentifier;
+use http::{Request, Response};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
@@ -13,12 +14,15 @@ use k8s_openapi::api::events::v1::Event;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use kube::client::Body;
+use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower::service_fn;
 
 #[test]
 fn explicit_kubeconfig_selection_disables_incluster_fallback() {
@@ -63,6 +67,25 @@ fn namespace_watcher_is_restricted_to_selected_namespace() {
         Some("metadata.name=team-a".to_string())
     );
     assert!(namespace_watcher_config(None).field_selector.is_none());
+}
+
+#[tokio::test]
+async fn event_api_respects_selected_namespace() {
+    let client = Client::new(
+        service_fn(|_request: Request<Body>| async {
+            Ok::<_, Infallible>(Response::new(Body::empty()))
+        }),
+        "default",
+    );
+
+    assert_eq!(
+        event_api(client.clone(), Some("team-a")).resource_url(),
+        "/apis/events.k8s.io/v1/namespaces/team-a/events"
+    );
+    assert_eq!(
+        event_api(client, None).resource_url(),
+        "/apis/events.k8s.io/v1/events"
+    );
 }
 
 struct TempDir {
