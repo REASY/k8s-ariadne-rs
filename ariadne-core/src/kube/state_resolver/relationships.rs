@@ -4,14 +4,16 @@
 
 use crate::state_resolver::{
     Arc, ClusterState, ClusterStateResolver, ConfigMap, EndpointSlice, EndpointSliceDerived,
-    HashMap, HashSet, Ingress, IngressDerived, Node, ObjectMeta, ObservedClusterSnapshot,
-    PersistentVolume, Pod, Resource, ResourceExt, Result, Service, ServiceAccount,
+    HashMap, HashSet, Ingress, IngressDerived, NetworkPolicy, Node, ObjectMeta,
+    ObservedClusterSnapshot, PersistentVolume, Pod, Resource, ResourceExt, Result, Service,
+    ServiceAccount,
 };
 use crate::types::{
     Container, ContainerType, Edge, Endpoint, EndpointAddress, EndpointIdentity, GenericObject,
     Host, IngressServiceBackend, ObjectIdentifier, ResourceAttributes, ResourceType,
 };
 use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use tracing::{trace, warn};
 
 const ENDPOINT_SLICE_SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
@@ -326,6 +328,98 @@ impl ClusterStateResolver {
                 }
             }
         }
+    }
+
+    pub(super) fn network_policies_to_pods(
+        network_policies: &[Arc<NetworkPolicy>],
+        pods: &[Arc<Pod>],
+        state: &mut ClusterState,
+    ) {
+        let mut pods_by_namespace: HashMap<&str, Vec<&Arc<Pod>>> = HashMap::new();
+        for pod in pods {
+            if let Some(namespace) = pod.metadata.namespace.as_deref() {
+                pods_by_namespace.entry(namespace).or_default().push(pod);
+            }
+        }
+
+        for network_policy in network_policies {
+            let Some(network_policy_uid) = network_policy.metadata.uid.as_deref() else {
+                continue;
+            };
+            let Some(namespace) = network_policy.metadata.namespace.as_deref() else {
+                continue;
+            };
+            let Some(selector) = network_policy
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.pod_selector.as_ref())
+            else {
+                warn!(
+                    network_policy_uid,
+                    network_policy_namespace = namespace,
+                    "Skipping NetworkPolicy with missing required podSelector"
+                );
+                continue;
+            };
+
+            for pod in pods_by_namespace
+                .get(namespace)
+                .into_iter()
+                .flat_map(|pods| pods.iter().copied())
+            {
+                let Some(pod_uid) = pod.metadata.uid.as_deref() else {
+                    continue;
+                };
+                if Self::label_selector_matches(selector, pod.metadata.labels.as_ref()) {
+                    state.add_edge(
+                        network_policy_uid,
+                        ResourceType::NetworkPolicy,
+                        pod_uid,
+                        ResourceType::Pod,
+                        Edge::AppliesTo,
+                    );
+                }
+            }
+        }
+    }
+
+    fn label_selector_matches(
+        selector: &LabelSelector,
+        labels: Option<&std::collections::BTreeMap<String, String>>,
+    ) -> bool {
+        let match_labels = selector.match_labels.as_ref().is_none_or(|requirements| {
+            requirements
+                .iter()
+                .all(|(key, value)| labels.and_then(|labels| labels.get(key)) == Some(value))
+        });
+        if !match_labels {
+            return false;
+        }
+
+        selector
+            .match_expressions
+            .as_ref()
+            .is_none_or(|requirements| {
+                requirements.iter().all(|requirement| {
+                    let label_value = labels.and_then(|labels| labels.get(&requirement.key));
+                    let values = requirement.values.as_deref().unwrap_or_default();
+                    match requirement.operator.as_str() {
+                        "In" => {
+                            !values.is_empty()
+                                && label_value
+                                    .is_some_and(|value| values.iter().any(|item| item == value))
+                        }
+                        "NotIn" => {
+                            !values.is_empty()
+                                && label_value
+                                    .is_none_or(|value| values.iter().all(|item| item != value))
+                        }
+                        "Exists" => values.is_empty() && label_value.is_some(),
+                        "DoesNotExist" => values.is_empty() && label_value.is_none(),
+                        _ => false,
+                    }
+                })
+            })
     }
 
     fn collect_injected_config_map_names<'a>(

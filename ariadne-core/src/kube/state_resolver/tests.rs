@@ -8,9 +8,12 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::api::discovery::v1::{Endpoint as KubernetesEndpoint, EndpointConditions};
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IngressBackend, IngressRule,
-    IngressServiceBackend as KubeIngressServiceBackend, IngressSpec, ServiceBackendPort,
+    IngressServiceBackend as KubeIngressServiceBackend, IngressSpec, NetworkPolicySpec,
+    ServiceBackendPort,
 };
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{
+    LabelSelector, LabelSelectorRequirement, OwnerReference,
+};
 use k8s_openapi::apimachinery::pkg::version::Info;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -363,6 +366,77 @@ fn pod(name: &str, namespace: &str, uid: &str, owners: Vec<OwnerReference>) -> A
     })
 }
 
+fn pod_with_labels(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    resource_version: &str,
+    labels: &[(&str, &str)],
+) -> Arc<Pod> {
+    Arc::new(Pod {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            resource_version: Some(resource_version.to_string()),
+            labels: (!labels.is_empty()).then(|| {
+                labels
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
+fn network_policy(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    resource_version: &str,
+    pod_selector: LabelSelector,
+) -> Arc<NetworkPolicy> {
+    Arc::new(NetworkPolicy {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            resource_version: Some(resource_version.to_string()),
+            ..Default::default()
+        },
+        spec: Some(NetworkPolicySpec {
+            pod_selector: Some(pod_selector),
+            ..Default::default()
+        }),
+    })
+}
+
+fn label_selector(
+    match_labels: &[(&str, &str)],
+    match_expressions: Vec<LabelSelectorRequirement>,
+) -> LabelSelector {
+    LabelSelector {
+        match_labels: (!match_labels.is_empty()).then(|| {
+            match_labels
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect()
+        }),
+        match_expressions: (!match_expressions.is_empty()).then_some(match_expressions),
+    }
+}
+
+fn label_requirement(key: &str, operator: &str, values: &[&str]) -> LabelSelectorRequirement {
+    LabelSelectorRequirement {
+        key: key.to_string(),
+        operator: operator.to_string(),
+        values: (!values.is_empty())
+            .then(|| values.iter().map(|value| value.to_string()).collect()),
+    }
+}
+
 fn pod_with_pvc(name: &str, namespace: &str, uid: &str, claim_name: &str) -> Arc<Pod> {
     Arc::new(Pod {
         metadata: ObjectMeta {
@@ -635,6 +709,293 @@ fn has_edge(state: &ClusterState, edge_type: Edge, source: &str, target: &str) -
     state
         .get_edges_by_type(&edge_type)
         .any(|edge| edge.source == source && edge.target == target)
+}
+
+fn applies_to_targets(state: &ClusterState, network_policy_uid: &str) -> BTreeSet<String> {
+    state
+        .get_edges_by_type(&Edge::AppliesTo)
+        .filter(|edge| edge.source == network_policy_uid)
+        .map(|edge| edge.target.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn network_policy_pod_selectors_follow_kubernetes_semantics_and_namespace_scope() {
+    let snapshot = SnapshotFrame {
+        pods: vec![
+            pod_with_labels(
+                "web-prod",
+                "team-a",
+                "pod-web-prod",
+                "1",
+                &[
+                    ("app", "web"),
+                    ("environment", "prod"),
+                    ("partition", "blue"),
+                ],
+            ),
+            pod_with_labels(
+                "api-dev",
+                "team-a",
+                "pod-api-dev",
+                "1",
+                &[("app", "api"), ("environment", "dev")],
+            ),
+            pod_with_labels("unlabeled", "team-a", "pod-unlabeled", "1", &[]),
+            pod_with_labels(
+                "web-prod",
+                "team-b",
+                "pod-web-prod-team-b",
+                "1",
+                &[("app", "web"), ("environment", "prod")],
+            ),
+        ],
+        network_policies: vec![
+            network_policy("all", "team-a", "policy-all", "1", LabelSelector::default()),
+            network_policy(
+                "match-labels",
+                "team-a",
+                "policy-match-labels",
+                "1",
+                label_selector(&[("app", "web")], Vec::new()),
+            ),
+            network_policy(
+                "in",
+                "team-a",
+                "policy-in",
+                "1",
+                label_selector(
+                    &[],
+                    vec![label_requirement("environment", "In", &["prod", "staging"])],
+                ),
+            ),
+            network_policy(
+                "not-in",
+                "team-a",
+                "policy-not-in",
+                "1",
+                label_selector(
+                    &[],
+                    vec![label_requirement("environment", "NotIn", &["dev"])],
+                ),
+            ),
+            network_policy(
+                "exists",
+                "team-a",
+                "policy-exists",
+                "1",
+                label_selector(&[], vec![label_requirement("partition", "Exists", &[])]),
+            ),
+            network_policy(
+                "does-not-exist",
+                "team-a",
+                "policy-does-not-exist",
+                "1",
+                label_selector(
+                    &[],
+                    vec![label_requirement("partition", "DoesNotExist", &[])],
+                ),
+            ),
+            network_policy(
+                "combined",
+                "team-a",
+                "policy-combined",
+                "1",
+                label_selector(
+                    &[("app", "web")],
+                    vec![
+                        label_requirement("environment", "In", &["prod"]),
+                        label_requirement("partition", "Exists", &[]),
+                    ],
+                ),
+            ),
+            network_policy(
+                "failed-and",
+                "team-a",
+                "policy-failed-and",
+                "1",
+                label_selector(
+                    &[("app", "web")],
+                    vec![label_requirement("environment", "In", &["dev"])],
+                ),
+            ),
+            network_policy(
+                "unknown-operator",
+                "team-a",
+                "policy-unknown",
+                "1",
+                label_selector(
+                    &[],
+                    vec![label_requirement("environment", "Unknown", &["prod"])],
+                ),
+            ),
+            network_policy(
+                "team-b",
+                "team-b",
+                "policy-team-b",
+                "1",
+                label_selector(&[("app", "web")], Vec::new()),
+            ),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("NetworkPolicy selectors should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert_eq!(
+        applies_to_targets(&state, "policy-all"),
+        BTreeSet::from([
+            "pod-api-dev".to_string(),
+            "pod-unlabeled".to_string(),
+            "pod-web-prod".to_string(),
+        ])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-match-labels"),
+        BTreeSet::from(["pod-web-prod".to_string()])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-in"),
+        BTreeSet::from(["pod-web-prod".to_string()])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-not-in"),
+        BTreeSet::from(["pod-unlabeled".to_string(), "pod-web-prod".to_string()])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-exists"),
+        BTreeSet::from(["pod-web-prod".to_string()])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-does-not-exist"),
+        BTreeSet::from(["pod-api-dev".to_string(), "pod-unlabeled".to_string()])
+    );
+    assert_eq!(
+        applies_to_targets(&state, "policy-combined"),
+        BTreeSet::from(["pod-web-prod".to_string()])
+    );
+    assert!(applies_to_targets(&state, "policy-failed-and").is_empty());
+    assert!(applies_to_targets(&state, "policy-unknown").is_empty());
+    assert_eq!(
+        applies_to_targets(&state, "policy-team-b"),
+        BTreeSet::from(["pod-web-prod-team-b".to_string()])
+    );
+}
+
+#[tokio::test]
+async fn network_policy_edges_track_pod_label_and_policy_selector_changes() {
+    let policy_selects_web = network_policy(
+        "web",
+        "default",
+        "policy-web",
+        "1",
+        label_selector(&[("app", "web")], Vec::new()),
+    );
+    let initial = SnapshotFrame {
+        pods: vec![pod_with_labels(
+            "workload",
+            "default",
+            "pod-workload",
+            "1",
+            &[("app", "web")],
+        )],
+        network_policies: vec![policy_selects_web.clone()],
+        ..Default::default()
+    };
+    let pod_label_changed = SnapshotFrame {
+        pods: vec![pod_with_labels(
+            "workload",
+            "default",
+            "pod-workload",
+            "2",
+            &[("app", "api")],
+        )],
+        network_policies: vec![policy_selects_web],
+        ..Default::default()
+    };
+    let policy_selector_changed = SnapshotFrame {
+        pods: vec![pod_with_labels(
+            "workload",
+            "default",
+            "pod-workload",
+            "2",
+            &[("app", "api")],
+        )],
+        network_policies: vec![network_policy(
+            "web",
+            "default",
+            "policy-web",
+            "2",
+            label_selector(&[("app", "api")], Vec::new()),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, pod_label_changed, policy_selector_changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize with a matching NetworkPolicy");
+    let backend = Arc::new(MockGraphBackend::default());
+
+    {
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(has_edge(
+            &state,
+            Edge::AppliesTo,
+            "policy-web",
+            "pod-workload"
+        ));
+    }
+
+    let pod_change = resolver
+        .sync_from_source(backend.clone())
+        .await
+        .expect("Pod label change should sync");
+    assert_eq!(pod_change.diff.modified_nodes, 1);
+    assert_eq!(pod_change.diff.added_edges, 0);
+    assert_eq!(pod_change.diff.removed_edges, 1);
+    {
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(!has_edge(
+            &state,
+            Edge::AppliesTo,
+            "policy-web",
+            "pod-workload"
+        ));
+    }
+
+    let policy_change = resolver
+        .sync_from_source(backend)
+        .await
+        .expect("NetworkPolicy selector change should sync");
+    assert_eq!(policy_change.diff.modified_nodes, 1);
+    assert_eq!(policy_change.diff.added_edges, 1);
+    assert_eq!(policy_change.diff.removed_edges, 0);
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    assert!(has_edge(
+        &state,
+        Edge::AppliesTo,
+        "policy-web",
+        "pod-workload"
+    ));
 }
 
 #[tokio::test]

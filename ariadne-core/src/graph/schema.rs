@@ -135,6 +135,11 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
         Edge::BelongsTo,
         ResourceType::Namespace,
     ),
+    (
+        ResourceType::NetworkPolicy,
+        Edge::AppliesTo,
+        ResourceType::Pod,
+    ),
     (ResourceType::Node, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Node, Edge::Manages, ResourceType::Pod),
     (
