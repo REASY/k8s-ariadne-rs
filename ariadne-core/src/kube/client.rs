@@ -110,27 +110,7 @@ pub struct KubeClientImpl {
 impl KubeClientImpl {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
         install_rustls_provider();
-        let cfg = match Config::from_kubeconfig(options).await {
-            Ok(cfg) => {
-                info!(
-                    "Successfully loaded kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), cluster_url: {}",
-                    options.context, options.cluster, options.user, cfg.cluster_url
-                );
-                cfg
-            }
-            Err(err) => {
-                info!(
-                    "Failed to load kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), falling back to local in-cluster config. The error was: {err:?}",
-                    options.context, options.cluster, options.user
-                );
-                let in_cluster_cfg = Config::incluster()?;
-                info!(
-                    "Successfully loaded in-cluster config, cluster_url: {}",
-                    in_cluster_cfg.cluster_url
-                );
-                in_cluster_cfg
-            }
-        };
+        let cfg = load_kube_config(options).await?;
         let client = Client::try_from(cfg.clone())?;
 
         Ok(KubeClientImpl {
@@ -182,6 +162,45 @@ impl KubeClientImpl {
                 .unwrap_or_else(|| Api::all(client.clone())),
         })
     }
+}
+
+pub(super) async fn load_kube_config(options: &KubeConfigOptions) -> Result<Config> {
+    match Config::from_kubeconfig(options).await {
+        Ok(cfg) => {
+            info!(
+                "Successfully loaded kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), cluster_url: {}",
+                options.context, options.cluster, options.user, cfg.cluster_url
+            );
+            Ok(cfg)
+        }
+        Err(err)
+            if explicit_kubeconfig_requested(options, std::env::var_os("KUBECONFIG").is_some()) =>
+        {
+            warn!(
+                "Failed to load explicitly requested kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}): {err:?}",
+                options.context, options.cluster, options.user
+            );
+            Err(err.into())
+        }
+        Err(err) => {
+            info!(
+                "Failed to load default kubeconfig; attempting in-cluster configuration. The error was: {err:?}"
+            );
+            let in_cluster_cfg = Config::incluster()?;
+            info!(
+                "Successfully loaded in-cluster config, cluster_url: {}",
+                in_cluster_cfg.cluster_url
+            );
+            Ok(in_cluster_cfg)
+        }
+    }
+}
+
+fn explicit_kubeconfig_requested(options: &KubeConfigOptions, kubeconfig_env_is_set: bool) -> bool {
+    kubeconfig_env_is_set
+        || options.context.is_some()
+        || options.cluster.is_some()
+        || options.user.is_some()
 }
 
 const STORE_READY_TIMEOUT_SECONDS: u64 = 10;

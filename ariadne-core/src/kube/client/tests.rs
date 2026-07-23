@@ -20,6 +20,42 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[test]
+fn explicit_kubeconfig_selection_disables_incluster_fallback() {
+    for options in [
+        KubeConfigOptions {
+            context: Some("production".to_string()),
+            ..Default::default()
+        },
+        KubeConfigOptions {
+            cluster: Some("production".to_string()),
+            ..Default::default()
+        },
+        KubeConfigOptions {
+            user: Some("operator".to_string()),
+            ..Default::default()
+        },
+    ] {
+        assert!(explicit_kubeconfig_requested(&options, false));
+    }
+}
+
+#[test]
+fn kubeconfig_environment_disables_incluster_fallback() {
+    assert!(explicit_kubeconfig_requested(
+        &KubeConfigOptions::default(),
+        true
+    ));
+}
+
+#[test]
+fn unspecified_kubeconfig_allows_incluster_fallback() {
+    assert!(!explicit_kubeconfig_requested(
+        &KubeConfigOptions::default(),
+        false
+    ));
+}
+
 struct TempDir {
     path: PathBuf,
 }

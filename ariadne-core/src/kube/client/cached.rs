@@ -12,7 +12,7 @@ use super::{
     RESOURCE_NODE, RESOURCE_PERSISTENT_VOLUME, RESOURCE_PERSISTENT_VOLUME_CLAIM, RESOURCE_POD,
     RESOURCE_REPLICA_SET, RESOURCE_SERVICE, RESOURCE_SERVICE_ACCOUNT, RESOURCE_STATEFUL_SET,
     RESOURCE_STORAGE_CLASS, ReplicaSet, Resource, Result, STORE_READY_TIMEOUT_SECONDS, Service,
-    ServiceAccount, StatefulSet, StorageClass, Store, install_rustls_provider,
+    ServiceAccount, StatefulSet, StorageClass, Store, install_rustls_provider, load_kube_config,
     make_store_and_watch,
 };
 use async_trait::async_trait;
@@ -21,7 +21,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub struct CachedKubeClient {
     config: Config,
@@ -302,27 +302,7 @@ pub(super) fn update_degraded_resource_kinds(
 impl CachedKubeClient {
     pub async fn new(options: &KubeConfigOptions, maybe_ns: Option<&str>) -> Result<Self> {
         install_rustls_provider();
-        let cfg = match Config::from_kubeconfig(options).await {
-            Ok(cfg) => {
-                info!(
-                    "Successfully loaded kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), cluster_url: {}",
-                    options.context, options.cluster, options.user, cfg.cluster_url
-                );
-                cfg
-            }
-            Err(err) => {
-                info!(
-                    "Failed to load kubeconfig using KubeConfigOptions(context: {:?}, cluster: {:?}, user: {:?}), falling back to local in-cluster config. The error was: {err:?}",
-                    options.context, options.cluster, options.user
-                );
-                let in_cluster_cfg = Config::incluster()?;
-                info!(
-                    "Successfully loaded in-cluster config, cluster_url: {}",
-                    in_cluster_cfg.cluster_url
-                );
-                in_cluster_cfg
-            }
-        };
+        let cfg = load_kube_config(options).await?;
         let client = Client::try_from(cfg.clone())?;
 
         let namespace_api: Api<Namespace> = Api::all(client.clone());
