@@ -252,6 +252,32 @@ async fn store_state_or_empty_returns_empty_when_store_absent() {
 }
 
 #[tokio::test]
+async fn event_store_timeout_and_failure_are_errors_not_empty_state() {
+    let (pending_store, _writer) = reflector::store::<Event>();
+    let timeout_err =
+        store_state_or_empty_with_timeout(&Some(pending_store), "Event", Duration::from_millis(1))
+            .await
+            .expect_err("an unready Event store must fail");
+    assert!(
+        timeout_err
+            .to_string()
+            .contains("Timed out waiting for Event store readiness")
+    );
+
+    let (failed_store, writer) = reflector::store::<Event>();
+    drop(writer);
+    let readiness_err =
+        store_state_or_empty_with_timeout(&Some(failed_store), "Event", Duration::from_millis(20))
+            .await
+            .expect_err("a failed Event store must fail without panicking");
+    assert!(
+        readiness_err
+            .to_string()
+            .contains("Event store is not ready")
+    );
+}
+
+#[tokio::test]
 async fn wait_for_store_readiness_covers_success_error_and_timeout() {
     let ready_state = wait_for_store_readiness(
         future::ready(Ok::<(), std::io::Error>(())),

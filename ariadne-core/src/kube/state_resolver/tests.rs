@@ -36,6 +36,7 @@ struct FailureConfig {
     storage_classes_after_first_round: bool,
     persistent_volumes_after_first_round: bool,
     persistent_volume_claims_after_first_round: bool,
+    events_after_first_round: bool,
 }
 
 #[derive(Debug)]
@@ -189,6 +190,10 @@ impl KubeClient for MockKubeClient {
     }
 
     async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
+        let round = *self.round_index.lock().expect("round_index lock poisoned");
+        if self.failures.events_after_first_round && round > 1 {
+            return Err(std::io::Error::other("mock event failure").into());
+        }
         Ok(self.current_round_snapshot().events)
     }
 
@@ -676,6 +681,51 @@ async fn cluster_resource_read_failures_preserve_last_known_good_state() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn event_read_failure_preserves_last_known_good_events() {
+    let mut initial = base_snapshot();
+    initial.events.push(Arc::new(Event {
+        metadata: ObjectMeta {
+            name: Some("pod-warning".to_string()),
+            namespace: Some("team-a".to_string()),
+            uid: Some("event-1".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }));
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial],
+            FailureConfig {
+                events_after_first_round: true,
+                ..Default::default()
+            },
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize with the first Event snapshot");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let backend = Arc::new(MockGraphBackend::default());
+
+    let err = resolver
+        .sync_from_source(backend.clone())
+        .await
+        .expect_err("Event read failure must abort the snapshot refresh");
+
+    assert_eq!(err.stage, SourceSyncStage::KubeFetch);
+    assert!(backend.update_summaries().is_empty());
+    assert!(
+        state_handle
+            .lock()
+            .expect("state lock poisoned")
+            .node_by_uid("event-1")
+            .is_some(),
+        "last-known-good Event must remain in the graph"
+    );
 }
 
 #[tokio::test]

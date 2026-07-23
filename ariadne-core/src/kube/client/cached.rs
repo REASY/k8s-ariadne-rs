@@ -163,22 +163,8 @@ impl KubeClient for CachedKubeClient {
     }
 
     async fn get_events(&self) -> Result<Vec<Arc<Event>>> {
-        let Some(store) = &self.event_store else {
-            return Ok(Vec::new());
-        };
-        let timeout_duration = event_store_ready_timeout();
-        match timeout(timeout_duration, store.wait_until_ready()).await {
-            Ok(wait_result) => {
-                wait_result.expect("Event store is not ready");
-                Ok(store.state())
-            }
-            Err(_elapsed) => {
-                warn!(
-                    "Timed out waiting for events after {timeout_duration:?}; returning empty list",
-                );
-                Ok(Vec::new())
-            }
-        }
+        store_state_or_empty_with_timeout(&self.event_store, "Event", event_store_ready_timeout())
+            .await
     }
 
     fn degraded_resource_kinds_handle(&self) -> Arc<Mutex<BTreeSet<String>>> {
@@ -229,9 +215,20 @@ where
     T: Resource + Clone + Debug + Send + Sync + 'static,
     T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
 {
+    store_state_or_empty_with_timeout(store, kind, store_ready_timeout()).await
+}
+
+pub(super) async fn store_state_or_empty_with_timeout<T>(
+    store: &Option<Store<T>>,
+    kind: &'static str,
+    timeout_duration: Duration,
+) -> Result<Vec<Arc<T>>>
+where
+    T: Resource + Clone + Debug + Send + Sync + 'static,
+    T::DynamicType: Default + Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+{
     match store {
         Some(store) => {
-            let timeout_duration = store_ready_timeout();
             wait_for_store_readiness(
                 store.wait_until_ready(),
                 || store.state(),

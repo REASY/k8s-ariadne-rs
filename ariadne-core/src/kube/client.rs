@@ -53,7 +53,7 @@ pub use cached::CachedKubeClient;
 #[cfg(test)]
 use cached::{
     event_store_ready_timeout, start_store_with_factory, store_ready_timeout, store_state_or_empty,
-    update_degraded_resource_kinds, wait_for_store_readiness,
+    store_state_or_empty_with_timeout, update_degraded_resource_kinds, wait_for_store_readiness,
 };
 pub use snapshot::SnapshotKubeClient;
 
