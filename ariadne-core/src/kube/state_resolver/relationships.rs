@@ -5,8 +5,8 @@
 use crate::state_resolver::{
     Arc, ClusterState, ClusterStateResolver, ConfigMap, EndpointSlice, EndpointSliceDerived,
     HashMap, HashSet, Ingress, IngressDerived, NetworkPolicy, Node, ObjectMeta,
-    ObservedClusterSnapshot, PersistentVolume, Pod, Resource, ResourceExt, Result, Service,
-    ServiceAccount,
+    ObservedClusterSnapshot, PersistentVolume, PersistentVolumeClaim, Pod, Resource, ResourceExt,
+    Result, Service, ServiceAccount,
 };
 use crate::types::{
     Container, ContainerType, Edge, Endpoint, EndpointAddress, EndpointIdentity, GenericObject,
@@ -456,6 +456,46 @@ impl ClusterStateResolver {
             .entry(name)
             .and_modify(|existing| *existing |= required)
             .or_insert(required);
+    }
+
+    pub(super) fn persistent_volume_claims_to_storage_classes(
+        persistent_volume_claims: &[Arc<PersistentVolumeClaim>],
+        storage_class_name_to_uid: &HashMap<&str, &str>,
+        state: &mut ClusterState,
+    ) {
+        for persistent_volume_claim in persistent_volume_claims {
+            let Some(pvc_uid) = persistent_volume_claim.metadata.uid.as_deref() else {
+                continue;
+            };
+            let Some(storage_class_name) = persistent_volume_claim
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.storage_class_name.as_deref())
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+
+            match storage_class_name_to_uid.get(storage_class_name) {
+                Some(storage_class_uid) => state.add_edge(
+                    pvc_uid,
+                    ResourceType::PersistentVolumeClaim,
+                    storage_class_uid,
+                    ResourceType::StorageClass,
+                    Edge::UsesStorageClass,
+                ),
+                None => warn!(
+                    pvc_uid,
+                    pvc_namespace = persistent_volume_claim
+                        .metadata
+                        .namespace
+                        .as_deref()
+                        .unwrap_or(""),
+                    storage_class_name,
+                    "Skipping unresolved PersistentVolumeClaim to StorageClass relationship"
+                ),
+            }
+        }
     }
 
     pub(super) fn pvc_to_pv(

@@ -411,6 +411,11 @@ impl ClusterStateResolver {
 
         let storage_class_name_to_uid: HashMap<&str, &str> =
             Self::name_to_uid(snapshot.storage_classes.iter().map(|x| &x.metadata));
+        Self::persistent_volume_claims_to_storage_classes(
+            &snapshot.persistent_volume_claims,
+            &storage_class_name_to_uid,
+            &mut state,
+        );
         Self::pvc_to_pv(
             &snapshot.persistent_volumes,
             &storage_class_name_to_uid,

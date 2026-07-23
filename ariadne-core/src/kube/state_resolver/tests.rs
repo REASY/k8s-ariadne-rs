@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use k8s_openapi::api::core::v1::{
     ConfigMapEnvSource, ConfigMapKeySelector, ConfigMapProjection, ConfigMapVolumeSource,
     Container as KubernetesContainer, EnvFromSource, EnvVar, EnvVarSource, EphemeralContainer,
-    PersistentVolumeClaimVolumeSource, PodSpec, ProjectedVolumeSource, Volume, VolumeProjection,
+    PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, PodSpec, ProjectedVolumeSource,
+    Volume, VolumeProjection,
 };
 use k8s_openapi::api::discovery::v1::{Endpoint as KubernetesEndpoint, EndpointConditions};
 use k8s_openapi::api::networking::v1::{
@@ -569,6 +570,41 @@ fn persistent_volume_claim(name: &str, namespace: &str, uid: &str) -> Arc<Persis
             uid: Some(uid.to_string()),
             ..Default::default()
         },
+        ..Default::default()
+    })
+}
+
+fn persistent_volume_claim_with_storage_class(
+    name: &str,
+    namespace: &str,
+    uid: &str,
+    resource_version: &str,
+    storage_class_name: Option<&str>,
+) -> Arc<PersistentVolumeClaim> {
+    Arc::new(PersistentVolumeClaim {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            uid: Some(uid.to_string()),
+            resource_version: Some(resource_version.to_string()),
+            ..Default::default()
+        },
+        spec: Some(PersistentVolumeClaimSpec {
+            storage_class_name: storage_class_name.map(str::to_string),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+fn storage_class(name: &str, uid: &str) -> Arc<StorageClass> {
+    Arc::new(StorageClass {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            uid: Some(uid.to_string()),
+            ..Default::default()
+        },
+        provisioner: format!("example.com/{name}"),
         ..Default::default()
     })
 }
@@ -1749,6 +1785,165 @@ async fn missing_optional_config_maps_do_not_abort_graph_build() {
             .get_edges_by_type(&Edge::InjectsConfig)
             .any(|edge| edge.source == "pod-optional-config")
     );
+}
+
+#[tokio::test]
+async fn persistent_volume_claims_link_only_explicit_non_empty_storage_classes() {
+    let snapshot = SnapshotFrame {
+        storage_classes: vec![storage_class("fast", "storage-class-fast")],
+        persistent_volume_claims: vec![
+            persistent_volume_claim_with_storage_class(
+                "explicit",
+                "default",
+                "pvc-explicit",
+                "1",
+                Some("fast"),
+            ),
+            persistent_volume_claim_with_storage_class(
+                "empty",
+                "default",
+                "pvc-empty",
+                "1",
+                Some(""),
+            ),
+            persistent_volume_claim_with_storage_class("unset", "default", "pvc-unset", "1", None),
+            persistent_volume_claim_with_storage_class(
+                "missing",
+                "default",
+                "pvc-missing",
+                "1",
+                Some("missing"),
+            ),
+        ],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![snapshot],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("PVC StorageClass references should resolve");
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+
+    assert!(has_edge(
+        &state,
+        Edge::UsesStorageClass,
+        "pvc-explicit",
+        "storage-class-fast"
+    ));
+    for pvc_uid in ["pvc-empty", "pvc-unset", "pvc-missing"] {
+        assert!(
+            !state
+                .get_edges_by_type(&Edge::UsesStorageClass)
+                .any(|edge| edge.source == pvc_uid),
+            "{pvc_uid} must not be assigned a guessed or unresolved StorageClass"
+        );
+        assert!(
+            state.node_by_uid(pvc_uid).is_some(),
+            "an unresolved StorageClass must not prevent PVC materialization"
+        );
+    }
+}
+
+#[tokio::test]
+async fn persistent_volume_claim_storage_class_edges_track_defaulting_and_changes() {
+    let fast = storage_class("fast", "storage-class-fast");
+    let slow = storage_class("slow", "storage-class-slow");
+    let initial = SnapshotFrame {
+        storage_classes: vec![fast.clone(), slow.clone()],
+        persistent_volume_claims: vec![persistent_volume_claim_with_storage_class(
+            "data", "default", "pvc-data", "1", None,
+        )],
+        ..Default::default()
+    };
+    let defaulted = SnapshotFrame {
+        storage_classes: vec![fast.clone(), slow.clone()],
+        persistent_volume_claims: vec![persistent_volume_claim_with_storage_class(
+            "data",
+            "default",
+            "pvc-data",
+            "2",
+            Some("fast"),
+        )],
+        ..Default::default()
+    };
+    let changed = SnapshotFrame {
+        storage_classes: vec![fast, slow],
+        persistent_volume_claims: vec![persistent_volume_claim_with_storage_class(
+            "data",
+            "default",
+            "pvc-data",
+            "3",
+            Some("slow"),
+        )],
+        ..Default::default()
+    };
+    let resolver = ClusterStateResolver::new_with_kube_client(
+        "test-cluster".to_string(),
+        Box::new(MockKubeClient::new(
+            vec![initial, defaulted, changed],
+            FailureConfig::default(),
+            Arc::new(Mutex::new(BTreeSet::new())),
+        )),
+    )
+    .await
+    .expect("resolver should initialize with an unset PVC StorageClass");
+    let backend = Arc::new(MockGraphBackend::default());
+
+    {
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(
+            !state
+                .get_edges_by_type(&Edge::UsesStorageClass)
+                .any(|edge| edge.source == "pvc-data")
+        );
+    }
+
+    let defaulted_outcome = resolver
+        .sync_from_source(backend.clone())
+        .await
+        .expect("retroactively defaulted StorageClass should sync");
+    assert_eq!(defaulted_outcome.diff.modified_nodes, 1);
+    assert_eq!(defaulted_outcome.diff.added_edges, 1);
+    assert_eq!(defaulted_outcome.diff.removed_edges, 0);
+    {
+        let state_handle = resolver.resolve().await.expect("state should resolve");
+        let state = state_handle.lock().expect("state lock poisoned");
+        assert!(has_edge(
+            &state,
+            Edge::UsesStorageClass,
+            "pvc-data",
+            "storage-class-fast"
+        ));
+    }
+
+    let changed_outcome = resolver
+        .sync_from_source(backend)
+        .await
+        .expect("changed PVC StorageClass should sync");
+    assert_eq!(changed_outcome.diff.modified_nodes, 1);
+    assert_eq!(changed_outcome.diff.added_edges, 1);
+    assert_eq!(changed_outcome.diff.removed_edges, 1);
+    let state_handle = resolver.resolve().await.expect("state should resolve");
+    let state = state_handle.lock().expect("state lock poisoned");
+    assert!(!has_edge(
+        &state,
+        Edge::UsesStorageClass,
+        "pvc-data",
+        "storage-class-fast"
+    ));
+    assert!(has_edge(
+        &state,
+        Edge::UsesStorageClass,
+        "pvc-data",
+        "storage-class-slow"
+    ));
 }
 
 #[tokio::test]

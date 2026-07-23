@@ -167,6 +167,11 @@ const BASE_RELATIONSHIPS: &[EdgeKey] = &[
         Edge::BoundTo,
         ResourceType::PersistentVolume,
     ),
+    (
+        ResourceType::PersistentVolumeClaim,
+        Edge::UsesStorageClass,
+        ResourceType::StorageClass,
+    ),
     (ResourceType::Pod, Edge::PartOf, ResourceType::Cluster),
     (ResourceType::Pod, Edge::BelongsTo, ResourceType::Namespace),
     (ResourceType::Pod, Edge::RunsOn, ResourceType::Node),
