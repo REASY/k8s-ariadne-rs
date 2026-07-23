@@ -187,6 +187,15 @@ impl AccessChecker {
     }
 
     fn log_denied(&self, descriptor: ResourceDescriptor, list_ok: bool, watch_ok: bool) {
+        warn!("{}", self.denied_message(descriptor, list_ok, watch_ok));
+    }
+
+    fn denied_message(
+        &self,
+        descriptor: ResourceDescriptor,
+        list_ok: bool,
+        watch_ok: bool,
+    ) -> String {
         let mut missing_verbs = Vec::new();
         if !list_ok {
             missing_verbs.push("list");
@@ -196,13 +205,13 @@ impl AccessChecker {
         }
         let verbs = missing_verbs.join(", ");
         let scope = self.scope_label(descriptor);
-        warn!(
-            "RBAC: skipping {} (missing {} on {} at {})",
+        format!(
+            "RBAC: initial access denied for {} (missing {} on {} at {}); the reflector will keep retrying so later permission grants are detected",
             descriptor.kind,
             verbs,
             descriptor.fq_resource(),
             scope
-        );
+        )
     }
 
     fn log_check_error(
@@ -365,6 +374,20 @@ mod tests {
         );
         assert_eq!(max_active.load(Ordering::SeqCst), 2);
         assert_eq!(active.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn denied_message_describes_reflector_retry_behavior() {
+        let responses = Arc::new(Mutex::new(Vec::new()));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let checker = AccessChecker::new(test_client(responses, requests), Some("team-a"));
+
+        let message = checker.denied_message(RESOURCE_POD, false, true);
+
+        assert!(message.contains("initial access denied for Pod"));
+        assert!(message.contains("missing list on pods at namespace \"team-a\""));
+        assert!(message.contains("reflector will keep retrying"));
+        assert!(!message.contains("skipping"));
     }
 
     #[tokio::test]
