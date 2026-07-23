@@ -1,4 +1,4 @@
-FROM rust:1.94.1 AS builder
+FROM rust:1.97.1 AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ COPY . .
 RUN cargo build --locked --release -p ariadne-mcp
 
 
-FROM ubuntu:25.04
+FROM ubuntu:26.10
 
 ENV DEBIAN_FRONTEND=noninteractive
 
